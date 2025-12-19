@@ -5,7 +5,7 @@ from datetime import datetime
 
 from rich.markup import escape as escape_markup
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -299,6 +299,7 @@ class FastResumeApp(App):
     show_preview: reactive[bool] = reactive(True)
     selected_session: reactive[Session | None] = reactive(None)
     active_filter: reactive[str | None] = reactive(None)
+    is_loading: reactive[bool] = reactive(True)
 
     def __init__(self, initial_query: str = "", agent_filter: str | None = None):
         super().__init__()
@@ -321,7 +322,7 @@ class FastResumeApp(App):
                     id="search-input",
                     value=self.initial_query,
                 )
-                yield Label("0", id="session-count")
+                yield Label("", id="session-count")
 
             # Agent filter buttons - compact inline
             with Horizontal(id="filter-container"):
@@ -367,8 +368,27 @@ class FastResumeApp(App):
         # Focus search input
         self.query_one("#search-input", Input).focus()
 
-        # Initial search
-        self._do_search(self.initial_query)
+        # Try fast sync load first (cache hit), fall back to async
+        self._initial_load()
+
+    def _initial_load(self) -> None:
+        """Load sessions - sync if cached, async otherwise."""
+        # Try to get cached sessions directly (fast path)
+        cached = self.search_engine._load_from_cache()
+        if cached is not None:
+            # Cache hit - load synchronously, no flicker
+            self.search_engine._sessions = cached
+            self.sessions = self.search_engine.search(
+                self.initial_query, agent_filter=self.active_filter, limit=100
+            )
+            self.is_loading = False
+            self._update_table()
+            self._update_session_count()
+        else:
+            # Cache miss - show loading and fetch async
+            self._update_table()
+            self._update_session_count()
+            self._do_search(self.initial_query)
 
     def _update_filter_buttons(self) -> None:
         """Update filter button active states."""
@@ -381,7 +401,10 @@ class FastResumeApp(App):
     def _update_session_count(self) -> None:
         """Update the session count display."""
         count_label = self.query_one("#session-count", Label)
-        count_label.update(f"{len(self.sessions)}")
+        if self.is_loading:
+            count_label.update("...")
+        else:
+            count_label.update(f"{len(self.sessions)}")
 
     def on_resize(self) -> None:
         """Handle terminal resize."""
@@ -415,12 +438,20 @@ class FastResumeApp(App):
         # Force refresh
         table.refresh()
 
+    @work(exclusive=True, thread=True)
     def _do_search(self, query: str) -> None:
-        """Perform search and update results."""
+        """Perform search and update results in background thread."""
         self._current_query = query
-        self.sessions = self.search_engine.search(
+        sessions = self.search_engine.search(
             query, agent_filter=self.active_filter, limit=100
         )
+        # Update UI from worker thread via call_from_thread
+        self.call_from_thread(self._update_results, sessions)
+
+    def _update_results(self, sessions: list[Session]) -> None:
+        """Update the UI with search results (called from main thread)."""
+        self.sessions = sessions
+        self.is_loading = False
         self._update_table()
         self._update_session_count()
 
@@ -428,6 +459,11 @@ class FastResumeApp(App):
         """Update the results table with current sessions."""
         table = self.query_one("#results-table", DataTable)
         table.clear()
+
+        if self.is_loading and not self.sessions:
+            # Show loading row
+            table.add_row("", Text("Loading sessions...", style="italic dim"), "", "")
+            return
 
         for session in self.sessions:
             # Create colored agent badge
@@ -467,6 +503,8 @@ class FastResumeApp(App):
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
+        self.is_loading = True
+        self._update_session_count()
         self._do_search(event.value)
 
     @on(Input.Submitted, "#search-input")

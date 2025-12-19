@@ -60,6 +60,13 @@ class SessionSearch:
         ]
         self._sessions: list[Session] | None = None
         self._cache_file = CACHE_DIR / "sessions.json"
+        self._cache_key: str | None = None  # Cache the key to avoid repeated mtime checks
+
+    def _get_cache_key(self) -> str:
+        """Get cache key, computing it only once per instance."""
+        if self._cache_key is None:
+            self._cache_key = _get_cache_key()
+        return self._cache_key
 
     def _load_from_cache(self) -> list[Session] | None:
         """Try to load sessions from cache."""
@@ -71,7 +78,7 @@ class SessionSearch:
                 data = json.load(f)
 
             # Check if cache is valid
-            if data.get("key") != _get_cache_key():
+            if data.get("key") != self._get_cache_key():
                 return None
 
             # Reconstruct sessions
@@ -97,7 +104,7 @@ class SessionSearch:
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             data = {
-                "key": _get_cache_key(),
+                "key": self._get_cache_key(),
                 "sessions": [
                     {
                         "id": s.id,
