@@ -44,6 +44,7 @@ class ClaudeAdapter:
         """Parse a Claude Code session file."""
         try:
             title = ""
+            first_user_message = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
@@ -72,16 +73,29 @@ class ClaudeAdapter:
                         msg = data.get("message", {})
                         content = msg.get("content", "")
                         if isinstance(content, str):
-                            messages.append(content)
+                            # Skip meta messages and commands
+                            if not data.get("isMeta") and not content.startswith(("<command", "<local-command")):
+                                messages.append(content)
+                                if msg_type == "user" and not first_user_message and len(content) > 10:
+                                    first_user_message = content
                         elif isinstance(content, list):
                             for part in content:
                                 if isinstance(part, dict):
                                     if part.get("type") == "text":
-                                        messages.append(part.get("text", ""))
+                                        text = part.get("text", "")
+                                        messages.append(text)
+                                        if msg_type == "user" and not first_user_message:
+                                            first_user_message = text
                                 elif isinstance(part, str):
                                     messages.append(part)
 
-            if not title:
+            # Use first user message as title if no summary
+            if not title and first_user_message:
+                # Truncate and clean up
+                title = first_user_message.strip()[:100]
+                if len(first_user_message) > 100:
+                    title = title.rsplit(" ", 1)[0] + "..."
+            elif not title:
                 title = "Untitled session"
 
             # Skip sessions with no actual conversation content
