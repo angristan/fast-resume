@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Input, Static
+from textual.widgets import DataTable, Footer, Input, Static, Label, Button
 
 from .adapters.base import Session
 from .config import AGENTS
@@ -71,8 +71,8 @@ def highlight_matches(text: str, query: str, max_len: int | None = None) -> Text
             idx = text_lower.find(term, start)
             if idx == -1:
                 break
-            # Use reverse video (black on yellow) for high visibility
-            result.stylize("bold black on yellow", idx, idx + len(term))
+            # Modern highlight style - bold with accent background
+            result.stylize("bold reverse", idx, idx + len(term))
             start = idx + 1
 
     return result
@@ -130,24 +130,72 @@ class SessionPreview(Static):
 class FastResumeApp(App):
     """Main TUI application for fast-resume."""
 
-    ENABLE_COMMAND_PALETTE = False
-    theme = "gruvbox"
+    ENABLE_COMMAND_PALETTE = True
+    TITLE = "fast-resume"
+    SUB_TITLE = "Session manager"
 
     CSS = """
     Screen {
         layout: vertical;
         width: 100%;
+        background: $surface;
     }
 
-    #search-container {
-        height: 3;
+    /* Top bar - search + count */
+    #top-bar {
+        height: 1;
         width: 100%;
+        padding: 0 1;
     }
 
     #search-input {
         width: 1fr;
+        border: none;
+        background: $surface;
     }
 
+    #search-input:focus {
+        border: none;
+    }
+
+    #session-count {
+        dock: right;
+        color: $text-muted;
+        width: auto;
+    }
+
+    /* Agent filter tabs - compact */
+    #filter-container {
+        height: 1;
+        width: 100%;
+        padding: 0 1;
+    }
+
+    .filter-btn {
+        min-width: 8;
+        height: 1;
+        margin: 0 1 0 0;
+        border: none;
+        background: transparent;
+        text-style: none;
+        color: $text-muted;
+    }
+
+    .filter-btn:hover {
+        color: $text;
+        text-style: bold;
+    }
+
+    .filter-btn:focus {
+        text-style: none;
+    }
+
+    .filter-btn.-active {
+        color: $accent;
+        text-style: bold;
+    }
+
+    /* Main content area */
     #main-container {
         height: 1fr;
         width: 100%;
@@ -163,9 +211,28 @@ class FastResumeApp(App):
         width: 100%;
     }
 
+    DataTable {
+        background: transparent;
+    }
+
+    DataTable > .datatable--header {
+        text-style: bold;
+        color: $text;
+    }
+
+    DataTable > .datatable--cursor {
+        background: $accent 30%;
+    }
+
+    DataTable > .datatable--hover {
+        background: $surface-lighten-1;
+    }
+
+    /* Preview pane - compact */
     #preview-container {
-        height: 10;
-        border: solid $primary;
+        height: 8;
+        border-top: solid $surface-lighten-2;
+        background: $surface;
         padding: 0 1;
     }
 
@@ -178,14 +245,7 @@ class FastResumeApp(App):
         overflow-y: auto;
     }
 
-    DataTable > .datatable--cursor {
-        background: $accent;
-    }
-
-    .agent-badge {
-        padding: 0 1;
-    }
-
+    /* Agent colors */
     .agent-claude {
         color: #E87B35;
     }
@@ -202,8 +262,18 @@ class FastResumeApp(App):
         color: #FF6B35;
     }
 
+    /* Footer styling */
     Footer {
+        background: $primary-background;
+    }
+
+    Footer > .footer--key {
         background: $surface;
+        color: $text;
+    }
+
+    Footer > .footer--description {
+        color: $text-muted;
     }
     """
 
@@ -218,10 +288,17 @@ class FastResumeApp(App):
         Binding("down", "cursor_down", "Down", show=False),
         Binding("up", "cursor_up", "Up", show=False),
         Binding("enter", "resume_session", "Resume"),
+        Binding("1", "filter_all", "All", show=False),
+        Binding("2", "filter_claude", "Claude", show=False),
+        Binding("3", "filter_codex", "Codex", show=False),
+        Binding("4", "filter_opencode", "OpenCode", show=False),
+        Binding("5", "filter_vibe", "Vibe", show=False),
+        Binding("ctrl+p", "command_palette", "Commands"),
     ]
 
     show_preview: reactive[bool] = reactive(True)
     selected_session: reactive[Session | None] = reactive(None)
+    active_filter: reactive[str | None] = reactive(None)
 
     def __init__(self, initial_query: str = "", agent_filter: str | None = None):
         super().__init__()
@@ -232,16 +309,35 @@ class FastResumeApp(App):
         self._resume_command: list[str] | None = None
         self._resume_directory: str | None = None
         self._current_query: str = ""
+        self._filter_buttons: dict[str | None, Static] = {}
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
         with Vertical():
-            with Horizontal(id="search-container"):
+            # Top bar: search + session count
+            with Horizontal(id="top-bar"):
                 yield Input(
-                    placeholder="Search sessions...",
+                    placeholder="Search...",
                     id="search-input",
                     value=self.initial_query,
                 )
+                yield Label("0", id="session-count")
+
+            # Agent filter buttons - compact inline
+            with Horizontal(id="filter-container"):
+                for filter_key, filter_label in [
+                    (None, "All"),
+                    ("claude", "Claude"),
+                    ("codex", "Codex"),
+                    ("opencode", "OpenCode"),
+                    ("vibe", "Vibe"),
+                ]:
+                    btn_id = f"filter-{filter_key or 'all'}"
+                    btn = Button(filter_label, id=btn_id, classes="filter-btn")
+                    self._filter_buttons[filter_key] = btn
+                    yield btn
+
+            # Main content area
             with Vertical(id="main-container"):
                 with Vertical(id="results-container"):
                     yield DataTable(id="results-table", cursor_type="row")
@@ -264,11 +360,28 @@ class FastResumeApp(App):
         # Delay column width calculation until layout is ready
         self.call_after_refresh(self._update_column_widths)
 
+        # Set initial filter state from agent_filter parameter
+        self.active_filter = self.agent_filter
+        self._update_filter_buttons()
+
         # Focus search input
         self.query_one("#search-input", Input).focus()
 
         # Initial search
         self._do_search(self.initial_query)
+
+    def _update_filter_buttons(self) -> None:
+        """Update filter button active states."""
+        for filter_key, btn in self._filter_buttons.items():
+            if filter_key == self.active_filter:
+                btn.add_class("-active")
+            else:
+                btn.remove_class("-active")
+
+    def _update_session_count(self) -> None:
+        """Update the session count display."""
+        count_label = self.query_one("#session-count", Label)
+        count_label.update(f"{len(self.sessions)}")
 
     def on_resize(self) -> None:
         """Handle terminal resize."""
@@ -306,9 +419,10 @@ class FastResumeApp(App):
         """Perform search and update results."""
         self._current_query = query
         self.sessions = self.search_engine.search(
-            query, agent_filter=self.agent_filter, limit=100
+            query, agent_filter=self.active_filter, limit=100
         )
         self._update_table()
+        self._update_session_count()
 
     def _update_table(self) -> None:
         """Update the results table with current sessions."""
@@ -403,6 +517,47 @@ class FastResumeApp(App):
             )
             self._resume_directory = self.selected_session.directory
             self.exit()
+
+    def _set_filter(self, agent: str | None) -> None:
+        """Set the agent filter and refresh results."""
+        self.active_filter = agent
+        self._update_filter_buttons()
+        self._do_search(self._current_query)
+
+    def action_filter_all(self) -> None:
+        """Show all sessions."""
+        self._set_filter(None)
+
+    def action_filter_claude(self) -> None:
+        """Filter to Claude sessions only."""
+        self._set_filter("claude")
+
+    def action_filter_codex(self) -> None:
+        """Filter to Codex sessions only."""
+        self._set_filter("codex")
+
+    def action_filter_opencode(self) -> None:
+        """Filter to OpenCode sessions only."""
+        self._set_filter("opencode")
+
+    def action_filter_vibe(self) -> None:
+        """Filter to Vibe sessions only."""
+        self._set_filter("vibe")
+
+    @on(Button.Pressed, ".filter-btn")
+    def on_filter_click(self, event: Button.Pressed) -> None:
+        """Handle click on filter buttons."""
+        btn_id = event.button.id
+        if btn_id == "filter-all":
+            self._set_filter(None)
+        elif btn_id == "filter-claude":
+            self._set_filter("claude")
+        elif btn_id == "filter-codex":
+            self._set_filter("codex")
+        elif btn_id == "filter-opencode":
+            self._set_filter("opencode")
+        elif btn_id == "filter-vibe":
+            self._set_filter("vibe")
 
     def get_resume_command(self) -> list[str] | None:
         """Get the resume command to execute after exit."""
