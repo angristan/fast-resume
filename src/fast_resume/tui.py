@@ -194,15 +194,18 @@ class FastResumeApp(App):
     #results-container {
         height: 1fr;
         width: 100%;
+        overflow-x: hidden;
     }
 
     #results-table {
         height: 100%;
         width: 100%;
+        overflow-x: hidden;
     }
 
     DataTable {
         background: transparent;
+        overflow-x: hidden;
     }
 
     DataTable > .datatable--header {
@@ -425,26 +428,45 @@ class FastResumeApp(App):
     def _update_column_widths(self) -> None:
         """Update column widths based on terminal size."""
         table = self.query_one("#results-table", DataTable)
-
-        # Use the full screen width for calculation
         width = self.size.width
+        padding = 8  # column gaps + scrollbar
 
-        # Account for column separators (3 gaps × 2 spaces) and scrollbar gutter
-        fixed_cols = self._agent_width + self._dir_width + self._date_width
-        padding = 8  # column gaps + potential scrollbar
-        title_width = max(20, width - fixed_cols - padding)
+        # Responsive column widths based on terminal width
+        if width >= 120:
+            # Wide: show everything
+            agent_w = 12
+            dir_w = 30
+            date_w = 18
+        elif width >= 90:
+            # Medium: slightly smaller
+            agent_w = 10
+            dir_w = 22
+            date_w = 15
+        elif width >= 60:
+            # Narrow: compact
+            agent_w = 8
+            dir_w = 16
+            date_w = 12
+        else:
+            # Very narrow: minimal
+            agent_w = 8
+            dir_w = 0  # hide directory
+            date_w = 10
+
+        title_w = max(15, width - agent_w - dir_w - date_w - padding)
 
         # Disable auto_width and set explicit widths
         for col in table.columns.values():
             col.auto_width = False
 
-        table.columns[self._col_agent].width = self._agent_width
-        table.columns[self._col_title].width = title_width
-        table.columns[self._col_dir].width = self._dir_width
-        table.columns[self._col_date].width = self._date_width
+        table.columns[self._col_agent].width = agent_w
+        table.columns[self._col_title].width = title_w
+        table.columns[self._col_dir].width = dir_w
+        table.columns[self._col_date].width = date_w
 
         # Store for truncation
-        self._title_width = title_width
+        self._title_width = title_w
+        self._dir_width = dir_w
 
         # Force refresh
         table.refresh()
@@ -514,11 +536,12 @@ class FastResumeApp(App):
             max_title = getattr(self, '_title_width', 60) - 3
             title = highlight_matches(session.title, self._current_query, max_len=max_title)
 
-            # Format directory - right aligned with padding, also highlight
+            # Format directory - truncate based on column width
+            dir_w = getattr(self, '_dir_width', 22)
             directory = format_directory(session.directory)
-            if len(directory) > 20:
-                directory = "..." + directory[-17:]
-            dir_text = highlight_matches(directory, self._current_query)
+            if dir_w > 0 and len(directory) > dir_w - 2:
+                directory = "..." + directory[-(dir_w - 5):]
+            dir_text = highlight_matches(directory, self._current_query) if dir_w > 0 else Text("")
 
             # Format time - right aligned with padding
             time_ago = format_time_ago(session.timestamp)
