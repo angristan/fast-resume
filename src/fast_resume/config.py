@@ -6,7 +6,7 @@ from pathlib import Path
 AGENTS = {
     "claude": {"color": "#E87B35", "badge": "claude"},
     "codex": {"color": "#00A67E", "badge": "codex"},
-    "opencode": {"color": "#6366F1", "badge": "opencode"},
+    "opencode": {"color": "#CFCECD", "badge": "opencode"},
     "vibe": {"color": "#FF6B35", "badge": "vibe"},
 }
 

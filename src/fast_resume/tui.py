@@ -2,8 +2,11 @@
 
 import os
 from datetime import datetime
+from pathlib import Path
 
 import humanize
+from rich.columns import Columns
+from rich.console import Group, RenderableType
 from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import on, work
@@ -12,10 +15,45 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Input, Static, Label, Button
+from textual_image.renderable import Image as ImageRenderable
 
 from .adapters.base import Session
 from .config import AGENTS
 from .search import SessionSearch
+
+# Asset paths for agent icons
+ASSETS_DIR = Path(__file__).parent / "assets"
+
+# Cache for agent icon renderables
+_icon_cache: dict[str, ImageRenderable | None] = {}
+
+
+def get_agent_icon(agent: str) -> RenderableType:
+    """Get the icon + name renderable for an agent."""
+    agent_config = AGENTS.get(agent, {"color": "white", "badge": agent})
+
+    if agent not in _icon_cache:
+        icon_path = ASSETS_DIR / f"{agent}.png"
+        if icon_path.exists():
+            try:
+                _icon_cache[agent] = ImageRenderable(icon_path, width=2, height=1)
+            except Exception:
+                _icon_cache[agent] = None
+        else:
+            _icon_cache[agent] = None
+
+    icon = _icon_cache[agent]
+    name = Text(agent_config["badge"])
+    name.stylize(agent_config["color"])
+
+    if icon is not None:
+        # Combine icon and name horizontally
+        return Columns([icon, name], padding=(0, 1), expand=False)
+
+    # Fallback to just colored name with a dot
+    badge = Text(f"● {agent_config['badge']}")
+    badge.stylize(agent_config["color"], 0, 1)  # Color just the dot
+    return badge
 
 
 def format_time_ago(dt: datetime) -> str:
@@ -492,24 +530,25 @@ class FastResumeApp(App):
         padding = 8  # column gaps + scrollbar
 
         # Responsive column widths based on terminal width
+        # Agent column: icon (2) + space (1) + name (~8) = ~12
         if width >= 120:
             # Wide: show everything
-            agent_w = 12
+            agent_w = 14
             dir_w = 30
             date_w = 18
         elif width >= 90:
             # Medium: slightly smaller
-            agent_w = 10
+            agent_w = 12
             dir_w = 22
             date_w = 15
         elif width >= 60:
             # Narrow: compact
-            agent_w = 8
+            agent_w = 12
             dir_w = 16
             date_w = 12
         else:
             # Very narrow: minimal
-            agent_w = 8
+            agent_w = 10
             dir_w = 0  # hide directory
             date_w = 10
 
@@ -587,10 +626,8 @@ class FastResumeApp(App):
             return
 
         for session in self.sessions:
-            # Create colored agent badge
-            agent_config = AGENTS.get(session.agent, {"color": "white", "badge": session.agent})
-            badge = Text(f"[{agent_config['badge']}]")
-            badge.stylize(agent_config["color"])
+            # Get agent icon (image or text fallback)
+            icon = get_agent_icon(session.agent)
 
             # Title - truncate and highlight matches
             max_title = getattr(self, '_title_width', 60) - 3
@@ -607,7 +644,7 @@ class FastResumeApp(App):
             time_ago = format_time_ago(session.timestamp)
             time_ago = time_ago.rjust(8)
 
-            table.add_row(badge, title, dir_text, time_ago)
+            table.add_row(icon, title, dir_text, time_ago)
 
         # Select first row if available
         if self.sessions:
