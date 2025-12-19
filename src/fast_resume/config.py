@@ -8,7 +8,7 @@ AGENTS = {
     "codex": {"color": "#00A67E", "badge": "codex"},
     "opencode": {"color": "#CFCECD", "badge": "opencode"},
     "vibe": {"color": "#FF6B35", "badge": "vibe"},
-    "crush": {"color": "#FF5F87", "badge": "crush"},
+    "crush": {"color": "#6B51FF", "badge": "crush"},
 }
 
 # Storage paths
