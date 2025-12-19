@@ -67,14 +67,16 @@ class VibeAdapter:
                 if role == "system":
                     continue
 
+                role_prefix = "» " if role == "user" else "  "
+
                 if isinstance(content, str) and content:
-                    messages.append(content)
+                    messages.append(f"{role_prefix}{content}")
                 elif isinstance(content, list):
                     for part in content:
                         if isinstance(part, dict):
                             text = part.get("text", "")
                             if text:
-                                messages.append(text)
+                                messages.append(f"{role_prefix}{text}")
 
             # Generate title from first user message
             user_messages = [
@@ -93,7 +95,7 @@ class VibeAdapter:
             if len(title) == 80:
                 title += "..."
 
-            full_content = "\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

@@ -31,7 +31,7 @@ def format_directory(path: str) -> str:
     return path
 
 
-def highlight_matches(text: str, query: str, max_len: int | None = None) -> Text:
+def highlight_matches(text: str, query: str, max_len: int | None = None, style: str = "bold reverse") -> Text:
     """Highlight matching portions of text based on query terms.
 
     Returns a Rich Text object with matches highlighted.
@@ -56,8 +56,7 @@ def highlight_matches(text: str, query: str, max_len: int | None = None) -> Text
             idx = text_lower.find(term, start)
             if idx == -1:
                 break
-            # Modern highlight style - bold with accent background
-            result.stylize("bold reverse", idx, idx + len(term))
+            result.stylize(style, idx, idx + len(term))
             start = idx + 1
 
     return result
@@ -66,9 +65,13 @@ def highlight_matches(text: str, query: str, max_len: int | None = None) -> Text
 class SessionPreview(Static):
     """Preview pane showing session content."""
 
+    # Highlight style for matches in preview - bright yellow background
+    MATCH_STYLE = "black on yellow"
+    # Max lines to show for a single assistant message
+    MAX_ASSISTANT_LINES = 4
+
     def __init__(self) -> None:
         super().__init__("", id="preview")
-        self.border_title = "Preview"
 
     def update_preview(self, session: Session | None, query: str = "") -> None:
         """Update the preview with session content, highlighting matches."""
@@ -94,9 +97,9 @@ class SessionPreview(Static):
                         best_pos = pos
 
             if best_pos != -1:
-                # Show context around the match (start 50 chars before, up to 500 chars)
-                start = max(0, best_pos - 50)
-                end = min(len(content), start + 500)
+                # Show context around the match (start 100 chars before, up to 1500 chars)
+                start = max(0, best_pos - 100)
+                end = min(len(content), start + 1500)
                 preview_text = content[start:end]
                 if start > 0:
                     preview_text = "..." + preview_text
@@ -107,9 +110,66 @@ class SessionPreview(Static):
         if not preview_text:
             preview_text = session.preview
 
-        preview_text = escape_markup(preview_text)
-        highlighted = highlight_matches(preview_text, query)
-        self.update(highlighted)
+        # Build rich text with role-based styling
+        result = Text()
+
+        # Split by double newlines to get individual messages
+        messages = preview_text.split("\n\n")
+
+        for i, msg in enumerate(messages):
+            msg = escape_markup(msg.strip())
+            if not msg:
+                continue
+
+            # Add separator between messages (not before first)
+            if i > 0:
+                result.append("\n")
+
+            # Detect if this is a user message
+            is_user = msg.startswith("» ")
+
+            # Detect code blocks (``` markers)
+            in_code = False
+            lines = msg.split("\n")
+
+            # Truncate assistant messages
+            if not is_user and len(lines) > self.MAX_ASSISTANT_LINES:
+                lines = lines[: self.MAX_ASSISTANT_LINES]
+                lines.append("...")
+
+            for line in lines:
+                if line.startswith("```"):
+                    in_code = not in_code
+                    result.append(line + "\n", style="dim italic")
+                elif line.startswith("» "):
+                    # User prompt
+                    result.append("» ", style="bold cyan")
+                    content_part = line[2:]
+                    if len(content_part) > 200:
+                        content_part = content_part[:200].rsplit(" ", 1)[0] + " ..."
+                    highlighted = highlight_matches(content_part, query, style=self.MATCH_STYLE)
+                    result.append_text(highlighted)
+                    result.append("\n")
+                elif line == "...":
+                    result.append("  ...\n", style="dim")
+                elif in_code:
+                    # Inside code block
+                    result.append("  " + line + "\n", style="dim")
+                elif line.startswith("  "):
+                    # Assistant response
+                    highlighted = highlight_matches(line, query, style=self.MATCH_STYLE)
+                    result.append_text(highlighted)
+                    result.append("\n")
+                else:
+                    # Other content (possibly from truncated context)
+                    if line.startswith("..."):
+                        result.append(line + "\n", style="dim")
+                    else:
+                        highlighted = highlight_matches(line, query, style=self.MATCH_STYLE)
+                        result.append_text(highlighted)
+                        result.append("\n")
+
+        self.update(result)
 
 
 class FastResumeApp(App):
@@ -221,10 +281,10 @@ class FastResumeApp(App):
         background: $surface-lighten-1;
     }
 
-    /* Preview pane - compact */
+    /* Preview pane - expanded */
     #preview-container {
-        height: 8;
-        border-top: solid $surface-lighten-2;
+        height: 12;
+        border-top: solid $accent 50%;
         background: $surface;
         padding: 0 1;
     }

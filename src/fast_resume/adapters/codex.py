@@ -64,6 +64,7 @@ class CodexAdapter:
                         role = payload.get("role", "")
                         content = payload.get("content", [])
                         if role in ("user", "assistant"):
+                            role_prefix = "» " if role == "user" else "  "
                             for part in content:
                                 if isinstance(part, dict):
                                     text = part.get("text", "") or part.get(
@@ -72,7 +73,7 @@ class CodexAdapter:
                                     if text:
                                         # Skip system context for content
                                         if not text.strip().startswith("<environment_context>"):
-                                            messages.append(text)
+                                            messages.append(f"{role_prefix}{text}")
 
                     # Extract event messages (user prompts) - best source for title
                     if msg_type == "event_msg":
@@ -80,12 +81,12 @@ class CodexAdapter:
                         if event_type == "user_message":
                             msg = payload.get("message", "")
                             if msg:
-                                messages.append(msg)
+                                messages.append(f"» {msg}")
                                 user_prompts.append(msg)
                         elif event_type == "agent_reasoning":
                             text = payload.get("text", "")
                             if text:
-                                messages.append(text)
+                                messages.append(f"  {text}")
 
             if not session_id:
                 # Extract from filename: rollout-2025-12-17T18-24-27-019b2d57-...
@@ -100,7 +101,7 @@ class CodexAdapter:
             if len(user_prompts[0]) > 80:
                 title += "..."
 
-            full_content = "\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

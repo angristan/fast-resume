@@ -18,6 +18,7 @@ VIBE_DIR = Path.home() / ".vibe" / "logs" / "session"
 
 # Cache location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
+CACHE_VERSION = 3  # Bump when adapter output format changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

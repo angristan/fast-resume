@@ -69,7 +69,7 @@ class OpenCodeAdapter:
             # Get message content from parts
             messages = self._get_session_messages(session_id, message_dir, part_dir)
 
-            full_content = "\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
@@ -96,14 +96,17 @@ class OpenCodeAdapter:
             return messages
 
         # Get all message files
-        for msg_file in session_msg_dir.glob("msg_*.json"):
+        for msg_file in sorted(session_msg_dir.glob("msg_*.json")):
             try:
                 with open(msg_file, "r", encoding="utf-8") as f:
                     msg_data = json.load(f)
 
                 msg_id = msg_data.get("id", "")
+                role = msg_data.get("role", "")
                 if not msg_id:
                     continue
+
+                role_prefix = "» " if role == "user" else "  "
 
                 # Get parts for this message
                 msg_part_dir = part_dir / msg_id
@@ -117,7 +120,7 @@ class OpenCodeAdapter:
                             if part_type == "text":
                                 text = part_data.get("text", "")
                                 if text:
-                                    messages.append(text)
+                                    messages.append(f"{role_prefix}{text}")
                         except Exception:
                             continue
             except Exception:

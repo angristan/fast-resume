@@ -72,10 +72,11 @@ class ClaudeAdapter:
                     if msg_type in ("user", "assistant"):
                         msg = data.get("message", {})
                         content = msg.get("content", "")
+                        role_prefix = "» " if msg_type == "user" else "  "
                         if isinstance(content, str):
                             # Skip meta messages and commands
                             if not data.get("isMeta") and not content.startswith(("<command", "<local-command")):
-                                messages.append(content)
+                                messages.append(f"{role_prefix}{content}")
                                 if msg_type == "user" and not first_user_message and len(content) > 10:
                                     first_user_message = content
                         elif isinstance(content, list):
@@ -83,11 +84,11 @@ class ClaudeAdapter:
                                 if isinstance(part, dict):
                                     if part.get("type") == "text":
                                         text = part.get("text", "")
-                                        messages.append(text)
+                                        messages.append(f"{role_prefix}{text}")
                                         if msg_type == "user" and not first_user_message:
                                             first_user_message = text
                                 elif isinstance(part, str):
-                                    messages.append(part)
+                                    messages.append(f"{role_prefix}{part}")
 
             # Skip sessions with no actual user message
             if not first_user_message:
@@ -104,7 +105,7 @@ class ClaudeAdapter:
             if not messages:
                 return None
 
-            full_content = "\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
