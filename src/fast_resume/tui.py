@@ -148,6 +148,11 @@ class FastResumeApp(App):
         padding: 0 1;
     }
 
+    #spinner {
+        width: 2;
+        color: $accent;
+    }
+
     #search-input {
         width: 1fr;
         border: none;
@@ -300,6 +305,8 @@ class FastResumeApp(App):
     selected_session: reactive[Session | None] = reactive(None)
     active_filter: reactive[str | None] = reactive(None)
     is_loading: reactive[bool] = reactive(True)
+    _spinner_frame: int = 0
+    _spinner_chars: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self, initial_query: str = "", agent_filter: str | None = None):
         super().__init__()
@@ -311,12 +318,14 @@ class FastResumeApp(App):
         self._resume_directory: str | None = None
         self._current_query: str = ""
         self._filter_buttons: dict[str | None, Static] = {}
+        self._total_loaded: int = 0
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
         with Vertical():
-            # Top bar: search + session count
+            # Top bar: spinner + search + session count
             with Horizontal(id="top-bar"):
+                yield Label(">", id="spinner")
                 yield Input(
                     placeholder="Search...",
                     id="search-input",
@@ -368,27 +377,30 @@ class FastResumeApp(App):
         # Focus search input
         self.query_one("#search-input", Input).focus()
 
+        # Start spinner animation
+        self._spinner_timer = self.set_interval(0.08, self._update_spinner)
+
         # Try fast sync load first (cache hit), fall back to async
         self._initial_load()
 
     def _initial_load(self) -> None:
-        """Load sessions - sync if cached, async otherwise."""
+        """Load sessions - sync if cached, async with streaming otherwise."""
         # Try to get cached sessions directly (fast path)
         cached = self.search_engine._load_from_cache()
         if cached is not None:
             # Cache hit - load synchronously, no flicker
             self.search_engine._sessions = cached
+            self._total_loaded = len(cached)
             self.sessions = self.search_engine.search(
                 self.initial_query, agent_filter=self.active_filter, limit=100
             )
-            self.is_loading = False
+            self._finish_loading()
             self._update_table()
-            self._update_session_count()
         else:
-            # Cache miss - show loading and fetch async
+            # Cache miss - show loading and fetch with streaming
             self._update_table()
             self._update_session_count()
-            self._do_search(self.initial_query)
+            self._do_streaming_load()
 
     def _update_filter_buttons(self) -> None:
         """Update filter button active states."""
@@ -398,13 +410,27 @@ class FastResumeApp(App):
             else:
                 btn.remove_class("-active")
 
+    def _update_spinner(self) -> None:
+        """Advance spinner animation."""
+        spinner_label = self.query_one("#spinner", Label)
+        if self.is_loading:
+            self._spinner_frame = (self._spinner_frame + 1) % len(self._spinner_chars)
+            spinner_label.update(self._spinner_chars[self._spinner_frame])
+        else:
+            spinner_label.update(">")
+
     def _update_session_count(self) -> None:
         """Update the session count display."""
         count_label = self.query_one("#session-count", Label)
         if self.is_loading:
-            count_label.update("...")
+            count_label.update(f"{self._total_loaded} sessions loaded")
         else:
-            count_label.update(f"{len(self.sessions)}")
+            shown = len(self.sessions)
+            total = self._total_loaded
+            if shown < total:
+                count_label.update(f"{shown}/{total} sessions")
+            else:
+                count_label.update(f"{total} sessions")
 
     def on_resize(self) -> None:
         """Handle terminal resize."""
@@ -439,6 +465,36 @@ class FastResumeApp(App):
         table.refresh()
 
     @work(exclusive=True, thread=True)
+    def _do_streaming_load(self) -> None:
+        """Load sessions with progressive updates as each adapter completes."""
+        def on_progress(all_sessions: list[Session]):
+            # Track total loaded and filter for display
+            total = len(all_sessions)
+            filtered = all_sessions
+            if self.active_filter:
+                filtered = [s for s in all_sessions if s.agent == self.active_filter]
+            self.call_from_thread(self._update_results_streaming, filtered[:100], total)
+
+        self.search_engine.get_sessions_streaming(on_progress)
+        # Mark loading complete
+        self.call_from_thread(self._finish_loading)
+
+    def _update_results_streaming(self, sessions: list[Session], total: int) -> None:
+        """Update UI with streaming results (keeps loading state)."""
+        self.sessions = sessions
+        self._total_loaded = total
+        self._update_table()
+        self._update_session_count()
+
+    def _finish_loading(self) -> None:
+        """Mark loading as complete."""
+        self.is_loading = False
+        if hasattr(self, '_spinner_timer'):
+            self._spinner_timer.stop()
+        self._update_spinner()
+        self._update_session_count()
+
+    @work(exclusive=True, thread=True)
     def _do_search(self, query: str) -> None:
         """Perform search and update results in background thread."""
         self._current_query = query
@@ -460,9 +516,7 @@ class FastResumeApp(App):
         table = self.query_one("#results-table", DataTable)
         table.clear()
 
-        if self.is_loading and not self.sessions:
-            # Show loading row
-            table.add_row("", Text("Loading sessions...", style="italic dim"), "", "")
+        if not self.sessions:
             return
 
         for session in self.sessions:

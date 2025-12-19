@@ -3,7 +3,8 @@
 import hashlib
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -156,6 +157,39 @@ class SessionSearch:
         self._save_to_cache(sessions)
 
         return sessions
+
+    def get_sessions_streaming(
+        self, on_progress: Callable[[list[Session]], None]
+    ) -> list[Session]:
+        """Load sessions with progress callback for each adapter that completes."""
+        # Check cache first
+        cached = self._load_from_cache()
+        if cached is not None:
+            self._sessions = cached
+            on_progress(cached)
+            return cached
+
+        # Load from adapters, reporting progress as each completes
+        all_sessions: list[Session] = []
+
+        def load_adapter(adapter):
+            if adapter.is_available():
+                return adapter.find_sessions()
+            return []
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(load_adapter, a): a for a in self.adapters}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    all_sessions.extend(result)
+                    # Sort and report progress
+                    all_sessions.sort(key=lambda s: s.timestamp, reverse=True)
+                    on_progress(all_sessions.copy())
+
+        self._sessions = all_sessions
+        self._save_to_cache(all_sessions)
+        return all_sessions
 
     def _compute_hybrid_score(
         self, query: str, searchable: str, fuzzy_score: float

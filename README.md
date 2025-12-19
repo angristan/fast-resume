@@ -6,7 +6,8 @@ A fuzzy finder TUI for quickly searching and resuming coding agent sessions acro
 
 - **Unified search** across Claude Code, Codex CLI, OpenCode, and Vibe sessions
 - **Fuzzy matching** with hybrid scoring (fuzzy + exact match bonuses)
-- **Interactive TUI** built with [Textual](https://textual.textualize.io/) featuring search highlighting and session preview
+- **Interactive TUI** built with [Textual](https://textual.textualize.io/) with fzf-style interface
+- **Progressive loading** - sessions stream in as each agent loads
 - **Fast caching** for instant startup on subsequent runs
 - **Direct resume** - select a session and immediately resume it with the appropriate agent
 
@@ -57,6 +58,8 @@ fr --rebuild
 | `Enter` | Resume selected session |
 | `Tab` | Toggle preview pane |
 | `/` | Focus search input |
+| `1-5` | Filter by agent (All/Claude/Codex/OpenCode/Vibe) |
+| `Ctrl+P` | Open command palette |
 | `q` or `Esc` | Quit |
 
 ## Supported Agents
