@@ -517,11 +517,6 @@ class FastResumeApp(App):
         """Handle cursor movement in results table."""
         self._update_selected_session()
 
-    @on(DataTable.RowSelected)
-    def on_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection (Enter on table) - resume session."""
-        self.action_resume_session()
-
     def action_focus_search(self) -> None:
         """Focus the search input."""
         self.query_one("#search-input", Input).focus()
