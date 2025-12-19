@@ -67,9 +67,7 @@ class CrushAdapter:
             """)
 
             for row in cursor.fetchall():
-                session = self._parse_session(
-                    conn, row, project_path
-                )
+                session = self._parse_session(conn, row, project_path)
                 if session:
                     sessions.append(session)
 
@@ -101,12 +99,15 @@ class CrushAdapter:
 
             # Get messages for this session
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT role, parts, model
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY created_at ASC
-            """, (session_id,))
+            """,
+                (session_id,),
+            )
 
             messages: list[str] = []
             first_user_message = ""

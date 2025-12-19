@@ -38,9 +38,7 @@ class OpenCodeAdapter:
                 continue
 
             for session_file in project_dir.glob("ses_*.json"):
-                session = self._parse_session(
-                    session_file, message_dir, part_dir
-                )
+                session = self._parse_session(session_file, message_dir, part_dir)
                 if session:
                     sessions.append(session)
 

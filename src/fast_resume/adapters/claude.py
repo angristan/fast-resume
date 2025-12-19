@@ -75,9 +75,15 @@ class ClaudeAdapter:
                         role_prefix = "» " if msg_type == "user" else "  "
                         if isinstance(content, str):
                             # Skip meta messages and commands
-                            if not data.get("isMeta") and not content.startswith(("<command", "<local-command")):
+                            if not data.get("isMeta") and not content.startswith(
+                                ("<command", "<local-command")
+                            ):
                                 messages.append(f"{role_prefix}{content}")
-                                if msg_type == "user" and not first_user_message and len(content) > 10:
+                                if (
+                                    msg_type == "user"
+                                    and not first_user_message
+                                    and len(content) > 10
+                                ):
                                     first_user_message = content
                         elif isinstance(content, list):
                             for part in content:
@@ -85,7 +91,10 @@ class ClaudeAdapter:
                                     if part.get("type") == "text":
                                         text = part.get("text", "")
                                         messages.append(f"{role_prefix}{text}")
-                                        if msg_type == "user" and not first_user_message:
+                                        if (
+                                            msg_type == "user"
+                                            and not first_user_message
+                                        ):
                                             first_user_message = text
                                 elif isinstance(part, str):
                                     messages.append(f"{role_prefix}{part}")

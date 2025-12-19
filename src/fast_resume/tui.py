@@ -6,7 +6,7 @@ from pathlib import Path
 
 import humanize
 from rich.columns import Columns
-from rich.console import Group, RenderableType
+from rich.console import RenderableType
 from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import on, work
@@ -69,7 +69,9 @@ def format_directory(path: str) -> str:
     return path
 
 
-def highlight_matches(text: str, query: str, max_len: int | None = None, style: str = "bold reverse") -> Text:
+def highlight_matches(
+    text: str, query: str, max_len: int | None = None, style: str = "bold reverse"
+) -> Text:
     """Highlight matching portions of text based on query terms.
 
     Returns a Rich Text object with matches highlighted.
@@ -185,7 +187,9 @@ class SessionPreview(Static):
                     content_part = line[2:]
                     if len(content_part) > 200:
                         content_part = content_part[:200].rsplit(" ", 1)[0] + " ..."
-                    highlighted = highlight_matches(content_part, query, style=self.MATCH_STYLE)
+                    highlighted = highlight_matches(
+                        content_part, query, style=self.MATCH_STYLE
+                    )
                     result.append_text(highlighted)
                     result.append("\n")
                 elif line == "...":
@@ -203,7 +207,9 @@ class SessionPreview(Static):
                     if line.startswith("..."):
                         result.append(line + "\n", style="dim")
                     else:
-                        highlighted = highlight_matches(line, query, style=self.MATCH_STYLE)
+                        highlighted = highlight_matches(
+                            line, query, style=self.MATCH_STYLE
+                        )
                         result.append_text(highlighted)
                         result.append("\n")
 
@@ -455,8 +461,8 @@ class FastResumeApp(App):
     def on_mount(self) -> None:
         """Set up the app when mounted."""
         table = self.query_one("#results-table", DataTable)
-        self._col_agent, self._col_title, self._col_dir, self._col_date = table.add_columns(
-            "Agent", "Title", "Directory", "Date"
+        self._col_agent, self._col_title, self._col_dir, self._col_date = (
+            table.add_columns("Agent", "Title", "Directory", "Date")
         )
 
         # Set fixed column widths
@@ -531,7 +537,7 @@ class FastResumeApp(App):
 
     def on_resize(self) -> None:
         """Handle terminal resize."""
-        if hasattr(self, '_col_agent'):
+        if hasattr(self, "_col_agent"):
             self._update_column_widths()
 
     def _update_column_widths(self) -> None:
@@ -584,6 +590,7 @@ class FastResumeApp(App):
     @work(exclusive=True, thread=True)
     def _do_streaming_load(self) -> None:
         """Load sessions with progressive updates as each adapter completes."""
+
         def on_progress(all_sessions: list[Session]):
             # Track total loaded and filter for display
             total = len(all_sessions)
@@ -606,7 +613,7 @@ class FastResumeApp(App):
     def _finish_loading(self) -> None:
         """Mark loading as complete."""
         self.is_loading = False
-        if hasattr(self, '_spinner_timer'):
+        if hasattr(self, "_spinner_timer"):
             self._spinner_timer.stop()
         self._update_spinner()
         self._update_session_count()
@@ -641,15 +648,21 @@ class FastResumeApp(App):
             icon = get_agent_icon(session.agent)
 
             # Title - truncate and highlight matches
-            max_title = getattr(self, '_title_width', 60) - 3
-            title = highlight_matches(session.title, self._current_query, max_len=max_title)
+            max_title = getattr(self, "_title_width", 60) - 3
+            title = highlight_matches(
+                session.title, self._current_query, max_len=max_title
+            )
 
             # Format directory - truncate based on column width
-            dir_w = getattr(self, '_dir_width', 22)
+            dir_w = getattr(self, "_dir_width", 22)
             directory = format_directory(session.directory)
             if dir_w > 0 and len(directory) > dir_w - 2:
-                directory = "..." + directory[-(dir_w - 5):]
-            dir_text = highlight_matches(directory, self._current_query) if dir_w > 0 else Text("")
+                directory = "..." + directory[-(dir_w - 5) :]
+            dir_text = (
+                highlight_matches(directory, self._current_query)
+                if dir_w > 0
+                else Text("")
+            )
 
             # Format time - right aligned with padding
             time_ago = format_time_ago(session.timestamp)
@@ -787,7 +800,9 @@ class FastResumeApp(App):
         return self._resume_directory
 
 
-def run_tui(query: str = "", agent_filter: str | None = None) -> tuple[list[str] | None, str | None]:
+def run_tui(
+    query: str = "", agent_filter: str | None = None
+) -> tuple[list[str] | None, str | None]:
     """Run the TUI and return the resume command and directory if selected."""
     app = FastResumeApp(initial_query=query, agent_filter=agent_filter)
     app.run()

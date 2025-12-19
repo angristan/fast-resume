@@ -72,7 +72,9 @@ class CodexAdapter:
                                     )
                                     if text:
                                         # Skip system context for content
-                                        if not text.strip().startswith("<environment_context>"):
+                                        if not text.strip().startswith(
+                                            "<environment_context>"
+                                        ):
                                             messages.append(f"{role_prefix}{text}")
 
                     # Extract event messages (user prompts) - best source for title
@@ -90,7 +92,11 @@ class CodexAdapter:
 
             if not session_id:
                 # Extract from filename: rollout-2025-12-17T18-24-27-019b2d57-...
-                session_id = session_file.stem.split("-", 1)[-1] if "-" in session_file.stem else session_file.stem
+                session_id = (
+                    session_file.stem.split("-", 1)[-1]
+                    if "-" in session_file.stem
+                    else session_file.stem
+                )
 
             # Skip sessions with no actual user prompt
             if not user_prompts:

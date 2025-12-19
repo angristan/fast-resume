@@ -18,7 +18,15 @@ from .adapters import (
     Session,
     VibeAdapter,
 )
-from .config import CACHE_DIR, CACHE_VERSION, CLAUDE_DIR, CODEX_DIR, CRUSH_PROJECTS_FILE, OPENCODE_DIR, VIBE_DIR
+from .config import (
+    CACHE_DIR,
+    CACHE_VERSION,
+    CLAUDE_DIR,
+    CODEX_DIR,
+    CRUSH_PROJECTS_FILE,
+    OPENCODE_DIR,
+    VIBE_DIR,
+)
 
 
 def _get_dir_mtime(path: Path) -> float:
@@ -64,7 +72,9 @@ class SessionSearch:
         ]
         self._sessions: list[Session] | None = None
         self._cache_file = CACHE_DIR / "sessions.json"
-        self._cache_key: str | None = None  # Cache the key to avoid repeated mtime checks
+        self._cache_key: str | None = (
+            None  # Cache the key to avoid repeated mtime checks
+        )
 
     def _get_cache_key(self) -> str:
         """Get cache key, computing it only once per instance."""
@@ -264,7 +274,9 @@ class SessionSearch:
             fuzzy_score = match[1]
             if fuzzy_score > 40:  # Lower threshold since we'll re-rank
                 searchable = choices[idx][1]
-                hybrid_score = self._compute_hybrid_score(query, searchable, fuzzy_score)
+                hybrid_score = self._compute_hybrid_score(
+                    query, searchable, fuzzy_score
+                )
                 scored_results.append((choices[idx][0], hybrid_score))
 
         # Sort by hybrid score descending

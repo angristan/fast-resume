@@ -80,8 +80,7 @@ class VibeAdapter:
 
             # Generate title from first user message
             user_messages = [
-                m for i, m in enumerate(messages_data)
-                if m.get("role") == "user"
+                m for i, m in enumerate(messages_data) if m.get("role") == "user"
             ]
             if user_messages:
                 first_msg = user_messages[0].get("content", "")

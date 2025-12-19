@@ -1,7 +1,6 @@
 """CLI entry point for fast-resume."""
 
 import os
-import sys
 
 import click
 from rich.console import Console
@@ -22,7 +21,9 @@ from .tui import run_tui
 )
 @click.option("-d", "--directory", help="Filter by directory (substring match)")
 @click.option("--no-tui", is_flag=True, help="Output list to stdout instead of TUI")
-@click.option("--list", "list_only", is_flag=True, help="Just list sessions, don't resume")
+@click.option(
+    "--list", "list_only", is_flag=True, help="Just list sessions, don't resume"
+)
 @click.option("--rebuild", is_flag=True, help="Force rebuild the session cache")
 @click.version_option()
 def main(
@@ -94,7 +95,7 @@ def _list_sessions(query: str, agent: str | None, directory: str | None) -> None
         directory_display = session.directory
         home = os.path.expanduser("~")
         if directory_display.startswith(home):
-            directory_display = "~" + directory_display[len(home):]
+            directory_display = "~" + directory_display[len(home) :]
         if len(directory_display) > 35:
             directory_display = "..." + directory_display[-32:]
 
@@ -106,7 +107,9 @@ def _list_sessions(query: str, agent: str | None, directory: str | None) -> None
         )
 
     console.print(table)
-    console.print(f"\n[dim]Showing {min(len(sessions), 50)} of {len(sessions)} sessions[/dim]")
+    console.print(
+        f"\n[dim]Showing {min(len(sessions), 50)} of {len(sessions)} sessions[/dim]"
+    )
 
 
 if __name__ == "__main__":
