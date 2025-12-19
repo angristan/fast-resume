@@ -91,12 +91,14 @@ class CodexAdapter:
                 # Extract from filename: rollout-2025-12-17T18-24-27-019b2d57-...
                 session_id = session_file.stem.split("-", 1)[-1] if "-" in session_file.stem else session_file.stem
 
+            # Skip sessions with no actual user prompt
+            if not user_prompts:
+                return None
+
             # Generate title from first actual user prompt
-            title = "Untitled session"
-            if user_prompts:
-                title = user_prompts[0][:80]
-                if len(user_prompts[0]) > 80:
-                    title += "..."
+            title = user_prompts[0][:80]
+            if len(user_prompts[0]) > 80:
+                title += "..."
 
             full_content = "\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]

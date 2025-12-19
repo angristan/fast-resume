@@ -89,14 +89,16 @@ class ClaudeAdapter:
                                 elif isinstance(part, str):
                                     messages.append(part)
 
+            # Skip sessions with no actual user message
+            if not first_user_message:
+                return None
+
             # Use first user message as title if no summary
-            if not title and first_user_message:
+            if not title:
                 # Truncate and clean up
                 title = first_user_message.strip()[:100]
                 if len(first_user_message) > 100:
                     title = title.rsplit(" ", 1)[0] + "..."
-            elif not title:
-                title = "Untitled session"
 
             # Skip sessions with no actual conversation content
             if not messages:
