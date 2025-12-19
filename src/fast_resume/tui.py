@@ -424,7 +424,7 @@ class FastResumeApp(App):
             with Horizontal(id="top-bar"):
                 yield Label(">", id="spinner")
                 yield Input(
-                    placeholder="Search...",
+                    placeholder="Search by title or messages...",
                     id="search-input",
                     value=self.initial_query,
                 )
