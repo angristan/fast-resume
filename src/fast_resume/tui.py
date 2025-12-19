@@ -436,7 +436,12 @@ class FastResumeApp(App):
             # Main content area
             with Vertical(id="main-container"):
                 with Vertical(id="results-container"):
-                    yield DataTable(id="results-table", cursor_type="row")
+                    yield DataTable(
+                        id="results-table",
+                        cursor_type="row",
+                        cursor_background_priority="renderable",
+                        cursor_foreground_priority="renderable",
+                    )
                 with Vertical(id="preview-container"):
                     yield SessionPreview()
         yield Footer()
