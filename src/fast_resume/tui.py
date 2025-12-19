@@ -353,6 +353,10 @@ class FastResumeApp(App):
         color: #FF6B35;
     }
 
+    .agent-crush {
+        color: #FF5F87;
+    }
+
     /* Footer styling */
     Footer {
         background: $primary-background;
@@ -382,8 +386,9 @@ class FastResumeApp(App):
         Binding("1", "filter_all", "All", show=False),
         Binding("2", "filter_claude", "Claude", show=False),
         Binding("3", "filter_codex", "Codex", show=False),
-        Binding("4", "filter_opencode", "OpenCode", show=False),
-        Binding("5", "filter_vibe", "Vibe", show=False),
+        Binding("4", "filter_crush", "Crush", show=False),
+        Binding("5", "filter_opencode", "OpenCode", show=False),
+        Binding("6", "filter_vibe", "Vibe", show=False),
         Binding("ctrl+p", "command_palette", "Commands"),
     ]
 
@@ -425,6 +430,7 @@ class FastResumeApp(App):
                     (None, "All"),
                     ("claude", "Claude"),
                     ("codex", "Codex"),
+                    ("crush", "Crush"),
                     ("opencode", "OpenCode"),
                     ("vibe", "Vibe"),
                 ]:
@@ -709,6 +715,16 @@ class FastResumeApp(App):
     def action_resume_session(self) -> None:
         """Resume the selected session."""
         if self.selected_session:
+            # Crush doesn't support CLI resume - show a toast instead
+            if self.selected_session.agent == "crush":
+                self.notify(
+                    f"Crush doesn't support CLI resume. Open crush in: [bold]{self.selected_session.directory}[/bold] and use ctrl+s to find your session",
+                    title="Cannot resume",
+                    severity="warning",
+                    timeout=5,
+                )
+                return
+
             self._resume_command = self.search_engine.get_resume_command(
                 self.selected_session
             )
@@ -733,6 +749,10 @@ class FastResumeApp(App):
         """Filter to Codex sessions only."""
         self._set_filter("codex")
 
+    def action_filter_crush(self) -> None:
+        """Filter to Crush sessions only."""
+        self._set_filter("crush")
+
     def action_filter_opencode(self) -> None:
         """Filter to OpenCode sessions only."""
         self._set_filter("opencode")
@@ -751,6 +771,8 @@ class FastResumeApp(App):
             self._set_filter("claude")
         elif btn_id == "filter-codex":
             self._set_filter("codex")
+        elif btn_id == "filter-crush":
+            self._set_filter("crush")
         elif btn_id == "filter-opencode":
             self._set_filter("opencode")
         elif btn_id == "filter-vibe":

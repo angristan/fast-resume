@@ -4,7 +4,7 @@ A fuzzy finder TUI for quickly searching and resuming coding agent sessions acro
 
 ## Features
 
-- **Unified search** across Claude Code, Codex CLI, OpenCode, and Vibe sessions
+- **Unified search** across Claude Code, Codex CLI, Crush, OpenCode, and Vibe sessions
 - **Fuzzy matching** with hybrid scoring (fuzzy + exact match bonuses)
 - **Interactive TUI** built with [Textual](https://textual.textualize.io/) with fzf-style interface
 - **Progressive loading** - sessions stream in as each agent loads
@@ -37,6 +37,7 @@ fr auth middleware
 # Filter by agent
 fr -a claude
 fr -a codex
+fr -a crush
 fr -a opencode
 fr -a vibe
 
@@ -58,7 +59,7 @@ fr --rebuild
 | `Enter` | Resume selected session |
 | `Tab` | Toggle preview pane |
 | `/` | Focus search input |
-| `1-5` | Filter by agent (All/Claude/Codex/OpenCode/Vibe) |
+| `1-6` | Filter by agent (All/Claude/Codex/Crush/OpenCode/Vibe) |
 | `Ctrl+P` | Open command palette |
 | `q` or `Esc` | Quit |
 
@@ -68,6 +69,7 @@ fr --rebuild
 |-------|---------------|----------------|
 | Claude Code | `~/.claude/projects/` | `claude --resume <id>` |
 | Codex CLI | `~/.codex/sessions/` | `codex resume <id>` |
+| Crush | `~/.local/share/crush/projects.json` | N/A (no CLI resume support) |
 | OpenCode | `~/.local/share/opencode/storage/` | `opencode <dir> --session <id>` |
 | Vibe | `~/.vibe/logs/session/` | `vibe --resume <id>` |
 

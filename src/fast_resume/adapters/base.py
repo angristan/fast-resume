@@ -10,7 +10,7 @@ class Session:
     """Represents a coding agent session."""
 
     id: str
-    agent: str  # "claude", "codex", "opencode", "vibe"
+    agent: str  # "claude", "codex", "crush", "opencode", "vibe"
     title: str
     directory: str
     timestamp: datetime

@@ -13,11 +13,12 @@ from rapidfuzz import fuzz, process
 from .adapters import (
     ClaudeAdapter,
     CodexAdapter,
+    CrushAdapter,
     OpenCodeAdapter,
     Session,
     VibeAdapter,
 )
-from .config import CACHE_DIR, CACHE_VERSION, CLAUDE_DIR, CODEX_DIR, OPENCODE_DIR, VIBE_DIR
+from .config import CACHE_DIR, CACHE_VERSION, CLAUDE_DIR, CODEX_DIR, CRUSH_PROJECTS_FILE, OPENCODE_DIR, VIBE_DIR
 
 
 def _get_dir_mtime(path: Path) -> float:
@@ -44,6 +45,7 @@ def _get_cache_key() -> str:
         _get_dir_mtime(CODEX_DIR),
         _get_dir_mtime(OPENCODE_DIR),
         _get_dir_mtime(VIBE_DIR),
+        _get_dir_mtime(CRUSH_PROJECTS_FILE.parent),
     ]
     key = f"v{CACHE_VERSION}:" + ":".join(str(m) for m in mtimes)
     return hashlib.md5(key.encode()).hexdigest()[:16]
@@ -56,6 +58,7 @@ class SessionSearch:
         self.adapters = [
             ClaudeAdapter(),
             CodexAdapter(),
+            CrushAdapter(),
             OpenCodeAdapter(),
             VibeAdapter(),
         ]
