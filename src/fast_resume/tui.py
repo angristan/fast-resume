@@ -141,12 +141,11 @@ class FastResumeApp(App):
 
     #search-container {
         height: 3;
-        padding: 0 1;
         width: 100%;
     }
 
     #search-input {
-        width: 100%;
+        width: 1fr;
     }
 
     #main-container {
