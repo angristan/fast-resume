@@ -3,6 +3,7 @@
 import os
 from datetime import datetime
 
+import humanize
 from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import on, work
@@ -19,23 +20,7 @@ from .search import SessionSearch
 
 def format_time_ago(dt: datetime) -> str:
     """Format a datetime as a human-readable time ago string."""
-    now = datetime.now()
-    diff = now - dt
-
-    seconds = diff.total_seconds()
-    if seconds < 60:
-        return "just now"
-    elif seconds < 3600:
-        mins = int(seconds / 60)
-        return f"{mins}m ago"
-    elif seconds < 86400:
-        hours = int(seconds / 3600)
-        return f"{hours}h ago"
-    elif seconds < 604800:
-        days = int(seconds / 86400)
-        return f"{days}d ago"
-    else:
-        return dt.strftime("%Y-%m-%d")
+    return humanize.naturaltime(dt)
 
 
 def format_directory(path: str) -> str:
