@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -58,36 +59,65 @@ class CrushAdapter:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Get all sessions
             cursor.execute("""
-                SELECT id, title, message_count, updated_at, created_at
-                FROM sessions
-                WHERE message_count > 0
-                ORDER BY updated_at DESC
+                SELECT
+                    s.id, s.title, s.message_count, s.updated_at, s.created_at,
+                    m.role, m.parts, m.created_at as msg_created_at
+                FROM sessions s
+                LEFT JOIN messages m ON m.session_id = s.id
+                WHERE s.message_count > 0
+                ORDER BY s.updated_at DESC, m.created_at ASC
             """)
 
+            # Group messages by session
+            session_data: dict[str, dict] = {}
+            session_messages: dict[str, list[tuple[str, str]]] = defaultdict(list)
+
             for row in cursor.fetchall():
-                session = self._parse_session(conn, row, project_path)
+                session_id = row["id"]
+
+                # Store session metadata (first occurrence)
+                if session_id not in session_data:
+                    session_data[session_id] = {
+                        "title": row["title"] or "",
+                        "updated_at": row["updated_at"],
+                        "created_at": row["created_at"],
+                    }
+
+                # Collect messages
+                if row["role"] is not None:
+                    session_messages[session_id].append((row["role"], row["parts"]))
+
+            conn.close()
+
+            # Build Session objects
+            for session_id, data in session_data.items():
+                session = self._build_session(
+                    session_id,
+                    data,
+                    session_messages[session_id],
+                    project_path,
+                )
                 if session:
                     sessions.append(session)
 
-            conn.close()
         except sqlite3.Error:
             pass
 
         return sessions
 
-    def _parse_session(
-        self, conn: sqlite3.Connection, session_row: sqlite3.Row, project_path: str
+    def _build_session(
+        self,
+        session_id: str,
+        data: dict,
+        messages_raw: list[tuple[str, str]],
+        project_path: str,
     ) -> Session | None:
-        """Parse a single session from the database."""
+        """Build a Session object from pre-fetched data."""
         try:
-            session_id = session_row["id"]
-            title = session_row["title"] or ""
-
-            # Timestamps are in Unix seconds (or milliseconds - need to detect)
-            updated_at = session_row["updated_at"]
-            created_at = session_row["created_at"]
+            title = data["title"]
+            updated_at = data["updated_at"]
+            created_at = data["created_at"]
 
             # Detect if timestamp is in milliseconds (> year 3000 in seconds)
             if updated_at > 100_000_000_000:
@@ -97,25 +127,10 @@ class CrushAdapter:
 
             timestamp = datetime.fromtimestamp(updated_at)
 
-            # Get messages for this session
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT role, parts, model
-                FROM messages
-                WHERE session_id = ?
-                ORDER BY created_at ASC
-            """,
-                (session_id,),
-            )
-
             messages: list[str] = []
             first_user_message = ""
 
-            for msg_row in cursor.fetchall():
-                role = msg_row["role"]
-                parts_json = msg_row["parts"]
-
+            for role, parts_json in messages_raw:
                 text_content = self._extract_text_from_parts(parts_json)
                 if not text_content:
                     continue
