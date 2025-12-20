@@ -230,26 +230,18 @@ class FastResumeApp(App):
         background: $surface;
     }
 
-    /* Top bar - search + count */
-    #top-bar {
+    /* Title bar - branding + session count */
+    #title-bar {
         height: 1;
         width: 100%;
         padding: 0 1;
-    }
-
-    #spinner {
-        width: 2;
-        color: $accent;
-    }
-
-    #search-input {
-        width: 1fr;
-        border: none;
         background: $surface;
     }
 
-    #search-input:focus {
-        border: none;
+    #app-title {
+        width: 1fr;
+        color: $text;
+        text-style: bold;
     }
 
     #session-count {
@@ -258,15 +250,51 @@ class FastResumeApp(App):
         width: auto;
     }
 
-    /* Agent filter tabs - compact */
-    #filter-container {
-        height: 1;
+    /* Search row */
+    #search-row {
+        height: 3;
         width: 100%;
         padding: 0 1;
     }
 
+    #search-box {
+        width: 100%;
+        height: 3;
+        border: solid $primary-background-lighten-2;
+        background: $surface;
+        padding: 0 1;
+    }
+
+    #search-box:focus-within {
+        border: solid $accent;
+    }
+
+    #search-icon {
+        width: 3;
+        color: $text-muted;
+        content-align: center middle;
+    }
+
+    #search-input {
+        width: 1fr;
+        border: none;
+        background: transparent;
+    }
+
+    #search-input:focus {
+        border: none;
+    }
+
+    /* Agent filter tabs - pill style */
+    #filter-container {
+        height: 1;
+        width: 100%;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+
     .filter-btn {
-        min-width: 8;
+        min-width: 10;
         height: 1;
         margin: 0 1 0 0;
         border: none;
@@ -277,7 +305,6 @@ class FastResumeApp(App):
 
     .filter-btn:hover {
         color: $text;
-        text-style: bold;
     }
 
     .filter-btn:focus {
@@ -285,8 +312,58 @@ class FastResumeApp(App):
     }
 
     .filter-btn.-active {
+        background: $accent 20%;
         color: $accent;
         text-style: bold;
+    }
+
+    /* Agent-specific filter colors */
+    #filter-claude {
+        color: #E87B35;
+    }
+    #filter-claude.-active {
+        background: #E87B35 20%;
+        color: #E87B35;
+    }
+
+    #filter-codex {
+        color: #00A67E;
+    }
+    #filter-codex.-active {
+        background: #00A67E 20%;
+        color: #00A67E;
+    }
+
+    #filter-copilot {
+        color: #9CA3AF;
+    }
+    #filter-copilot.-active {
+        background: #9CA3AF 20%;
+        color: #9CA3AF;
+    }
+
+    #filter-crush {
+        color: #FF5F87;
+    }
+    #filter-crush.-active {
+        background: #FF5F87 20%;
+        color: #FF5F87;
+    }
+
+    #filter-opencode {
+        color: #6366F1;
+    }
+    #filter-opencode.-active {
+        background: #6366F1 20%;
+        color: #6366F1;
+    }
+
+    #filter-vibe {
+        color: #FF6B35;
+    }
+    #filter-vibe.-active {
+        background: #FF6B35 20%;
+        color: #FF6B35;
     }
 
     /* Main content area */
@@ -433,17 +510,22 @@ class FastResumeApp(App):
     def compose(self) -> ComposeResult:
         """Create child widgets."""
         with Vertical():
-            # Top bar: spinner + search + session count
-            with Horizontal(id="top-bar"):
-                yield Label(">", id="spinner")
-                yield Input(
-                    placeholder="Search by title or messages...",
-                    id="search-input",
-                    value=self.initial_query,
-                )
+            # Title bar: app name + session count
+            with Horizontal(id="title-bar"):
+                yield Label("fast-resume", id="app-title")
                 yield Label("", id="session-count")
 
-            # Agent filter buttons - compact inline
+            # Search row with boxed input
+            with Horizontal(id="search-row"):
+                with Horizontal(id="search-box"):
+                    yield Label("🔍", id="search-icon")
+                    yield Input(
+                        placeholder="Search by title or messages...",
+                        id="search-input",
+                        value=self.initial_query,
+                    )
+
+            # Agent filter buttons - pill style
             with Horizontal(id="filter-container"):
                 for filter_key, filter_label in [
                     (None, "All"),
@@ -455,7 +537,12 @@ class FastResumeApp(App):
                     ("vibe", "Vibe"),
                 ]:
                     btn_id = f"filter-{filter_key or 'all'}"
-                    btn = Button(filter_label, id=btn_id, classes="filter-btn")
+                    # Add colored dot prefix for agents
+                    if filter_key:
+                        label = f"● {filter_label}"
+                    else:
+                        label = filter_label
+                    btn = Button(label, id=btn_id, classes="filter-btn")
                     self._filter_buttons[filter_key] = btn
                     yield btn
 
@@ -530,13 +617,13 @@ class FastResumeApp(App):
                 btn.remove_class("-active")
 
     def _update_spinner(self) -> None:
-        """Advance spinner animation."""
-        spinner_label = self.query_one("#spinner", Label)
+        """Advance spinner animation in search icon."""
+        search_icon = self.query_one("#search-icon", Label)
         if self.is_loading:
             self._spinner_frame = (self._spinner_frame + 1) % len(self._spinner_chars)
-            spinner_label.update(self._spinner_chars[self._spinner_frame])
+            search_icon.update(self._spinner_chars[self._spinner_frame])
         else:
-            spinner_label.update(">")
+            search_icon.update("🔍")
 
     def _update_session_count(self) -> None:
         """Update the session count display."""
