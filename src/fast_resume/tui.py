@@ -742,7 +742,9 @@ class FastResumeApp(App):
     def _update_results(self, sessions: list[Session]) -> None:
         """Update the UI with search results (called from main thread)."""
         self.sessions = sessions
-        self.is_loading = False
+        # Only stop loading spinner if streaming indexing is also done
+        if not self.search_engine._streaming_in_progress:
+            self.is_loading = False
         self._update_table()
         self._update_session_count()
 

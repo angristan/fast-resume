@@ -75,6 +75,7 @@ class SessionSearch:
             VibeAdapter(),
         ]
         self._sessions: list[Session] | None = None
+        self._streaming_in_progress: bool = False
         self._cache_file = CACHE_DIR / "sessions.json"
         self._cache_key: str | None = (
             None  # Cache the key to avoid repeated mtime checks
@@ -148,6 +149,11 @@ class SessionSearch:
         if self._sessions is not None and not force_refresh:
             return self._sessions
 
+        # If streaming is in progress, return current partial results
+        # to avoid starting a second concurrent load
+        if self._streaming_in_progress:
+            return self._sessions if self._sessions is not None else []
+
         # Try cache first
         if not force_refresh:
             cached = self._load_from_cache()
@@ -188,27 +194,31 @@ class SessionSearch:
             on_progress(cached)
             return cached
 
-        # Load from adapters, reporting progress as each completes
-        all_sessions: list[Session] = []
+        # Mark streaming as in progress and initialize _sessions
+        # so concurrent searches can use partial results
+        self._streaming_in_progress = True
+        self._sessions = []
 
         def load_adapter(adapter):
             if adapter.is_available():
                 return adapter.find_sessions()
             return []
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(load_adapter, a): a for a in self.adapters}
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    all_sessions.extend(result)
-                    # Sort and report progress
-                    all_sessions.sort(key=lambda s: s.timestamp, reverse=True)
-                    on_progress(all_sessions.copy())
+        try:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {executor.submit(load_adapter, a): a for a in self.adapters}
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        self._sessions.extend(result)
+                        # Sort and report progress
+                        self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
+                        on_progress(self._sessions.copy())
+        finally:
+            self._streaming_in_progress = False
 
-        self._sessions = all_sessions
-        self._save_to_cache(all_sessions)
-        return all_sessions
+        self._save_to_cache(self._sessions)
+        return self._sessions
 
     def _compute_hybrid_score(
         self, query: str, searchable: str, fuzzy_score: float
