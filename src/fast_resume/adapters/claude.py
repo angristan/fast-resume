@@ -1,7 +1,6 @@
 """Claude Code session adapter."""
 
 import orjson
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -25,23 +24,21 @@ class ClaudeAdapter:
         if not self.is_available():
             return []
 
-        # Collect all session files first
-        session_files: list[Path] = []
+        sessions = []
         for project_dir in CLAUDE_DIR.iterdir():
             if not project_dir.is_dir():
                 continue
+
             for session_file in project_dir.glob("*.jsonl"):
                 # Skip agent subprocesses
-                if not session_file.name.startswith("agent-"):
-                    session_files.append(session_file)
+                if session_file.name.startswith("agent-"):
+                    continue
 
-        if not session_files:
-            return []
+                session = self._parse_session(session_file)
+                if session:
+                    sessions.append(session)
 
-        # Parse in parallel (cap workers to avoid overhead with many sessions)
-        with ThreadPoolExecutor(max_workers=min(8, len(session_files))) as executor:
-            results = executor.map(self._parse_session, session_files)
-            return [s for s in results if s is not None]
+        return sessions
 
     def _parse_session(self, session_file: Path) -> Session | None:
         """Parse a Claude Code session file."""
