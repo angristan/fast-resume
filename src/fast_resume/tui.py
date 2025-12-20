@@ -106,8 +106,8 @@ def highlight_matches(
 class SessionPreview(Static):
     """Preview pane showing session content."""
 
-    # Highlight style for matches in preview - bright yellow background
-    MATCH_STYLE = "black on yellow"
+    # Highlight style for matches in preview
+    MATCH_STYLE = "bold reverse"
     # Max lines to show for a single assistant message
     MAX_ASSISTANT_LINES = 4
 
