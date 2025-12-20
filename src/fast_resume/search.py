@@ -169,7 +169,7 @@ class SessionSearch:
                 return adapter.find_sessions()
             return []
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
             results = executor.map(load_adapter, self.adapters)
             for result in results:
                 sessions.extend(result)
@@ -205,7 +205,7 @@ class SessionSearch:
             return []
 
         try:
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
                 futures = {executor.submit(load_adapter, a): a for a in self.adapters}
                 for future in as_completed(futures):
                     result = future.result()
