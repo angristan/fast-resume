@@ -1,6 +1,6 @@
 """Crush (charmbracelet) session adapter."""
 
-import json
+import orjson
 import sqlite3
 from collections import defaultdict
 from datetime import datetime
@@ -29,9 +29,9 @@ class CrushAdapter:
         sessions = []
 
         try:
-            with open(CRUSH_PROJECTS_FILE, "r", encoding="utf-8") as f:
-                projects_data = json.load(f)
-        except (json.JSONDecodeError, OSError):
+            with open(CRUSH_PROJECTS_FILE, "rb") as f:
+                projects_data = orjson.loads(f.read())
+        except (orjson.JSONDecodeError, OSError):
             return []
 
         for project in projects_data.get("projects", []):
@@ -170,8 +170,8 @@ class CrushAdapter:
     def _extract_text_from_parts(self, parts_json: str) -> str:
         """Extract text content from message parts JSON."""
         try:
-            parts = json.loads(parts_json)
-        except json.JSONDecodeError:
+            parts = orjson.loads(parts_json)
+        except orjson.JSONDecodeError:
             return ""
 
         text_parts = []

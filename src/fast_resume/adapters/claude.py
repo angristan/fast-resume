@@ -1,6 +1,6 @@
 """Claude Code session adapter."""
 
-import json
+import orjson
 from datetime import datetime
 from pathlib import Path
 
@@ -56,8 +56,8 @@ class ClaudeAdapter:
                     if not line.strip():
                         continue
                     try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
+                        data = orjson.loads(line)
+                    except orjson.JSONDecodeError:
                         continue
 
                     msg_type = data.get("type", "")

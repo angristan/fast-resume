@@ -1,6 +1,6 @@
 """GitHub Copilot CLI session adapter."""
 
-import json
+import orjson
 import re
 from datetime import datetime
 from pathlib import Path
@@ -48,8 +48,8 @@ class CopilotAdapter:
                     if not line.strip():
                         continue
                     try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
+                        entry = orjson.loads(line)
+                    except orjson.JSONDecodeError:
                         continue
 
                     msg_type = entry.get("type", "")

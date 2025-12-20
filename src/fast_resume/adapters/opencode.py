@@ -1,6 +1,6 @@
 """OpenCode session adapter."""
 
-import json
+import orjson
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -38,8 +38,8 @@ class OpenCodeAdapter:
         if message_dir.exists():
             for msg_file in message_dir.glob("*/msg_*.json"):
                 try:
-                    with open(msg_file, "r", encoding="utf-8") as f:
-                        msg_data = json.load(f)
+                    with open(msg_file, "rb") as f:
+                        msg_data = orjson.loads(f.read())
                     session_id = msg_file.parent.name
                     msg_id = msg_data.get("id", "")
                     role = msg_data.get("role", "")
@@ -53,8 +53,8 @@ class OpenCodeAdapter:
         if part_dir.exists():
             for part_file in sorted(part_dir.glob("*/*.json")):
                 try:
-                    with open(part_file, "r", encoding="utf-8") as f:
-                        part_data = json.load(f)
+                    with open(part_file, "rb") as f:
+                        part_data = orjson.loads(f.read())
                     msg_id = part_file.parent.name
                     if part_data.get("type") == "text":
                         text = part_data.get("text", "")
@@ -85,8 +85,8 @@ class OpenCodeAdapter:
     ) -> Session | None:
         """Parse an OpenCode session file."""
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with open(session_file, "rb") as f:
+                data = orjson.loads(f.read())
 
             session_id = data.get("id", "")
             title = data.get("title", "Untitled session")

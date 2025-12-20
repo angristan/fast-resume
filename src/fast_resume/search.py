@@ -1,7 +1,7 @@
 """Search engine for aggregating and searching sessions."""
 
 import hashlib
-import json
+import orjson
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
@@ -93,8 +93,8 @@ class SessionSearch:
             return None
 
         try:
-            with open(self._cache_file, "r") as f:
-                data = json.load(f)
+            with open(self._cache_file, "rb") as f:
+                data = orjson.loads(f.read())
 
             # Check if cache is valid
             if data.get("key") != self._get_cache_key():
@@ -139,8 +139,8 @@ class SessionSearch:
                     for s in sessions
                 ],
             }
-            with open(self._cache_file, "w") as f:
-                json.dump(data, f)
+            with open(self._cache_file, "wb") as f:
+                f.write(orjson.dumps(data))
         except Exception:
             pass  # Cache write failure is not critical
 

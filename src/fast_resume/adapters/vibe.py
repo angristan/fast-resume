@@ -1,6 +1,6 @@
 """Vibe (Mistral) session adapter."""
 
-import json
+import orjson
 from datetime import datetime
 from pathlib import Path
 
@@ -35,8 +35,8 @@ class VibeAdapter:
     def _parse_session(self, session_file: Path) -> Session | None:
         """Parse a Vibe session file."""
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with open(session_file, "rb") as f:
+                data = orjson.loads(f.read())
 
             metadata = data.get("metadata", {})
             session_id = metadata.get("session_id", session_file.stem)
