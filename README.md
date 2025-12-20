@@ -181,66 +181,183 @@ Directory                            Sessions
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         CLI (cli.py)                        │
-│            fr [query] [-a agent] [-d dir] [flags]           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────┐
-│      TUI (tui.py)       │     │    Non-TUI Output (--no-tui)│
-│  Textual-based fuzzy    │     │    Rich table to stdout     │
-│  finder interface       │     │                             │
-└─────────────────────────┘     └─────────────────────────────┘
-              │                               │
-              └───────────────┬───────────────┘
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  SessionSearch (search.py)                  │
-│         Orchestrates adapters, manages streaming            │
-└─────────────────────────────────────────────────────────────┘
-              │                               │
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────┐
-│   TantivyIndex          │     │     Adapter Layer           │
-│   (index.py)            │     │     (adapters/*.py)         │
-│                         │     │                             │
-│ • Full-text search      │     │ • ClaudeAdapter             │
-│ • Fuzzy matching        │     │ • CodexAdapter              │
-│ • Incremental updates   │     │ • CopilotAdapter            │
-│ • Stats computation     │     │ • CrushAdapter              │
-│                         │     │ • OpenCodeAdapter           │
-│ ~/.cache/fast-resume/   │     │ • VibeAdapter               │
-└─────────────────────────┘     └─────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 SessionSearch                                          │
+│                                                                                        │
+│   • Orchestrates adapters in parallel (ThreadPoolExecutor)                             │
+│   • Compares file mtimes to detect changes (incremental updates)                       │
+│   • Delegates search queries to Tantivy index                                          │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+                      │                                       │
+         ┌────────────┴────────────┐                          │
+         ▼                         ▼                          ▼
+┌──────────────────┐    ┌────────────────────────────────────────────────────────────────┐
+│  TantivyIndex    │    │                          Adapters                              │
+│                  │    │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────┐ │
+│ • Fuzzy search   │◄───│  │ Claude │ │ Codex  │ │Copilot │ │ Crush  │ │OpenCode│ │Vibe│ │
+│ • mtime tracking │    │  └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └─┬──┘ │
+│                  │    │      │          │          │          │          │        │    │
+│ ~/.cache/        │    └──────┼──────────┼──────────┼──────────┼──────────┼────────┼────┘
+│   fast-resume/   │           ▼          ▼          ▼          ▼          ▼        ▼
+└──────────────────┘      ~/.claude/ ~/.codex/ ~/.copilot/ crush.db  opencode/  ~/.vibe/
 ```
 
-### Search Flow
+### Session Parsing
 
-1. **Index Check**: On startup, checks if Tantivy index exists and schema version matches
-2. **Incremental Load**: Compares file mtimes against known sessions, only parses changed files
-3. **Parallel Loading**: Uses ThreadPoolExecutor to load from all agents simultaneously
-4. **Tantivy Search**: Builds fuzzy queries with edit distance 1, searches title + content
-5. **Results Ranking**: Exact matches boosted, results sorted by score then timestamp
+Each agent stores sessions differently. Adapters normalize them into a common `Session` structure:
 
-### Index Details
+| Agent       | Format                                           | Parsing Strategy                                                                            |
+| ----------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Claude Code | JSONL in `~/.claude/projects/<project>/*.jsonl`  | Stream line-by-line, extract `user`/`assistant` messages, skip `agent-*` subprocess files   |
+| Codex       | JSONL in `~/.codex/sessions/**/*.jsonl`          | Line-by-line parsing, extract from `session_meta`, `response_item`, and `event_msg` entries |
+| Copilot     | JSONL in `~/.copilot/session-state/*.jsonl`      | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
+| Crush       | SQLite DB at `<project>/crush.db`                | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
+| OpenCode    | Split JSON in `~/.local/share/opencode/storage/` | Join `session/<hash>/ses_*.json` + `message/<id>/msg_*.json` + `part/<id>/*.json`           |
+| Vibe        | JSON in `~/.vibe/logs/session/session_*.json`    | Parse `messages` array with role-based content                                              |
 
-- **Engine:** [Tantivy](https://github.com/quickwit-oss/tantivy) (Rust full-text search library)
-- **Location:** `~/.cache/fast-resume/tantivy_index/`
-- **Schema Version:** Tracked in `.schema_version` file, auto-rebuilds on schema changes
-- **Fields:** `id`, `title`, `directory`, `agent`, `content`, `timestamp`, `message_count`, `mtime`
-
-### Adapter Protocol
-
-Each agent adapter implements:
+**The normalized Session structure:**
 
 ```python
-class AgentAdapter(Protocol):
-    def find_sessions(self) -> list[Session]: ...
-    def find_sessions_incremental(self, known: dict) -> tuple[list[Session], set[str]]: ...
-    def get_resume_command(self, session: Session) -> list[str] | None: ...
-    def is_available(self) -> bool: ...
+@dataclass
+class Session:
+    id: str              # Unique identifier (usually filename or UUID)
+    agent: str           # "claude", "codex", "copilot", "crush", "opencode", "vibe"
+    title: str           # Summary or first user message (max 100 chars)
+    directory: str       # Working directory where session was created
+    timestamp: datetime  # Last modified time
+    preview: str         # First 500 chars for preview pane
+    content: str         # Full conversation text (» user, ␣␣ assistant)
+    message_count: int   # Human turns (excludes tool results)
+    mtime: float         # File mtime for incremental update detection
 ```
+
+### Indexing
+
+**Incremental updates** avoid re-parsing on every launch:
+
+1. Load known sessions from Tantivy index with their `mtime` values
+2. Scan session files, compare mtimes against known values
+3. Only parse files where `current_mtime > known_mtime + 0.001`
+4. Detect deleted sessions (in index but not on disk)
+5. Apply changes atomically: delete removed, upsert modified
+
+**Parallel loading** via `ThreadPoolExecutor`:
+
+```python
+with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
+    futures = {executor.submit(get_incremental, a): a for a in self.adapters}
+    for future in as_completed(futures):
+        new_or_modified, deleted_ids = future.result()
+        self._index.update_sessions(new_or_modified)
+        on_progress()  # TUI updates as each adapter completes
+```
+
+**Schema versioning**: A `.schema_version` file tracks the index schema. If it doesn't match the code's `SCHEMA_VERSION` constant, the entire index is deleted and rebuilt. This prevents deserialization errors after upgrades.
+
+### Search
+
+[Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene). We use it via [tantivy-py](https://github.com/quickwit-oss/tantivy-py).
+
+**Fuzzy matching** handles typos with edit distance 1 and prefix matching:
+
+```python
+for term in query.split():
+    fuzzy_title = tantivy.Query.fuzzy_term_query(schema, "title", term, distance=1, prefix=True)
+    fuzzy_content = tantivy.Query.fuzzy_term_query(schema, "content", term, distance=1, prefix=True)
+
+    # Term can match in either field (OR), all terms must match (AND)
+    term_query = tantivy.Query.boolean_query([
+        (tantivy.Occur.Should, fuzzy_title),
+        (tantivy.Occur.Should, fuzzy_content),
+    ])
+    query_parts.append((tantivy.Occur.Must, term_query))
+```
+
+So `auth midleware` (typo) matches "authentication middleware".
+
+**Query lifecycle:**
+
+```
+┌─────────────┐   50ms    ┌─────────────┐  background  ┌─────────────┐
+│  Keystroke  │ ────────► │  Debounce   │ ───────────► │   Worker    │
+└─────────────┘  timer    └─────────────┘   thread     └──────┬──────┘
+                                                              │
+                          ┌─────────────┐              ┌──────▼──────┐
+                          │   Render    │ ◄─────────── │   Tantivy   │
+                          │   Table     │   results    │    Query    │
+                          └─────────────┘              └─────────────┘
+```
+
+### TUI
+
+**Streaming results**: Sessions appear as each adapter completes, not after all finish.
+
+- **Fast path**: Index up-to-date → load synchronously, no spinner
+- **Slow path**: Changes detected → spinner, stream results via `on_progress()` callback
+
+**Preview context**: When searching, the preview pane jumps to the matching portion:
+
+```python
+for term in query.lower().split():
+    pos = content.lower().find(term)
+    if pos != -1:
+        start = max(0, pos - 100)  # Show ~100 chars before match
+        preview_text = content[start:start + 1500]
+        break
+```
+
+Matching terms are highlighted with Rich's `Text.stylize()`.
+
+### Resume Handoff
+
+When you press Enter on a session, fast-resume hands off to the original agent:
+
+```python
+# In cli.py after TUI exits
+resume_cmd, resume_dir = run_tui(query=query, agent_filter=agent)
+
+if resume_cmd:
+    # 1. Change to the session's original working directory
+    os.chdir(resume_dir)
+
+    # 2. Replace current process with agent's resume command
+    os.execvp(resume_cmd[0], resume_cmd)
+```
+
+`os.execvp()` replaces the Python process entirely with the agent CLI. This means:
+
+- No subprocess overhead
+- Shell history shows `claude --resume xyz`, not `fr`
+- Agent inherits the correct working directory
+- fast-resume process is gone after handoff
+
+Each adapter returns the appropriate command:
+| Agent | Resume Command |
+|-------|----------------|
+| Claude | `["claude", "--resume", session.id]` |
+| Codex | `["codex", "resume", session.id]` |
+| Copilot | `["copilot", "--resume", session.id]` |
+| OpenCode | `["opencode", session.directory, "--session", session.id]` |
+| Vibe | `["vibe", "--resume", session.id]` |
+| Crush | `["crush"]` (no CLI resume, opens picker) |
+
+### Performance
+
+Why fast-resume feels instant:
+
+- **Tantivy (Rust)**: Search engine written in Rust, accessed via Python bindings. Handles fuzzy queries over 10k+ sessions in <10ms
+- **Incremental updates**: Only re-parse files where `mtime` changed. Second launch with no changes: ~50ms total
+- **Parallel adapters**: All adapters run simultaneously in ThreadPoolExecutor. Total time = slowest adapter, not sum
+- **Debounced search**: 50ms debounce prevents wasteful searches while typing
+- **Background workers**: Search runs in thread, UI never blocks
+- **orjson**: Rust-based JSON parsing, ~10x faster than stdlib json
+- **Streaming results**: Sessions appear as each adapter completes, not after all finish
+
+Typical performance on a machine with ~500 sessions:
+
+- Cold start (empty index): ~2s
+- Warm start (no changes): ~50ms
+- Search query: <10ms
 
 ## Development
 
