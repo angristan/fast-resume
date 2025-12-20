@@ -1,6 +1,8 @@
 """Tantivy full-text search index for sessions."""
 
 import shutil
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +13,33 @@ from .config import INDEX_DIR, MAX_PREVIEW_LENGTH, SCHEMA_VERSION
 
 # Version file to detect schema changes
 _VERSION_FILE = ".schema_version"
+
+
+@dataclass
+class IndexStats:
+    """Statistics about the index contents."""
+
+    total_sessions: int
+    sessions_by_agent: dict[str, int]
+    total_messages: int
+    oldest_session: datetime | None
+    newest_session: datetime | None
+    top_directories: list[tuple[str, int]]  # (directory, count) pairs
+    index_size_bytes: int
+    # Time breakdown
+    sessions_today: int
+    sessions_this_week: int
+    sessions_this_month: int
+    sessions_older: int
+    # Content metrics
+    total_content_chars: int
+    avg_content_chars: int
+    avg_messages_per_session: float
+    # Activity patterns
+    sessions_by_weekday: dict[str, int]  # Mon, Tue, etc.
+    sessions_by_hour: dict[int, int]  # 0-23
+    # Daily activity (date string -> (sessions, messages))
+    daily_activity: list[tuple[str, int, int]]  # (date, sessions, messages)
 
 
 class TantivyIndex:
@@ -160,6 +189,152 @@ class TantivyIndex:
         index = self._ensure_index()
         index.reload()
         return index.searcher().num_docs
+
+    def get_stats(self) -> IndexStats:
+        """Get statistics about the index contents."""
+        empty_stats = IndexStats(
+            total_sessions=0,
+            sessions_by_agent={},
+            total_messages=0,
+            oldest_session=None,
+            newest_session=None,
+            top_directories=[],
+            index_size_bytes=0,
+            sessions_today=0,
+            sessions_this_week=0,
+            sessions_this_month=0,
+            sessions_older=0,
+            total_content_chars=0,
+            avg_content_chars=0,
+            avg_messages_per_session=0.0,
+            sessions_by_weekday={},
+            sessions_by_hour={},
+            daily_activity=[],
+        )
+
+        if not self.index_path.exists() or not self._check_version():
+            return empty_stats
+
+        index = self._ensure_index()
+        index.reload()
+        searcher = index.searcher()
+
+        if searcher.num_docs == 0:
+            empty_stats.index_size_bytes = self._get_index_size()
+            return empty_stats
+
+        # Collect stats from all documents
+        agent_counts: Counter[str] = Counter()
+        dir_counts: Counter[str] = Counter()
+        weekday_counts: Counter[str] = Counter()
+        hour_counts: Counter[int] = Counter()
+        daily_sessions: Counter[str] = Counter()
+        daily_messages: Counter[str] = Counter()
+        total_messages = 0
+        total_content_chars = 0
+        oldest_ts: float | None = None
+        newest_ts: float | None = None
+
+        # Time boundaries
+        now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start.replace(day=today_start.day - today_start.weekday())
+        month_start = today_start.replace(day=1)
+
+        sessions_today = 0
+        sessions_this_week = 0
+        sessions_this_month = 0
+        sessions_older = 0
+
+        weekday_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+        all_query = tantivy.Query.all_query()
+        results = searcher.search(all_query, limit=searcher.num_docs).hits
+
+        for _score, doc_address in results:
+            doc = searcher.doc(doc_address)
+
+            agent = doc.get_first("agent")
+            if agent:
+                agent_counts[agent] += 1
+
+            directory = doc.get_first("directory")
+            if directory:
+                dir_counts[directory] += 1
+
+            msg_count = doc.get_first("message_count")
+            if msg_count:
+                total_messages += msg_count
+
+            content = doc.get_first("content")
+            if content:
+                total_content_chars += len(content)
+
+            timestamp = doc.get_first("timestamp")
+            if timestamp is not None:
+                if oldest_ts is None or timestamp < oldest_ts:
+                    oldest_ts = timestamp
+                if newest_ts is None or timestamp > newest_ts:
+                    newest_ts = timestamp
+
+                # Time breakdown
+                dt = datetime.fromtimestamp(timestamp)
+                if dt >= today_start:
+                    sessions_today += 1
+                if dt >= week_start:
+                    sessions_this_week += 1
+                if dt >= month_start:
+                    sessions_this_month += 1
+                else:
+                    sessions_older += 1
+
+                # Activity patterns
+                weekday_counts[weekday_names[dt.weekday()]] += 1
+                hour_counts[dt.hour] += 1
+
+                # Daily activity
+                date_str = dt.strftime("%Y-%m-%d")
+                daily_sessions[date_str] += 1
+                if msg_count:
+                    daily_messages[date_str] += msg_count
+
+        num_docs = searcher.num_docs
+
+        # Build daily activity list sorted by date
+        all_dates = sorted(set(daily_sessions.keys()) | set(daily_messages.keys()))
+        daily_activity = [
+            (d, daily_sessions.get(d, 0), daily_messages.get(d, 0)) for d in all_dates
+        ]
+
+        return IndexStats(
+            total_sessions=num_docs,
+            sessions_by_agent=dict(agent_counts),
+            total_messages=total_messages,
+            oldest_session=datetime.fromtimestamp(oldest_ts) if oldest_ts else None,
+            newest_session=datetime.fromtimestamp(newest_ts) if newest_ts else None,
+            top_directories=dir_counts.most_common(10),
+            index_size_bytes=self._get_index_size(),
+            sessions_today=sessions_today,
+            sessions_this_week=sessions_this_week,
+            sessions_this_month=sessions_this_month,
+            sessions_older=sessions_older,
+            total_content_chars=total_content_chars,
+            avg_content_chars=total_content_chars // num_docs if num_docs else 0,
+            avg_messages_per_session=total_messages / num_docs if num_docs else 0.0,
+            sessions_by_weekday={d: weekday_counts.get(d, 0) for d in weekday_names},
+            sessions_by_hour=dict(hour_counts),
+            daily_activity=daily_activity,
+        )
+
+    def _get_index_size(self) -> int:
+        """Get total size of the index directory in bytes."""
+        if not self.index_path.exists():
+            return 0
+        total = 0
+        for f in self.index_path.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+        return total
 
     def _doc_to_session(self, doc: tantivy.Document) -> Session | None:
         """Convert a Tantivy document to a Session object."""

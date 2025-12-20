@@ -3,10 +3,12 @@
 import os
 
 import click
+import humanize
 from rich.console import Console
 from rich.table import Table
 
-from .config import AGENTS
+from .config import AGENTS, INDEX_DIR
+from .index import TantivyIndex
 from .search import SessionSearch
 from .tui import run_tui
 
@@ -25,6 +27,7 @@ from .tui import run_tui
     "--list", "list_only", is_flag=True, help="Just list sessions, don't resume"
 )
 @click.option("--rebuild", is_flag=True, help="Force rebuild the session index")
+@click.option("--stats", is_flag=True, help="Show index statistics")
 @click.version_option()
 def main(
     query: str,
@@ -33,6 +36,7 @@ def main(
     no_tui: bool,
     list_only: bool,
     rebuild: bool,
+    stats: bool,
 ) -> None:
     """Fast fuzzy finder for coding agent session history.
 
@@ -49,6 +53,10 @@ def main(
 
         fr --no-tui           # List sessions in terminal
     """
+    if stats:
+        _show_stats()
+        return
+
     if rebuild:
         # Force rebuild index
         search = SessionSearch()
@@ -67,6 +75,125 @@ def main(
                 os.chdir(resume_dir)
             # Execute the resume command
             os.execvp(resume_cmd[0], resume_cmd)
+
+
+def _show_stats() -> None:
+    """Display index statistics."""
+    console = Console()
+    index = TantivyIndex()
+    stats = index.get_stats()
+
+    if stats.total_sessions == 0:
+        console.print(
+            "[dim]No sessions indexed yet. Run [bold]fr[/bold] to index sessions.[/dim]"
+        )
+        return
+
+    # Header
+    console.print("\n[bold]Index Statistics[/bold]\n")
+
+    # Overview table
+    overview = Table(show_header=False, box=None, padding=(0, 2))
+    overview.add_column("Label", style="dim")
+    overview.add_column("Value")
+
+    overview.add_row("Total sessions", f"[bold]{stats.total_sessions}[/bold]")
+    overview.add_row("Total messages", f"{stats.total_messages:,}")
+    overview.add_row("Avg messages/session", f"{stats.avg_messages_per_session:.1f}")
+    overview.add_row("Index size", humanize.naturalsize(stats.index_size_bytes))
+    overview.add_row("Index location", str(INDEX_DIR))
+
+    if stats.oldest_session and stats.newest_session:
+        date_range = (
+            f"{stats.oldest_session:%Y-%m-%d} to {stats.newest_session:%Y-%m-%d}"
+        )
+        overview.add_row("Date range", date_range)
+
+    console.print(overview)
+
+    # Sessions by agent
+    console.print("\n[bold]Sessions by Agent[/bold]\n")
+    agent_table = Table(show_header=True, header_style="bold")
+    agent_table.add_column("Agent")
+    agent_table.add_column("Sessions", justify="right")
+    agent_table.add_column("", justify="left")  # Bar
+
+    # Sort by count descending
+    sorted_agents = sorted(stats.sessions_by_agent.items(), key=lambda x: -x[1])
+    max_count = max(stats.sessions_by_agent.values()) if stats.sessions_by_agent else 1
+
+    for agent_name, count in sorted_agents:
+        agent_config = AGENTS.get(agent_name, {"color": "white"})
+        color = agent_config["color"]
+        bar_width = int((count / max_count) * 20)
+        bar = "[" + color + "]" + "█" * bar_width + "[/" + color + "]"
+        pct = f"({count * 100 // stats.total_sessions}%)"
+        agent_table.add_row(
+            f"[{color}]{agent_name}[/{color}]",
+            str(count),
+            f"{bar} [dim]{pct}[/dim]",
+        )
+
+    console.print(agent_table)
+
+    # Activity by day of week
+    if stats.sessions_by_weekday:
+        console.print("\n[bold]Activity by Day[/bold]\n")
+        day_table = Table(show_header=False, box=None, padding=(0, 1))
+        day_table.add_column("Day", style="dim", width=4)
+        day_table.add_column("Bar")
+        day_table.add_column("Count", justify="right", width=4)
+
+        max_day = (
+            max(stats.sessions_by_weekday.values()) if stats.sessions_by_weekday else 1
+        )
+        for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
+            count = stats.sessions_by_weekday.get(day, 0)
+            bar_width = int((count / max_day) * 20) if max_day else 0
+            bar = "[green]" + "█" * bar_width + "[/green]"
+            day_table.add_row(day, bar, str(count))
+
+        console.print(day_table)
+
+    # Activity by hour
+    if stats.sessions_by_hour:
+        console.print("\n[bold]Activity by Hour[/bold]\n")
+        # Show as a compact sparkline-style display
+        max_hour = max(stats.sessions_by_hour.values()) if stats.sessions_by_hour else 1
+        blocks = " ▁▂▃▄▅▆▇█"
+
+        hour_line = ""
+        for h in range(24):
+            count = stats.sessions_by_hour.get(h, 0)
+            idx = int((count / max_hour) * 8) if max_hour else 0
+            hour_line += blocks[idx]
+
+        console.print(f"  [dim]0h[/dim] [yellow]{hour_line}[/yellow] [dim]23h[/dim]")
+
+        # Find peak hours
+        sorted_hours = sorted(stats.sessions_by_hour.items(), key=lambda x: -x[1])
+        if sorted_hours:
+            top_hours = sorted_hours[:3]
+            peak_str = ", ".join(f"{h}:00 ({c})" for h, c in top_hours)
+            console.print(f"  [dim]Peak hours: {peak_str}[/dim]")
+
+    # Top directories
+    if stats.top_directories:
+        console.print("\n[bold]Top Directories[/bold]\n")
+        dir_table = Table(show_header=True, header_style="bold")
+        dir_table.add_column("Directory")
+        dir_table.add_column("Sessions", justify="right")
+
+        home = os.path.expanduser("~")
+        for directory, count in stats.top_directories[:10]:
+            display_dir = directory
+            if display_dir.startswith(home):
+                display_dir = "~" + display_dir[len(home) :]
+            dir_table.add_row(display_dir, str(count))
+
+        console.print(dir_table)
+
+    console.print()
 
 
 def _list_sessions(query: str, agent: str | None, directory: str | None) -> None:
