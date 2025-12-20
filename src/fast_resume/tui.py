@@ -589,24 +589,24 @@ class FastResumeApp(App):
         # Start spinner animation
         self._spinner_timer = self.set_interval(0.08, self._update_spinner)
 
-        # Try fast sync load first (cache hit), fall back to async
+        # Try fast sync load first (index hit), fall back to async
         self._initial_load()
 
     def _initial_load(self) -> None:
-        """Load sessions - sync if cached, async with streaming otherwise."""
-        # Try to get cached sessions directly (fast path)
-        cached = self.search_engine._load_from_cache()
-        if cached is not None:
-            # Cache hit - load synchronously, no flicker
-            self.search_engine._sessions = cached
-            self._total_loaded = len(cached)
+        """Load sessions - sync if index is current, async with streaming otherwise."""
+        # Try to get sessions directly from index (fast path)
+        sessions = self.search_engine._load_from_index()
+        if sessions is not None:
+            # Index is current - load synchronously, no flicker
+            self.search_engine._sessions = sessions
+            self._total_loaded = len(sessions)
             self.sessions = self.search_engine.search(
                 self.initial_query, agent_filter=self.active_filter, limit=100
             )
             self._finish_loading()
             self._update_table()
         else:
-            # Cache miss - show loading and fetch with streaming
+            # Index needs update - show loading and fetch with streaming
             self._update_table()
             self._update_session_count()
             self._do_streaming_load()

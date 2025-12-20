@@ -161,7 +161,7 @@ class OpenCodeAdapter:
 
         # Scan session files and get timestamps
         # For OpenCode, we use the 'created' timestamp from the file content
-        # (not file mtime) because that's what we store in the cache
+        # (not file mtime) because that's what we store in the index
         current_sessions: dict[str, tuple[Path, float]] = {}
 
         for project_dir in session_dir.iterdir():

@@ -122,7 +122,7 @@ class VibeAdapter:
 
         # Scan all session files and build current state
         # For Vibe, we use the 'start_time' timestamp from the file content
-        # (not file mtime) because that's what we store in the cache
+        # (not file mtime) because that's what we store in the index
         current_files: dict[str, tuple[Path, float]] = {}
 
         for session_file in VIBE_DIR.glob("session_*.json"):

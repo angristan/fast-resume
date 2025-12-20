@@ -24,7 +24,7 @@ from .tui import run_tui
 @click.option(
     "--list", "list_only", is_flag=True, help="Just list sessions, don't resume"
 )
-@click.option("--rebuild", is_flag=True, help="Force rebuild the session cache")
+@click.option("--rebuild", is_flag=True, help="Force rebuild the session index")
 @click.version_option()
 def main(
     query: str,
@@ -50,10 +50,10 @@ def main(
         fr --no-tui           # List sessions in terminal
     """
     if rebuild:
-        # Force rebuild cache
+        # Force rebuild index
         search = SessionSearch()
         search.get_all_sessions(force_refresh=True)
-        click.echo("Cache rebuilt.")
+        click.echo("Index rebuilt.")
         if not (no_tui or list_only or query):
             return
 

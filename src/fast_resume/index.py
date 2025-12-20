@@ -7,7 +7,7 @@ from pathlib import Path
 import tantivy
 
 from .adapters.base import Session
-from .config import CACHE_VERSION, MAX_PREVIEW_LENGTH, TANTIVY_INDEX_DIR
+from .config import INDEX_DIR, MAX_PREVIEW_LENGTH, SCHEMA_VERSION
 
 # Version file to detect schema changes
 _VERSION_FILE = ".schema_version"
@@ -19,7 +19,7 @@ class TantivyIndex:
     This is the single source of truth for session data.
     """
 
-    def __init__(self, index_path: Path = TANTIVY_INDEX_DIR) -> None:
+    def __init__(self, index_path: Path = INDEX_DIR) -> None:
         self.index_path = index_path
         self._index: tantivy.Index | None = None
         self._schema: tantivy.Schema | None = None
@@ -45,19 +45,19 @@ class TantivyIndex:
         return schema_builder.build()
 
     def _check_version(self) -> bool:
-        """Check if index version matches current cache version."""
+        """Check if index version matches current schema version."""
         if not self._version_file.exists():
             return False
         try:
             stored_version = int(self._version_file.read_text().strip())
-            return stored_version == CACHE_VERSION
+            return stored_version == SCHEMA_VERSION
         except (ValueError, OSError):
             return False
 
     def _write_version(self) -> None:
-        """Write current version to version file."""
+        """Write current schema version to version file."""
         self._version_file.parent.mkdir(parents=True, exist_ok=True)
-        self._version_file.write_text(str(CACHE_VERSION))
+        self._version_file.write_text(str(SCHEMA_VERSION))
 
     def _clear(self) -> None:
         """Clear the index directory."""

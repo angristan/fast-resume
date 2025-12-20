@@ -35,7 +35,7 @@ class SessionSearch:
         self._streaming_in_progress: bool = False
         self._index = TantivyIndex()
 
-    def _load_from_cache(self) -> list[Session] | None:
+    def _load_from_index(self) -> list[Session] | None:
         """Try to load sessions from index if no changes detected (fast path for TUI)."""
         # Get known sessions from Tantivy
         known = self._index.get_known_sessions()
