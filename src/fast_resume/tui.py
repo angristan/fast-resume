@@ -465,7 +465,7 @@ class FastResumeApp(App):
         Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False),
         Binding("/", "focus_search", "Search", priority=True),
-        Binding("enter", "resume_session", "Resume", priority=True),
+        Binding("enter", "resume_session", "Resume"),
         Binding("c", "copy_path", "Copy resume command", priority=True),
         Binding("tab", "toggle_preview", "Preview", priority=True),
         Binding("j", "cursor_down", "Down", show=False),
