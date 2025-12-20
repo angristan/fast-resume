@@ -800,7 +800,9 @@ class FastResumeApp(App):
             # Build full resume command: cd <dir> && <resume command>
             resume_cmd = self.search_engine.get_resume_command(self.selected_session)
             if not resume_cmd:
-                self.notify("No resume command available", severity="warning", timeout=2)
+                self.notify(
+                    "No resume command available", severity="warning", timeout=2
+                )
                 return
 
             directory = self.selected_session.directory

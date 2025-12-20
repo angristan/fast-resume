@@ -27,6 +27,7 @@ artifacts = ["src/fast_resume/assets/*.png"]
 [dependency-groups]
 dev = [
     "cairosvg>=2.8.2",
+    "pre-commit>=4.5.1",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]

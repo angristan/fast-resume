@@ -95,7 +95,10 @@ class ClaudeAdapter:
                                 # tool_result means automatic response, not human input
 
                             for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
+                                if (
+                                    isinstance(part, dict)
+                                    and part.get("type") == "text"
+                                ):
                                     text = part.get("text", "")
                                     messages.append(f"» {text}")
                                     if not first_user_message:
@@ -114,7 +117,10 @@ class ClaudeAdapter:
                             messages.append(f"  {content}")
                         elif isinstance(content, list):
                             for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
+                                if (
+                                    isinstance(part, dict)
+                                    and part.get("type") == "text"
+                                ):
                                     text = part.get("text", "")
                                     if text:
                                         messages.append(f"  {text}")

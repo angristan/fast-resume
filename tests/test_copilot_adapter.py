@@ -155,7 +155,9 @@ class TestCopilotAdapter:
         assert session is not None
         assert session.id == "my-session-file"
 
-    def test_parse_session_extracts_directory_from_folder_trust(self, adapter, temp_dir):
+    def test_parse_session_extracts_directory_from_folder_trust(
+        self, adapter, temp_dir
+    ):
         """Test directory extraction from folder_trust message."""
         session_dir = temp_dir / "session-state"
         session_dir.mkdir(parents=True)

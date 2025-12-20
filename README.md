@@ -73,6 +73,15 @@ fr --rebuild
 | OpenCode | `~/.local/share/opencode/storage/` | `opencode <dir> --session <id>` |
 | Vibe | `~/.vibe/logs/session/` | `vibe --resume <id>` |
 
+## Development
+
+```bash
+git clone https://github.com/your-username/fast-resume.git
+cd fast-resume
+uv sync
+uv run pre-commit install
+```
+
 ## How It Works
 
 1. Scans session files from each supported agent's data directory
