@@ -383,16 +383,22 @@ class FastResumeApp(App):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("escape", "quit", "Quit"),
+        Binding("escape", "quit", "Quit", priority=True),
+        Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False),
-        Binding("/", "focus_search", "Search"),
-        Binding("tab", "toggle_preview", "Preview"),
+        Binding("/", "focus_search", "Search", priority=True),
+        Binding("enter", "resume_session", "Resume", priority=True),
+        Binding("c", "copy_path", "Copy resume command", priority=True),
+        Binding("tab", "toggle_preview", "Preview", priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
         Binding("up", "cursor_up", "Up", show=False),
-        Binding("enter", "resume_session", "Resume"),
+        Binding("pagedown", "page_down", "Page Down", show=False),
+        Binding("pageup", "page_up", "Page Up", show=False),
+        Binding("plus", "increase_preview", "+Preview", show=False),
+        Binding("equals", "increase_preview", "+Preview", show=False),
+        Binding("minus", "decrease_preview", "-Preview", show=False),
         Binding("1", "filter_all", "All", show=False),
         Binding("2", "filter_claude", "Claude", show=False),
         Binding("3", "filter_codex", "Codex", show=False),
@@ -407,6 +413,7 @@ class FastResumeApp(App):
     selected_session: reactive[Session | None] = reactive(None)
     active_filter: reactive[str | None] = reactive(None)
     is_loading: reactive[bool] = reactive(True)
+    preview_height: reactive[int] = reactive(12)
     _spinner_frame: int = 0
     _spinner_chars: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -416,6 +423,7 @@ class FastResumeApp(App):
         self.initial_query = initial_query
         self.agent_filter = agent_filter
         self.sessions: list[Session] = []
+        self._displayed_sessions: list[Session] = []
         self._resume_command: list[str] | None = None
         self._resume_directory: str | None = None
         self._current_query: str = ""
@@ -657,9 +665,21 @@ class FastResumeApp(App):
         table.clear()
 
         if not self.sessions:
+            # Show empty state message
+            table.add_row(
+                "",
+                Text("No sessions found", style="dim italic"),
+                "",
+                "",
+                "",
+            )
+            self._displayed_sessions = []
             return
 
-        for session in self.sessions:
+        # Store for selection tracking
+        self._displayed_sessions = self.sessions
+
+        for session in self._displayed_sessions:
             # Get agent icon (image or text fallback)
             icon = get_agent_icon(session.agent)
 
@@ -683,22 +703,32 @@ class FastResumeApp(App):
             # Format message count
             msgs_text = str(session.message_count) if session.message_count > 0 else "-"
 
-            # Format time - right aligned with padding
+            # Format time with age-based coloring
             time_ago = format_time_ago(session.timestamp)
-            time_ago = time_ago.rjust(8)
+            time_text = Text(time_ago.rjust(8))
+            # Color based on age: green=today, yellow=this week, dim=older
+            now = datetime.now()
+            age = now - session.timestamp
+            if age.days == 0:
+                time_text.stylize("green")
+            elif age.days < 7:
+                time_text.stylize("yellow")
+            else:
+                time_text.stylize("dim")
 
-            table.add_row(icon, title, dir_text, msgs_text, time_ago)
+            table.add_row(icon, title, dir_text, msgs_text, time_text)
 
         # Select first row if available
-        if self.sessions:
+        if self._displayed_sessions:
             table.move_cursor(row=0)
             self._update_selected_session()
 
     def _update_selected_session(self) -> None:
         """Update the selected session based on cursor position."""
         table = self.query_one("#results-table", DataTable)
-        if table.cursor_row is not None and table.cursor_row < len(self.sessions):
-            self.selected_session = self.sessions[table.cursor_row]
+        displayed = getattr(self, "_displayed_sessions", self.sessions)
+        if table.cursor_row is not None and table.cursor_row < len(displayed):
+            self.selected_session = displayed[table.cursor_row]
             preview = self.query_one(SessionPreview)
             preview.update_preview(self.selected_session, self._current_query)
 
@@ -743,6 +773,84 @@ class FastResumeApp(App):
         table = self.query_one("#results-table", DataTable)
         table.action_cursor_up()
         self._update_selected_session()
+
+    def action_page_down(self) -> None:
+        """Move cursor down by a page."""
+        table = self.query_one("#results-table", DataTable)
+        # Move down by ~10 rows (approximate page)
+        for _ in range(10):
+            table.action_cursor_down()
+        self._update_selected_session()
+
+    def action_page_up(self) -> None:
+        """Move cursor up by a page."""
+        table = self.query_one("#results-table", DataTable)
+        # Move up by ~10 rows (approximate page)
+        for _ in range(10):
+            table.action_cursor_up()
+        self._update_selected_session()
+
+    def action_copy_path(self) -> None:
+        """Copy the full resume command (cd + agent resume) to clipboard."""
+        if self.selected_session:
+            import shlex
+            import subprocess
+            import sys
+
+            # Build full resume command: cd <dir> && <resume command>
+            resume_cmd = self.search_engine.get_resume_command(self.selected_session)
+            if not resume_cmd:
+                self.notify("No resume command available", severity="warning", timeout=2)
+                return
+
+            directory = self.selected_session.directory
+            cmd_str = shlex.join(resume_cmd)
+            full_cmd = f"cd {shlex.quote(directory)} && {cmd_str}"
+
+            try:
+                if sys.platform == "darwin":
+                    subprocess.run(["pbcopy"], input=full_cmd.encode(), check=True)
+                elif sys.platform == "win32":
+                    subprocess.run(["clip"], input=full_cmd.encode(), check=True)
+                else:
+                    # Linux - try xclip or xsel
+                    try:
+                        subprocess.run(
+                            ["xclip", "-selection", "clipboard"],
+                            input=full_cmd.encode(),
+                            check=True,
+                        )
+                    except FileNotFoundError:
+                        subprocess.run(
+                            ["xsel", "--clipboard", "--input"],
+                            input=full_cmd.encode(),
+                            check=True,
+                        )
+                self.notify(f"Copied: {full_cmd}", timeout=3)
+            except Exception:
+                # Fallback: show command in notification if clipboard fails
+                self.notify(
+                    f"{full_cmd}",
+                    title="Clipboard unavailable",
+                    timeout=5,
+                )
+
+    def action_increase_preview(self) -> None:
+        """Increase preview pane height."""
+        if self.preview_height < 30:
+            self.preview_height += 3
+            self._apply_preview_height()
+
+    def action_decrease_preview(self) -> None:
+        """Decrease preview pane height."""
+        if self.preview_height > 6:
+            self.preview_height -= 3
+            self._apply_preview_height()
+
+    def _apply_preview_height(self) -> None:
+        """Apply the current preview height to the container."""
+        preview_container = self.query_one("#preview-container")
+        preview_container.styles.height = self.preview_height
 
     def action_resume_session(self) -> None:
         """Resume the selected session."""
