@@ -113,17 +113,23 @@ class SessionSearch:
 
         return self._sessions
 
-    def get_sessions_streaming(
-        self, on_progress: Callable[[list[Session]], None]
-    ) -> list[Session]:
-        """Load sessions with progress callback for each adapter that completes."""
+    def get_sessions_streaming(self, on_progress: Callable[[], None]) -> list[Session]:
+        """Load sessions with progress callback for each adapter that completes.
+
+        Sessions are indexed incrementally as each adapter completes, allowing
+        Tantivy search to work during streaming.
+        """
         # Get known sessions from Tantivy
         known = self._index.get_known_sessions()
 
+        # Pre-populate _sessions_by_id with existing sessions from index
+        # so search() can find them during streaming
+        existing_sessions = self._index.get_all_sessions()
+        for session in existing_sessions:
+            self._sessions_by_id[session.id] = session
+
         # Mark streaming as in progress
         self._streaming_in_progress = True
-        all_new_or_modified: list[Session] = []
-        all_deleted_ids: list[str] = []
 
         def get_incremental(adapter):
             return adapter.find_sessions_incremental(known)
@@ -135,33 +141,30 @@ class SessionSearch:
                 }
                 for future in as_completed(futures):
                     new_or_modified, deleted_ids = future.result()
-                    all_new_or_modified.extend(new_or_modified)
-                    all_deleted_ids.extend(deleted_ids)
 
-                    # Report progress with current sessions from index + new ones
-                    # For streaming, we build up partial results
-                    current_sessions = self._index.get_all_sessions()
-                    # Add newly found sessions (not yet in index)
-                    existing_ids = {s.id for s in current_sessions}
-                    for session in all_new_or_modified:
-                        if session.id not in existing_ids:
-                            current_sessions.append(session)
-                    # Remove deleted
-                    deleted_set = set(all_deleted_ids)
-                    current_sessions = [
-                        s for s in current_sessions if s.id not in deleted_set
-                    ]
-                    current_sessions.sort(key=lambda s: s.timestamp, reverse=True)
-                    on_progress(current_sessions)
+                    # Skip if no changes from this adapter
+                    if not new_or_modified and not deleted_ids:
+                        continue
+
+                    # Handle deletions first
+                    if deleted_ids:
+                        self._index.delete_sessions(deleted_ids)
+                        for sid in deleted_ids:
+                            self._sessions_by_id.pop(sid, None)
+
+                    # Index incrementally + update _sessions_by_id for search lookup
+                    if new_or_modified:
+                        # Delete modified sessions before re-adding (avoid duplicates)
+                        modified_ids = [s.id for s in new_or_modified]
+                        self._index.delete_sessions(modified_ids)
+                        self._index.add_sessions(new_or_modified)
+                        for session in new_or_modified:
+                            self._sessions_by_id[session.id] = session
+
+                    # Notify progress - TUI will query the index
+                    on_progress()
         finally:
             self._streaming_in_progress = False
-
-        # Apply all changes to index
-        self._index.delete_sessions(all_deleted_ids)
-        # Delete modified sessions before re-adding (avoid duplicates)
-        modified_ids = [s.id for s in all_new_or_modified]
-        self._index.delete_sessions(modified_ids)
-        self._index.add_sessions(all_new_or_modified)
 
         # Load final state from index
         self._sessions = self._index.get_all_sessions()
@@ -179,11 +182,18 @@ class SessionSearch:
         limit: int = 100,
     ) -> list[Session]:
         """Search sessions using Tantivy full-text search with fuzzy matching."""
-        # Ensure sessions are loaded (populates _sessions_by_id)
-        sessions = self.get_all_sessions()
+        # During streaming, _sessions_by_id is updated incrementally
+        # Only call get_all_sessions() if not streaming and no sessions loaded yet
+        if not self._streaming_in_progress and self._sessions is None:
+            self.get_all_sessions()
 
         # If no query, return filtered sessions by timestamp
         if not query:
+            sessions = sorted(
+                self._sessions_by_id.values(),
+                key=lambda s: s.timestamp,
+                reverse=True,
+            )
             if agent_filter:
                 sessions = [s for s in sessions if s.agent == agent_filter]
             if directory_filter:
@@ -209,6 +219,10 @@ class SessionSearch:
                 matched_sessions.append(session)
 
         return matched_sessions[:limit]
+
+    def get_session_count(self) -> int:
+        """Get the total number of sessions in the index."""
+        return self._index.get_session_count()
 
     def get_adapter_for_session(self, session: Session):
         """Get the adapter for a session."""

@@ -705,13 +705,14 @@ class FastResumeApp(App):
     def _do_streaming_load(self) -> None:
         """Load sessions with progressive updates as each adapter completes."""
 
-        def on_progress(all_sessions: list[Session]):
-            # Track total loaded and filter for display
-            total = len(all_sessions)
-            filtered = all_sessions
-            if self.active_filter:
-                filtered = [s for s in all_sessions if s.agent == self.active_filter]
-            self.call_from_thread(self._update_results_streaming, filtered[:100], total)
+        def on_progress():
+            # Use Tantivy search with initial_query
+            query = self.initial_query
+            sessions = self.search_engine.search(
+                query, agent_filter=self.active_filter, limit=100
+            )
+            total = self.search_engine.get_session_count()
+            self.call_from_thread(self._update_results_streaming, sessions, total)
 
         self.search_engine.get_sessions_streaming(on_progress)
         # Mark loading complete

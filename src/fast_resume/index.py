@@ -150,6 +150,15 @@ class TantivyIndex:
 
         return sessions
 
+    def get_session_count(self) -> int:
+        """Get the total number of sessions in the index."""
+        if not self.index_path.exists() or not self._check_version():
+            return 0
+
+        index = self._ensure_index()
+        index.reload()
+        return index.searcher().num_docs
+
     def _doc_to_session(self, doc: tantivy.Document) -> Session | None:
         """Convert a Tantivy document to a Session object."""
         try:
