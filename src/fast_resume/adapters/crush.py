@@ -244,6 +244,7 @@ class CrushAdapter:
                 # Use 1ms tolerance for comparison due to datetime precision loss
                 session_mtime = session.timestamp.timestamp()
                 if known_entry is None or session_mtime > known_entry[0] + 0.001:
+                    session.mtime = session_mtime
                     new_or_modified.append(session)
 
         # Find deleted sessions

@@ -22,7 +22,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Storage location
 INDEX_DIR = Path.home() / ".cache" / "fast-resume" / "tantivy_index"
-SCHEMA_VERSION = 11  # Bump when schema changes
+SCHEMA_VERSION = 12  # Bump when schema changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

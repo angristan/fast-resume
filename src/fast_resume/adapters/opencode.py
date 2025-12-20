@@ -186,11 +186,11 @@ class OpenCodeAdapter:
 
         # Check which sessions need parsing
         # Use 1ms tolerance for mtime comparison due to datetime precision loss
-        sessions_to_parse: list[tuple[str, Path]] = []
+        sessions_to_parse: list[tuple[str, Path, float]] = []
         for session_id, (path, mtime) in current_sessions.items():
             known_entry = known.get(session_id)
             if known_entry is None or mtime > known_entry[0] + 0.001:
-                sessions_to_parse.append((session_id, path))
+                sessions_to_parse.append((session_id, path, mtime))
 
         # Find deleted sessions
         current_ids = set(current_sessions.keys())
@@ -237,9 +237,10 @@ class OpenCodeAdapter:
 
         # Parse the changed sessions
         new_or_modified = []
-        for session_id, path in sessions_to_parse:
+        for session_id, path, mtime in sessions_to_parse:
             session = self._parse_session(path, messages_by_session, parts_by_message)
             if session:
+                session.mtime = mtime
                 new_or_modified.append(session)
 
         return new_or_modified, deleted_ids

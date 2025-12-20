@@ -113,11 +113,16 @@ class SessionSearch:
 
         return self._sessions
 
-    def get_sessions_streaming(self, on_progress: Callable[[], None]) -> list[Session]:
+    def get_sessions_streaming(
+        self, on_progress: Callable[[], None]
+    ) -> tuple[list[Session], int, int, int]:
         """Load sessions with progress callback for each adapter that completes.
 
         Sessions are indexed incrementally as each adapter completes, allowing
         Tantivy search to work during streaming.
+
+        Returns:
+            Tuple of (sessions, new_count, updated_count, deleted_count)
         """
         # Get known sessions from Tantivy
         known = self._index.get_known_sessions()
@@ -130,6 +135,9 @@ class SessionSearch:
 
         # Mark streaming as in progress
         self._streaming_in_progress = True
+        total_new = 0
+        total_updated = 0
+        total_deleted = 0
 
         def get_incremental(adapter):
             return adapter.find_sessions_incremental(known)
@@ -151,6 +159,7 @@ class SessionSearch:
                         self._index.delete_sessions(deleted_ids)
                         for sid in deleted_ids:
                             self._sessions_by_id.pop(sid, None)
+                        total_deleted += len(deleted_ids)
 
                     # Index incrementally + update _sessions_by_id for search lookup
                     if new_or_modified:
@@ -160,6 +169,11 @@ class SessionSearch:
                         self._index.add_sessions(new_or_modified)
                         for session in new_or_modified:
                             self._sessions_by_id[session.id] = session
+                            # Count new vs updated
+                            if session.id in known:
+                                total_updated += 1
+                            else:
+                                total_new += 1
 
                     # Notify progress - TUI will query the index
                     on_progress()
@@ -172,7 +186,7 @@ class SessionSearch:
             self._sessions_by_id[session.id] = session
         self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
 
-        return self._sessions
+        return self._sessions, total_new, total_updated, total_deleted
 
     def search(
         self,

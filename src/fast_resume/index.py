@@ -42,6 +42,8 @@ class TantivyIndex:
         schema_builder.add_float_field("timestamp", stored=True)
         # Message count - stored as integer
         schema_builder.add_integer_field("message_count", stored=True)
+        # File modification time - for incremental updates
+        schema_builder.add_float_field("mtime", stored=True)
         return schema_builder.build()
 
     def _check_version(self) -> bool:
@@ -89,10 +91,10 @@ class TantivyIndex:
         return self._index
 
     def get_known_sessions(self) -> dict[str, tuple[float, str]]:
-        """Get all session IDs with their timestamps and agents.
+        """Get all session IDs with their mtimes and agents.
 
         Returns:
-            Dict mapping session_id to (timestamp, agent) tuple.
+            Dict mapping session_id to (mtime, agent) tuple.
         """
         if not self.index_path.exists() or not self._check_version():
             return {}
@@ -113,10 +115,10 @@ class TantivyIndex:
         for _score, doc_address in results:
             doc = searcher.doc(doc_address)
             session_id = doc.get_first("id")
-            timestamp = doc.get_first("timestamp")
+            mtime = doc.get_first("mtime")
             agent = doc.get_first("agent")
-            if session_id and timestamp is not None and agent:
-                known[session_id] = (timestamp, agent)
+            if session_id and mtime is not None and agent:
+                known[session_id] = (mtime, agent)
 
         return known
 
@@ -181,6 +183,7 @@ class TantivyIndex:
                 preview=content[:MAX_PREVIEW_LENGTH],
                 content=content,
                 message_count=doc.get_first("message_count") or 0,
+                mtime=doc.get_first("mtime") or 0.0,
             )
         except Exception:
             return None
@@ -213,6 +216,7 @@ class TantivyIndex:
                     content=session.content,
                     timestamp=session.timestamp.timestamp(),
                     message_count=session.message_count,
+                    mtime=session.mtime,
                 )
             )
         writer.commit()

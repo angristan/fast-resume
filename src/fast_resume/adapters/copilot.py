@@ -157,6 +157,7 @@ class CopilotAdapter:
             if known_entry is None or mtime > known_entry[0] + 0.001:
                 session = self._parse_session(path)
                 if session:
+                    session.mtime = mtime
                     new_or_modified.append(session)
 
         # Find deleted sessions

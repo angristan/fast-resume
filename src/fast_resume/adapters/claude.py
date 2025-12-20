@@ -193,6 +193,7 @@ class ClaudeAdapter:
                 # New or modified - parse it
                 session = self._parse_session(path)
                 if session:
+                    session.mtime = mtime
                     new_or_modified.append(session)
 
         # Find deleted sessions (in known but not in current, for this agent only)

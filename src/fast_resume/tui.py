@@ -714,9 +714,11 @@ class FastResumeApp(App):
             total = self.search_engine.get_session_count()
             self.call_from_thread(self._update_results_streaming, sessions, total)
 
-        self.search_engine.get_sessions_streaming(on_progress)
-        # Mark loading complete
-        self.call_from_thread(self._finish_loading)
+        _, new, updated, deleted = self.search_engine.get_sessions_streaming(
+            on_progress
+        )
+        # Mark loading complete and show toast if there were changes
+        self.call_from_thread(self._finish_loading, new, updated, deleted)
 
     def _update_results_streaming(self, sessions: list[Session], total: int) -> None:
         """Update UI with streaming results (keeps loading state)."""
@@ -725,13 +727,35 @@ class FastResumeApp(App):
         self._update_table()
         self._update_session_count()
 
-    def _finish_loading(self) -> None:
-        """Mark loading as complete."""
+    def _finish_loading(self, new: int = 0, updated: int = 0, deleted: int = 0) -> None:
+        """Mark loading as complete and show toast if there were changes."""
         self.is_loading = False
         if hasattr(self, "_spinner_timer"):
             self._spinner_timer.stop()
         self._update_spinner()
         self._update_session_count()
+
+        # Show toast if there were changes
+        if new or updated or deleted:
+            parts = []
+            # Put "session(s)" on the first item only
+            if new:
+                parts.append(f"{new} new session{'s' if new != 1 else ''}")
+            if updated:
+                if not parts:  # First item
+                    parts.append(
+                        f"{updated} session{'s' if updated != 1 else ''} updated"
+                    )
+                else:
+                    parts.append(f"{updated} updated")
+            if deleted:
+                if not parts:  # First item
+                    parts.append(
+                        f"{deleted} session{'s' if deleted != 1 else ''} deleted"
+                    )
+                else:
+                    parts.append(f"{deleted} deleted")
+            self.notify(", ".join(parts), title="Index updated")
 
     @work(exclusive=True, thread=True)
     def _do_search(self, query: str) -> None:
