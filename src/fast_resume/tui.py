@@ -77,7 +77,7 @@ def highlight_matches(
     Returns a Rich Text object with matches highlighted.
     """
     if max_len and len(text) > max_len:
-        text = text[:max_len] + "..."
+        text = text[: max_len - 3] + "..."
 
     if not query:
         return Text(text)
@@ -475,12 +475,10 @@ class FastResumeApp(App):
             self._col_date,
         ) = table.add_columns("Agent", "Title", "Directory", "Turns", "Date")
 
-        # Set fixed column widths
-        self._agent_width = 12
-        self._dir_width = 22
-        self._date_width = 10
+        # Initialize column widths immediately based on current size
+        self._update_column_widths()
 
-        # Delay column width calculation until layout is ready
+        # Also update after layout is fully ready (in case size changes)
         self.call_after_refresh(self._update_column_widths)
 
         # Set initial filter state from agent_filter parameter
@@ -549,6 +547,9 @@ class FastResumeApp(App):
         """Handle terminal resize."""
         if hasattr(self, "_col_agent"):
             self._update_column_widths()
+            # Re-render rows with new truncation widths
+            if self.sessions:
+                self._update_table()
 
     def _update_column_widths(self) -> None:
         """Update column widths based on terminal size."""
@@ -663,7 +664,7 @@ class FastResumeApp(App):
             icon = get_agent_icon(session.agent)
 
             # Title - truncate and highlight matches
-            max_title = getattr(self, "_title_width", 60) - 3
+            max_title = getattr(self, "_title_width", 60)
             title = highlight_matches(
                 session.title, self._current_query, max_len=max_title
             )
@@ -671,8 +672,8 @@ class FastResumeApp(App):
             # Format directory - truncate based on column width
             dir_w = getattr(self, "_dir_width", 22)
             directory = format_directory(session.directory)
-            if dir_w > 0 and len(directory) > dir_w - 2:
-                directory = "..." + directory[-(dir_w - 5) :]
+            if dir_w > 0 and len(directory) > dir_w:
+                directory = "..." + directory[-(dir_w - 3) :]
             dir_text = (
                 highlight_matches(directory, self._current_query)
                 if dir_w > 0
