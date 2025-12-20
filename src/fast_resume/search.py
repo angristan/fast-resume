@@ -96,12 +96,8 @@ class SessionSearch:
         # Apply deletions to index
         self._index.delete_sessions(all_deleted_ids)
 
-        # Delete modified sessions before re-adding (avoid duplicates)
-        modified_ids = [s.id for s in all_new_or_modified]
-        self._index.delete_sessions(modified_ids)
-
-        # Apply additions/updates to index
-        self._index.add_sessions(all_new_or_modified)
+        # Update modified sessions atomically (delete + add in single transaction)
+        self._index.update_sessions(all_new_or_modified)
 
         # Load all sessions from index
         self._sessions = self._index.get_all_sessions()
@@ -163,10 +159,8 @@ class SessionSearch:
 
                     # Index incrementally + update _sessions_by_id for search lookup
                     if new_or_modified:
-                        # Delete modified sessions before re-adding (avoid duplicates)
-                        modified_ids = [s.id for s in new_or_modified]
-                        self._index.delete_sessions(modified_ids)
-                        self._index.add_sessions(new_or_modified)
+                        # Update atomically (delete + add in single transaction)
+                        self._index.update_sessions(new_or_modified)
                         for session in new_or_modified:
                             self._sessions_by_id[session.id] = session
                             # Count new vs updated

@@ -28,8 +28,8 @@ class TantivyIndex:
     def _build_schema(self) -> tantivy.Schema:
         """Build the Tantivy schema for sessions."""
         schema_builder = tantivy.SchemaBuilder()
-        # ID field - stored for retrieval
-        schema_builder.add_text_field("id", stored=True)
+        # ID field - stored and indexed with raw tokenizer for exact term matching
+        schema_builder.add_text_field("id", stored=True, tokenizer_name="raw")
         # Title - stored and indexed for search
         schema_builder.add_text_field("title", stored=True)
         # Directory - stored and indexed
@@ -206,6 +206,33 @@ class TantivyIndex:
 
         index = self._ensure_index()
         writer = index.writer()
+        for session in sessions:
+            writer.add_document(
+                tantivy.Document(
+                    id=session.id,
+                    title=session.title,
+                    directory=session.directory,
+                    agent=session.agent,
+                    content=session.content,
+                    timestamp=session.timestamp.timestamp(),
+                    message_count=session.message_count,
+                    mtime=session.mtime,
+                )
+            )
+        writer.commit()
+        self._write_version()
+
+    def update_sessions(self, sessions: list[Session]) -> None:
+        """Update sessions in the index (delete then add in a single transaction)."""
+        if not sessions:
+            return
+
+        index = self._ensure_index()
+        writer = index.writer()
+        # Delete existing documents first
+        for session in sessions:
+            writer.delete_documents_by_term("id", session.id)
+        # Add new versions
         for session in sessions:
             writer.add_document(
                 tantivy.Document(
