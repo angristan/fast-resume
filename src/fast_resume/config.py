@@ -20,7 +20,7 @@ CRUSH_PROJECTS_FILE = Path.home() / ".local" / "share" / "crush" / "projects.jso
 
 # Cache location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
-CACHE_VERSION = 3  # Bump when adapter output format changes
+CACHE_VERSION = 5  # Bump when adapter output format changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

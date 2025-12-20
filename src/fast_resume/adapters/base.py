@@ -16,6 +16,7 @@ class Session:
     timestamp: datetime
     preview: str  # First ~500 chars of content for display
     content: str  # Full searchable content
+    message_count: int = 0  # Number of user + assistant messages
 
 
 class AgentAdapter(Protocol):

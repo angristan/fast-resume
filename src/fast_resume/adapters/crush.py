@@ -147,6 +147,7 @@ class CrushAdapter:
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
+                message_count=len(messages),
             )
         except Exception:
             return None

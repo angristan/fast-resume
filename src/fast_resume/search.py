@@ -107,6 +107,7 @@ class SessionSearch:
                         timestamp=datetime.fromisoformat(s["timestamp"]),
                         preview=s["preview"],
                         content=s["content"],
+                        message_count=s.get("message_count", 0),
                     )
                 )
             return sessions
@@ -128,6 +129,7 @@ class SessionSearch:
                         "timestamp": s.timestamp.isoformat(),
                         "preview": s.preview,
                         "content": s.content,
+                        "message_count": s.message_count,
                     }
                     for s in sessions
                 ],

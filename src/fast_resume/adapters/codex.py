@@ -40,7 +40,7 @@ class CodexAdapter:
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
-            user_prompts: list[str] = []  # Clean user prompts for title
+            user_prompts: list[str] = []  # Actual human inputs for title and count
 
             with open(session_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -59,7 +59,7 @@ class CodexAdapter:
                         session_id = payload.get("id", "")
                         directory = payload.get("cwd", "")
 
-                    # Extract user messages (for content, but filter for title)
+                    # Extract response items for preview content
                     if msg_type == "response_item":
                         role = payload.get("role", "")
                         content = payload.get("content", [])
@@ -77,7 +77,7 @@ class CodexAdapter:
                                         ):
                                             messages.append(f"{role_prefix}{text}")
 
-                    # Extract event messages (user prompts) - best source for title
+                    # Extract event messages (user prompts) - actual human inputs
                     if msg_type == "event_msg":
                         event_type = payload.get("type", "")
                         if event_type == "user_message":
@@ -118,6 +118,7 @@ class CodexAdapter:
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
+                message_count=len(user_prompts),
             )
         except Exception:
             return None

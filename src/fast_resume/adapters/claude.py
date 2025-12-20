@@ -48,6 +48,8 @@ class ClaudeAdapter:
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
+            # Count actual human interactions (not tool results)
+            human_turn_count = 0
 
             with open(session_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -68,36 +70,56 @@ class ClaudeAdapter:
                     if msg_type == "user" and not directory:
                         directory = data.get("cwd", "")
 
-                    # Extract message content
-                    if msg_type in ("user", "assistant"):
+                    # Process user messages
+                    if msg_type == "user":
                         msg = data.get("message", {})
                         content = msg.get("content", "")
-                        role_prefix = "» " if msg_type == "user" else "  "
+
+                        # Check if this is a real human input or automatic tool result
+                        is_human_input = False
                         if isinstance(content, str):
-                            # Skip meta messages and commands
+                            is_human_input = True
                             if not data.get("isMeta") and not content.startswith(
                                 ("<command", "<local-command")
                             ):
-                                messages.append(f"{role_prefix}{content}")
-                                if (
-                                    msg_type == "user"
-                                    and not first_user_message
-                                    and len(content) > 10
-                                ):
+                                messages.append(f"» {content}")
+                                if not first_user_message and len(content) > 10:
                                     first_user_message = content
                         elif isinstance(content, list):
+                            # Check first part - if it's text (not tool_result), it's human
+                            first_part = content[0] if content else {}
+                            if isinstance(first_part, dict):
+                                part_type = first_part.get("type", "")
+                                if part_type == "text":
+                                    is_human_input = True
+                                # tool_result means automatic response, not human input
+
                             for part in content:
-                                if isinstance(part, dict):
-                                    if part.get("type") == "text":
-                                        text = part.get("text", "")
-                                        messages.append(f"{role_prefix}{text}")
-                                        if (
-                                            msg_type == "user"
-                                            and not first_user_message
-                                        ):
-                                            first_user_message = text
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text = part.get("text", "")
+                                    messages.append(f"» {text}")
+                                    if not first_user_message:
+                                        first_user_message = text
                                 elif isinstance(part, str):
-                                    messages.append(f"{role_prefix}{part}")
+                                    messages.append(f"» {part}")
+
+                        if is_human_input:
+                            human_turn_count += 1
+
+                    # Extract assistant content for preview (no need to count)
+                    if msg_type == "assistant":
+                        msg = data.get("message", {})
+                        content = msg.get("content", "")
+                        if isinstance(content, str) and content:
+                            messages.append(f"  {content}")
+                        elif isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text = part.get("text", "")
+                                    if text:
+                                        messages.append(f"  {text}")
+                                elif isinstance(part, str):
+                                    messages.append(f"  {part}")
 
             # Skip sessions with no actual user message
             if not first_user_message:
@@ -125,6 +147,7 @@ class ClaudeAdapter:
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
+                message_count=human_turn_count,
             )
         except Exception:
             return None

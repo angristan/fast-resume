@@ -461,9 +461,13 @@ class FastResumeApp(App):
     def on_mount(self) -> None:
         """Set up the app when mounted."""
         table = self.query_one("#results-table", DataTable)
-        self._col_agent, self._col_title, self._col_dir, self._col_date = (
-            table.add_columns("Agent", "Title", "Directory", "Date")
-        )
+        (
+            self._col_agent,
+            self._col_title,
+            self._col_dir,
+            self._col_msgs,
+            self._col_date,
+        ) = table.add_columns("Agent", "Title", "Directory", "Turns", "Date")
 
         # Set fixed column widths
         self._agent_width = 12
@@ -552,24 +556,28 @@ class FastResumeApp(App):
             # Wide: show everything
             agent_w = 14
             dir_w = 30
+            msgs_w = 6
             date_w = 18
         elif width >= 90:
             # Medium: slightly smaller
             agent_w = 12
             dir_w = 22
+            msgs_w = 5
             date_w = 15
         elif width >= 60:
             # Narrow: compact
             agent_w = 12
             dir_w = 16
+            msgs_w = 5
             date_w = 12
         else:
             # Very narrow: minimal
             agent_w = 10
             dir_w = 0  # hide directory
+            msgs_w = 4
             date_w = 10
 
-        title_w = max(15, width - agent_w - dir_w - date_w - padding)
+        title_w = max(15, width - agent_w - dir_w - msgs_w - date_w - padding)
 
         # Disable auto_width and set explicit widths
         for col in table.columns.values():
@@ -578,6 +586,7 @@ class FastResumeApp(App):
         table.columns[self._col_agent].width = agent_w
         table.columns[self._col_title].width = title_w
         table.columns[self._col_dir].width = dir_w
+        table.columns[self._col_msgs].width = msgs_w
         table.columns[self._col_date].width = date_w
 
         # Store for truncation
@@ -664,11 +673,14 @@ class FastResumeApp(App):
                 else Text("")
             )
 
+            # Format message count
+            msgs_text = str(session.message_count) if session.message_count > 0 else "-"
+
             # Format time - right aligned with padding
             time_ago = format_time_ago(session.timestamp)
             time_ago = time_ago.rjust(8)
 
-            table.add_row(icon, title, dir_text, time_ago)
+            table.add_row(icon, title, dir_text, msgs_text, time_ago)
 
         # Select first row if available
         if self.sessions:
