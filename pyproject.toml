@@ -8,10 +8,10 @@ dependencies = [
     "textual>=0.47.0",
     "rich>=13.0.0",
     "click>=8.0.0",
-    "rapidfuzz>=3.0.0",
     "humanize>=4.14.0",
     "textual-image>=0.8.4",
     "orjson>=3.10.0",
+    "tantivy>=0.25.0",
 ]
 
 [project.scripts]

@@ -2,13 +2,10 @@
 
 import hashlib
 import orjson
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
-
-from rapidfuzz import fuzz, process
 
 from .adapters import (
     ClaudeAdapter,
@@ -29,6 +26,7 @@ from .config import (
     OPENCODE_DIR,
     VIBE_DIR,
 )
+from .index import TantivyIndex
 
 
 def _get_dir_mtime(path: Path) -> float:
@@ -75,11 +73,13 @@ class SessionSearch:
             VibeAdapter(),
         ]
         self._sessions: list[Session] | None = None
+        self._sessions_by_id: dict[str, Session] = {}
         self._streaming_in_progress: bool = False
         self._cache_file = CACHE_DIR / "sessions.json"
         self._cache_key: str | None = (
             None  # Cache the key to avoid repeated mtime checks
         )
+        self._index = TantivyIndex()
 
     def _get_cache_key(self) -> str:
         """Get cache key, computing it only once per instance."""
@@ -97,34 +97,40 @@ class SessionSearch:
                 data = orjson.loads(f.read())
 
             # Check if cache is valid
-            if data.get("key") != self._get_cache_key():
+            cache_key = self._get_cache_key()
+            if data.get("key") != cache_key:
+                return None
+
+            # Also check if Tantivy index needs rebuild
+            if self._index.needs_rebuild(cache_key):
                 return None
 
             # Reconstruct sessions
             sessions = []
             for s in data.get("sessions", []):
-                sessions.append(
-                    Session(
-                        id=s["id"],
-                        agent=s["agent"],
-                        title=s["title"],
-                        directory=s["directory"],
-                        timestamp=datetime.fromisoformat(s["timestamp"]),
-                        preview=s["preview"],
-                        content=s["content"],
-                        message_count=s.get("message_count", 0),
-                    )
+                session = Session(
+                    id=s["id"],
+                    agent=s["agent"],
+                    title=s["title"],
+                    directory=s["directory"],
+                    timestamp=datetime.fromisoformat(s["timestamp"]),
+                    preview=s["preview"],
+                    content=s["content"],
+                    message_count=s.get("message_count", 0),
                 )
+                sessions.append(session)
+                self._sessions_by_id[session.id] = session
             return sessions
         except Exception:
             return None
 
     def _save_to_cache(self, sessions: list[Session]) -> None:
-        """Save sessions to cache."""
+        """Save sessions to cache and build Tantivy index."""
+        cache_key = self._get_cache_key()
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             data = {
-                "key": self._get_cache_key(),
+                "key": cache_key,
                 "sessions": [
                     {
                         "id": s.id,
@@ -141,6 +147,9 @@ class SessionSearch:
             }
             with open(self._cache_file, "wb") as f:
                 f.write(orjson.dumps(data))
+
+            # Build Tantivy index
+            self._index.build_index(sessions, cache_key)
         except Exception:
             pass  # Cache write failure is not critical
 
@@ -178,7 +187,10 @@ class SessionSearch:
         sessions.sort(key=lambda s: s.timestamp, reverse=True)
         self._sessions = sessions
 
-        # Save to cache in background
+        # Build sessions_by_id lookup
+        self._sessions_by_id = {s.id: s for s in sessions}
+
+        # Save to cache and build Tantivy index
         self._save_to_cache(sessions)
 
         return sessions
@@ -211,6 +223,9 @@ class SessionSearch:
                     result = future.result()
                     if result:
                         self._sessions.extend(result)
+                        # Update sessions_by_id lookup
+                        for s in result:
+                            self._sessions_by_id[s.id] = s
                         # Sort and report progress
                         self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
                         on_progress(self._sessions.copy())
@@ -220,31 +235,6 @@ class SessionSearch:
         self._save_to_cache(self._sessions)
         return self._sessions
 
-    def _compute_hybrid_score(
-        self, query: str, searchable: str, fuzzy_score: float
-    ) -> float:
-        """Compute hybrid score combining fuzzy matching with exact match bonuses."""
-        query_lower = query.lower()
-        searchable_lower = searchable.lower()
-
-        # Exact substring bonus - query appears verbatim
-        exact_bonus = 25 if query_lower in searchable_lower else 0
-
-        # Token match bonus - all query words present
-        tokens = query_lower.split()
-        token_bonus = 15 if all(t in searchable_lower for t in tokens) else 0
-
-        # Phrase/consecutive words bonus - words appear together in order
-        phrase_bonus = 0
-        if len(tokens) > 1:
-            # Check if tokens appear consecutively (with some flexibility for punctuation)
-            # Build pattern: word1.*?word2 with small gap allowed
-            pattern = r"\b" + r"\W{0,3}".join(re.escape(t) for t in tokens) + r"\b"
-            if re.search(pattern, searchable_lower):
-                phrase_bonus = 30
-
-        return fuzzy_score + exact_bonus + token_bonus + phrase_bonus
-
     def search(
         self,
         query: str,
@@ -252,61 +242,37 @@ class SessionSearch:
         directory_filter: str | None = None,
         limit: int = 100,
     ) -> list[Session]:
-        """Search sessions with hybrid fuzzy + exact matching."""
+        """Search sessions using Tantivy full-text search with fuzzy matching."""
+        # Ensure sessions are loaded (populates _sessions_by_id)
         sessions = self.get_all_sessions()
 
-        # Apply agent filter
-        if agent_filter:
-            sessions = [s for s in sessions if s.agent == agent_filter]
-
-        # Apply directory filter
-        if directory_filter:
-            sessions = [
-                s for s in sessions if directory_filter.lower() in s.directory.lower()
-            ]
-
+        # If no query, return filtered sessions by timestamp
         if not query:
+            if agent_filter:
+                sessions = [s for s in sessions if s.agent == agent_filter]
+            if directory_filter:
+                sessions = [
+                    s
+                    for s in sessions
+                    if directory_filter.lower() in s.directory.lower()
+                ]
             return sessions[:limit]
 
-        # Build searchable strings: combine title, directory, and content
-        choices = []
-        for session in sessions:
-            # Weight title and directory higher by including them multiple times
-            searchable = (
-                f"{session.title} {session.title} {session.directory} {session.content}"
-            )
-            choices.append((session, searchable))
+        # Use Tantivy for fuzzy search
+        results = self._index.search(query, agent_filter=agent_filter, limit=limit)
 
-        # Use rapidfuzz for fuzzy matching
-        results = process.extract(
-            query,
-            {i: c[1] for i, c in enumerate(choices)},
-            scorer=fuzz.WRatio,
-            limit=min(limit * 2, len(choices)),  # Get more results for re-ranking
-        )
-
-        # Re-rank with hybrid scoring
-        scored_results = []
-        for match in results:
-            idx = match[2]  # Index in choices
-            fuzzy_score = match[1]
-            if fuzzy_score > 40:  # Lower threshold since we'll re-rank
-                searchable = choices[idx][1]
-                hybrid_score = self._compute_hybrid_score(
-                    query, searchable, fuzzy_score
-                )
-                scored_results.append((choices[idx][0], hybrid_score))
-
-        # Sort by hybrid score descending
-        scored_results.sort(key=lambda x: x[1], reverse=True)
-
-        # Return sessions above threshold
+        # Lookup full session objects from results
         matched_sessions = []
-        for session, score in scored_results[:limit]:
-            if score > 50:
+        for session_id, _score in results:
+            session = self._sessions_by_id.get(session_id)
+            if session:
+                # Apply directory filter (substring match not supported in FTS)
+                if directory_filter:
+                    if directory_filter.lower() not in session.directory.lower():
+                        continue
                 matched_sessions.append(session)
 
-        return matched_sessions
+        return matched_sessions[:limit]
 
     def get_adapter_for_session(self, session: Session):
         """Get the adapter for a session."""
