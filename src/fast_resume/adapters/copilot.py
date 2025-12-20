@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, COPILOT_DIR, MAX_CONTENT_LENGTH, MAX_PREVIEW_LENGTH
+from ..config import AGENTS, COPILOT_DIR, MAX_PREVIEW_LENGTH
 from .base import Session
 
 
@@ -96,7 +96,7 @@ class CopilotAdapter:
             if not messages:
                 return None
 
-            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

@@ -4,7 +4,7 @@ import orjson
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, MAX_CONTENT_LENGTH, MAX_PREVIEW_LENGTH, VIBE_DIR
+from ..config import AGENTS, MAX_PREVIEW_LENGTH, VIBE_DIR
 from .base import Session
 
 
@@ -94,7 +94,7 @@ class VibeAdapter:
             if len(title) == 80:
                 title += "..."
 
-            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

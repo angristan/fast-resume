@@ -272,7 +272,9 @@ class SessionSearch:
         choices = []
         for session in sessions:
             # Weight title and directory higher by including them multiple times
-            searchable = f"{session.title} {session.title} {session.directory} {session.content[:2000]}"
+            searchable = (
+                f"{session.title} {session.title} {session.directory} {session.content}"
+            )
             choices.append((session, searchable))
 
         # Use rapidfuzz for fuzzy matching

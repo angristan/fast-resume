@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, MAX_CONTENT_LENGTH, MAX_PREVIEW_LENGTH, OPENCODE_DIR
+from ..config import AGENTS, MAX_PREVIEW_LENGTH, OPENCODE_DIR
 from .base import Session
 
 
@@ -105,7 +105,7 @@ class OpenCodeAdapter:
                 session_id, messages_by_session, parts_by_message
             )
 
-            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

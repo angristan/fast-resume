@@ -4,7 +4,7 @@ import orjson
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, CODEX_DIR, MAX_CONTENT_LENGTH, MAX_PREVIEW_LENGTH
+from ..config import AGENTS, CODEX_DIR, MAX_PREVIEW_LENGTH
 from .base import Session
 
 
@@ -107,7 +107,7 @@ class CodexAdapter:
             if len(user_prompts[0]) > 80:
                 title += "..."
 
-            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(

@@ -22,8 +22,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Cache location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
-CACHE_VERSION = 6  # Bump when adapter output format changes
+CACHE_VERSION = 7  # Bump when adapter output format changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500
-MAX_CONTENT_LENGTH = 50000  # Max chars to index per session

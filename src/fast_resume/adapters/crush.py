@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_CONTENT_LENGTH, MAX_PREVIEW_LENGTH
+from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_PREVIEW_LENGTH
 from .base import Session
 
 
@@ -151,7 +151,7 @@ class CrushAdapter:
                 if len(first_user_message) > 100:
                     title = title.rsplit(" ", 1)[0] + "..."
 
-            full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
+            full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
