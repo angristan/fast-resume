@@ -110,6 +110,62 @@ class VibeAdapter:
         except Exception:
             return None
 
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally, comparing against known sessions."""
+        if not self.is_available():
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        # Scan all session files and build current state
+        # For Vibe, we use the 'start_time' timestamp from the file content
+        # (not file mtime) because that's what we store in the cache
+        current_files: dict[str, tuple[Path, float]] = {}
+
+        for session_file in VIBE_DIR.glob("session_*.json"):
+            try:
+                with open(session_file, "rb") as f:
+                    data = orjson.loads(f.read())
+                metadata = data.get("metadata", {})
+                session_id = metadata.get("session_id", session_file.stem)
+
+                # Use start_time to match what _parse_session stores
+                start_time = metadata.get("start_time", "")
+                if start_time:
+                    try:
+                        mtime = datetime.fromisoformat(start_time).timestamp()
+                    except ValueError:
+                        mtime = session_file.stat().st_mtime
+                else:
+                    mtime = session_file.stat().st_mtime
+
+                current_files[session_id] = (session_file, mtime)
+            except Exception:
+                continue
+
+        # Find new and modified sessions
+        # Use 1ms tolerance for mtime comparison due to datetime precision loss
+        new_or_modified = []
+        for session_id, (path, mtime) in current_files.items():
+            known_entry = known.get(session_id)
+            if known_entry is None or mtime > known_entry[0] + 0.001:
+                session = self._parse_session(path)
+                if session:
+                    new_or_modified.append(session)
+
+        # Find deleted sessions
+        current_ids = set(current_files.keys())
+        deleted_ids = [
+            sid
+            for sid, (_, agent) in known.items()
+            if agent == self.name and sid not in current_ids
+        ]
+
+        return new_or_modified, deleted_ids
+
     def get_resume_command(self, session: Session) -> list[str]:
         """Get command to resume a Vibe session."""
         return ["vibe", "--resume", session.id]

@@ -23,7 +23,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 # Cache location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 TANTIVY_INDEX_DIR = CACHE_DIR / "tantivy_index"
-CACHE_VERSION = 8  # Bump when adapter output format changes
+CACHE_VERSION = 11  # Bump when schema changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

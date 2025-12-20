@@ -158,6 +158,53 @@ class ClaudeAdapter:
         except Exception:
             return None
 
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally, comparing against known sessions."""
+        if not self.is_available():
+            # If adapter not available, all known sessions from this agent are deleted
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        # Scan all session files and build current state
+        current_files: dict[str, tuple[Path, float]] = {}  # session_id -> (path, mtime)
+
+        for project_dir in CLAUDE_DIR.iterdir():
+            if not project_dir.is_dir():
+                continue
+
+            for session_file in project_dir.glob("*.jsonl"):
+                if session_file.name.startswith("agent-"):
+                    continue
+
+                session_id = session_file.stem
+                mtime = session_file.stat().st_mtime
+                current_files[session_id] = (session_file, mtime)
+
+        # Find new and modified sessions
+        # Use 1ms tolerance for mtime comparison due to datetime precision loss
+        new_or_modified = []
+        for session_id, (path, mtime) in current_files.items():
+            known_entry = known.get(session_id)
+            if known_entry is None or mtime > known_entry[0] + 0.001:
+                # New or modified - parse it
+                session = self._parse_session(path)
+                if session:
+                    new_or_modified.append(session)
+
+        # Find deleted sessions (in known but not in current, for this agent only)
+        current_ids = set(current_files.keys())
+        deleted_ids = [
+            sid
+            for sid, (_, agent) in known.items()
+            if agent == self.name and sid not in current_ids
+        ]
+
+        return new_or_modified, deleted_ids
+
     def get_resume_command(self, session: Session) -> list[str]:
         """Get command to resume a Claude Code session."""
         return ["claude", "--resume", session.id]

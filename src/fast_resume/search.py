@@ -1,11 +1,7 @@
 """Search engine for aggregating and searching sessions."""
 
-import hashlib
-import orjson
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
-from datetime import datetime
-from pathlib import Path
 
 from .adapters import (
     ClaudeAdapter,
@@ -16,52 +12,14 @@ from .adapters import (
     Session,
     VibeAdapter,
 )
-from .config import (
-    CACHE_DIR,
-    CACHE_VERSION,
-    CLAUDE_DIR,
-    CODEX_DIR,
-    COPILOT_DIR,
-    CRUSH_PROJECTS_FILE,
-    OPENCODE_DIR,
-    VIBE_DIR,
-)
 from .index import TantivyIndex
 
 
-def _get_dir_mtime(path: Path) -> float:
-    """Get the latest mtime of a directory tree (shallow check)."""
-    if not path.exists():
-        return 0
-    try:
-        # Just check the directory itself and immediate children
-        mtimes = [path.stat().st_mtime]
-        for child in path.iterdir():
-            try:
-                mtimes.append(child.stat().st_mtime)
-            except OSError:
-                pass
-        return max(mtimes)
-    except OSError:
-        return 0
-
-
-def _get_cache_key() -> str:
-    """Generate a cache key based on directory mtimes and cache version."""
-    mtimes = [
-        _get_dir_mtime(CLAUDE_DIR),
-        _get_dir_mtime(CODEX_DIR),
-        _get_dir_mtime(COPILOT_DIR),
-        _get_dir_mtime(OPENCODE_DIR),
-        _get_dir_mtime(VIBE_DIR),
-        _get_dir_mtime(CRUSH_PROJECTS_FILE.parent),
-    ]
-    key = f"v{CACHE_VERSION}:" + ":".join(str(m) for m in mtimes)
-    return hashlib.md5(key.encode()).hexdigest()[:16]
-
-
 class SessionSearch:
-    """Aggregates sessions from all adapters and provides search."""
+    """Aggregates sessions from all adapters and provides search.
+
+    Uses Tantivy as the single source of truth for session data.
+    """
 
     def __init__(self) -> None:
         self.adapters = [
@@ -75,164 +33,142 @@ class SessionSearch:
         self._sessions: list[Session] | None = None
         self._sessions_by_id: dict[str, Session] = {}
         self._streaming_in_progress: bool = False
-        self._cache_file = CACHE_DIR / "sessions.json"
-        self._cache_key: str | None = (
-            None  # Cache the key to avoid repeated mtime checks
-        )
         self._index = TantivyIndex()
 
-    def _get_cache_key(self) -> str:
-        """Get cache key, computing it only once per instance."""
-        if self._cache_key is None:
-            self._cache_key = _get_cache_key()
-        return self._cache_key
-
     def _load_from_cache(self) -> list[Session] | None:
-        """Try to load sessions from cache."""
-        if not self._cache_file.exists():
+        """Try to load sessions from index if no changes detected (fast path for TUI)."""
+        # Get known sessions from Tantivy
+        known = self._index.get_known_sessions()
+        if not known:
             return None
 
-        try:
-            with open(self._cache_file, "rb") as f:
-                data = orjson.loads(f.read())
-
-            # Check if cache is valid
-            cache_key = self._get_cache_key()
-            if data.get("key") != cache_key:
+        # Check if any adapter has changes
+        for adapter in self.adapters:
+            new_or_modified, deleted_ids = adapter.find_sessions_incremental(known)
+            if new_or_modified or deleted_ids:
+                # Changes detected - need full update
                 return None
 
-            # Also check if Tantivy index needs rebuild
-            if self._index.needs_rebuild(cache_key):
-                return None
-
-            # Reconstruct sessions
-            sessions = []
-            for s in data.get("sessions", []):
-                session = Session(
-                    id=s["id"],
-                    agent=s["agent"],
-                    title=s["title"],
-                    directory=s["directory"],
-                    timestamp=datetime.fromisoformat(s["timestamp"]),
-                    preview=s["preview"],
-                    content=s["content"],
-                    message_count=s.get("message_count", 0),
-                )
-                sessions.append(session)
-                self._sessions_by_id[session.id] = session
-            return sessions
-        except Exception:
+        # No changes - load from index
+        sessions = self._index.get_all_sessions()
+        if not sessions:
             return None
 
-    def _save_to_cache(self, sessions: list[Session]) -> None:
-        """Save sessions to cache and build Tantivy index."""
-        cache_key = self._get_cache_key()
-        try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            data = {
-                "key": cache_key,
-                "sessions": [
-                    {
-                        "id": s.id,
-                        "agent": s.agent,
-                        "title": s.title,
-                        "directory": s.directory,
-                        "timestamp": s.timestamp.isoformat(),
-                        "preview": s.preview,
-                        "content": s.content,
-                        "message_count": s.message_count,
-                    }
-                    for s in sessions
-                ],
-            }
-            with open(self._cache_file, "wb") as f:
-                f.write(orjson.dumps(data))
+        # Populate sessions_by_id
+        for session in sessions:
+            self._sessions_by_id[session.id] = session
 
-            # Build Tantivy index
-            self._index.build_index(sessions, cache_key)
-        except Exception:
-            pass  # Cache write failure is not critical
+        return sessions
 
     def get_all_sessions(self, force_refresh: bool = False) -> list[Session]:
-        """Get all sessions from all adapters."""
+        """Get all sessions from all adapters with incremental updates."""
         if self._sessions is not None and not force_refresh:
             return self._sessions
 
         # If streaming is in progress, return current partial results
-        # to avoid starting a second concurrent load
         if self._streaming_in_progress:
             return self._sessions if self._sessions is not None else []
 
-        # Try cache first
-        if not force_refresh:
-            cached = self._load_from_cache()
-            if cached is not None:
-                self._sessions = cached
-                return cached
+        # Get known sessions from Tantivy for incremental comparison
+        known = self._index.get_known_sessions() if not force_refresh else {}
 
-        # Load from adapters in parallel
-        sessions: list[Session] = []
+        # Ask each adapter for changes
+        all_new_or_modified: list[Session] = []
+        all_deleted_ids: list[str] = []
 
-        def load_adapter(adapter):
-            if adapter.is_available():
-                return adapter.find_sessions()
-            return []
+        def get_incremental(adapter):
+            return adapter.find_sessions_incremental(known)
 
         with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
-            results = executor.map(load_adapter, self.adapters)
-            for result in results:
-                sessions.extend(result)
+            results = executor.map(get_incremental, self.adapters)
+            for new_or_modified, deleted_ids in results:
+                all_new_or_modified.extend(new_or_modified)
+                all_deleted_ids.extend(deleted_ids)
+
+        # If no changes and we have data in index, load from index
+        if not all_new_or_modified and not all_deleted_ids and known:
+            self._sessions = self._index.get_all_sessions()
+            for session in self._sessions:
+                self._sessions_by_id[session.id] = session
+            self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
+            return self._sessions
+
+        # Apply deletions to index
+        self._index.delete_sessions(all_deleted_ids)
+
+        # Delete modified sessions before re-adding (avoid duplicates)
+        modified_ids = [s.id for s in all_new_or_modified]
+        self._index.delete_sessions(modified_ids)
+
+        # Apply additions/updates to index
+        self._index.add_sessions(all_new_or_modified)
+
+        # Load all sessions from index
+        self._sessions = self._index.get_all_sessions()
+        for session in self._sessions:
+            self._sessions_by_id[session.id] = session
 
         # Sort by timestamp, newest first
-        sessions.sort(key=lambda s: s.timestamp, reverse=True)
-        self._sessions = sessions
+        self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
 
-        # Build sessions_by_id lookup
-        self._sessions_by_id = {s.id: s for s in sessions}
-
-        # Save to cache and build Tantivy index
-        self._save_to_cache(sessions)
-
-        return sessions
+        return self._sessions
 
     def get_sessions_streaming(
         self, on_progress: Callable[[list[Session]], None]
     ) -> list[Session]:
         """Load sessions with progress callback for each adapter that completes."""
-        # Check cache first
-        cached = self._load_from_cache()
-        if cached is not None:
-            self._sessions = cached
-            on_progress(cached)
-            return cached
+        # Get known sessions from Tantivy
+        known = self._index.get_known_sessions()
 
-        # Mark streaming as in progress and initialize _sessions
-        # so concurrent searches can use partial results
+        # Mark streaming as in progress
         self._streaming_in_progress = True
-        self._sessions = []
+        all_new_or_modified: list[Session] = []
+        all_deleted_ids: list[str] = []
 
-        def load_adapter(adapter):
-            if adapter.is_available():
-                return adapter.find_sessions()
-            return []
+        def get_incremental(adapter):
+            return adapter.find_sessions_incremental(known)
 
         try:
             with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
-                futures = {executor.submit(load_adapter, a): a for a in self.adapters}
+                futures = {
+                    executor.submit(get_incremental, a): a for a in self.adapters
+                }
                 for future in as_completed(futures):
-                    result = future.result()
-                    if result:
-                        self._sessions.extend(result)
-                        # Update sessions_by_id lookup
-                        for s in result:
-                            self._sessions_by_id[s.id] = s
-                        # Sort and report progress
-                        self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
-                        on_progress(self._sessions.copy())
+                    new_or_modified, deleted_ids = future.result()
+                    all_new_or_modified.extend(new_or_modified)
+                    all_deleted_ids.extend(deleted_ids)
+
+                    # Report progress with current sessions from index + new ones
+                    # For streaming, we build up partial results
+                    current_sessions = self._index.get_all_sessions()
+                    # Add newly found sessions (not yet in index)
+                    existing_ids = {s.id for s in current_sessions}
+                    for session in all_new_or_modified:
+                        if session.id not in existing_ids:
+                            current_sessions.append(session)
+                    # Remove deleted
+                    deleted_set = set(all_deleted_ids)
+                    current_sessions = [
+                        s for s in current_sessions if s.id not in deleted_set
+                    ]
+                    current_sessions.sort(key=lambda s: s.timestamp, reverse=True)
+                    on_progress(current_sessions)
         finally:
             self._streaming_in_progress = False
 
-        self._save_to_cache(self._sessions)
+        # Apply all changes to index
+        self._index.delete_sessions(all_deleted_ids)
+        # Delete modified sessions before re-adding (avoid duplicates)
+        modified_ids = [s.id for s in all_new_or_modified]
+        self._index.delete_sessions(modified_ids)
+        self._index.add_sessions(all_new_or_modified)
+
+        # Load final state from index
+        self._sessions = self._index.get_all_sessions()
+        for session in self._sessions:
+            self._sessions_by_id[session.id] = session
+        self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
+
         return self._sessions
 
     def search(

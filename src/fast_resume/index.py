@@ -1,22 +1,29 @@
 """Tantivy full-text search index for sessions."""
 
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import tantivy
 
 from .adapters.base import Session
-from .config import TANTIVY_INDEX_DIR
+from .config import CACHE_VERSION, MAX_PREVIEW_LENGTH, TANTIVY_INDEX_DIR
+
+# Version file to detect schema changes
+_VERSION_FILE = ".schema_version"
 
 
 class TantivyIndex:
-    """Manages a Tantivy full-text search index for sessions."""
+    """Manages a Tantivy full-text search index for sessions.
+
+    This is the single source of truth for session data.
+    """
 
     def __init__(self, index_path: Path = TANTIVY_INDEX_DIR) -> None:
         self.index_path = index_path
         self._index: tantivy.Index | None = None
         self._schema: tantivy.Schema | None = None
-        self._cache_key_file = index_path / ".cache_key"
+        self._version_file = index_path / _VERSION_FILE
 
     def _build_schema(self) -> tantivy.Schema:
         """Build the Tantivy schema for sessions."""
@@ -29,14 +36,44 @@ class TantivyIndex:
         schema_builder.add_text_field("directory", stored=True)
         # Agent - stored for filtering
         schema_builder.add_text_field("agent", stored=True)
-        # Content - indexed but not stored (save space)
-        schema_builder.add_text_field("content", stored=False)
+        # Content - stored and indexed for full-text search
+        schema_builder.add_text_field("content", stored=True)
+        # Timestamp - stored as float (Unix timestamp)
+        schema_builder.add_float_field("timestamp", stored=True)
+        # Message count - stored as integer
+        schema_builder.add_integer_field("message_count", stored=True)
         return schema_builder.build()
+
+    def _check_version(self) -> bool:
+        """Check if index version matches current cache version."""
+        if not self._version_file.exists():
+            return False
+        try:
+            stored_version = int(self._version_file.read_text().strip())
+            return stored_version == CACHE_VERSION
+        except (ValueError, OSError):
+            return False
+
+    def _write_version(self) -> None:
+        """Write current version to version file."""
+        self._version_file.parent.mkdir(parents=True, exist_ok=True)
+        self._version_file.write_text(str(CACHE_VERSION))
+
+    def _clear(self) -> None:
+        """Clear the index directory."""
+        self._index = None
+        self._schema = None
+        if self.index_path.exists():
+            shutil.rmtree(self.index_path)
 
     def _ensure_index(self) -> tantivy.Index:
         """Ensure the index is loaded or created."""
         if self._index is not None:
             return self._index
+
+        # Check version - rebuild if schema changed
+        if self.index_path.exists() and not self._check_version():
+            self._clear()
 
         self._schema = self._build_schema()
 
@@ -47,41 +84,116 @@ class TantivyIndex:
             # Create new index
             self.index_path.mkdir(parents=True, exist_ok=True)
             self._index = tantivy.Index(self._schema, path=str(self.index_path))
+            self._write_version()
 
         return self._index
 
-    def get_stored_cache_key(self) -> str | None:
-        """Get the cache key stored with the index."""
-        if not self._cache_key_file.exists():
-            return None
+    def get_known_sessions(self) -> dict[str, tuple[float, str]]:
+        """Get all session IDs with their timestamps and agents.
+
+        Returns:
+            Dict mapping session_id to (timestamp, agent) tuple.
+        """
+        if not self.index_path.exists() or not self._check_version():
+            return {}
+
+        index = self._ensure_index()
+        index.reload()
+        searcher = index.searcher()
+
+        if searcher.num_docs == 0:
+            return {}
+
+        known: dict[str, tuple[float, str]] = {}
+
+        # Match all documents
+        all_query = tantivy.Query.all_query()
+        results = searcher.search(all_query, limit=searcher.num_docs).hits
+
+        for _score, doc_address in results:
+            doc = searcher.doc(doc_address)
+            session_id = doc.get_first("id")
+            timestamp = doc.get_first("timestamp")
+            agent = doc.get_first("agent")
+            if session_id and timestamp is not None and agent:
+                known[session_id] = (timestamp, agent)
+
+        return known
+
+    def get_all_sessions(self) -> list[Session]:
+        """Retrieve all sessions from the index.
+
+        Returns:
+            List of Session objects, unsorted.
+        """
+        if not self.index_path.exists() or not self._check_version():
+            return []
+
+        index = self._ensure_index()
+        index.reload()
+        searcher = index.searcher()
+
+        if searcher.num_docs == 0:
+            return []
+
+        sessions: list[Session] = []
+
+        # Match all documents
+        all_query = tantivy.Query.all_query()
+        results = searcher.search(all_query, limit=searcher.num_docs).hits
+
+        for _score, doc_address in results:
+            doc = searcher.doc(doc_address)
+            session = self._doc_to_session(doc)
+            if session:
+                sessions.append(session)
+
+        return sessions
+
+    def _doc_to_session(self, doc: tantivy.Document) -> Session | None:
+        """Convert a Tantivy document to a Session object."""
         try:
-            return self._cache_key_file.read_text().strip()
+            session_id = doc.get_first("id")
+            if not session_id:
+                return None
+
+            timestamp_float = doc.get_first("timestamp")
+            if timestamp_float is None:
+                return None
+
+            content = doc.get_first("content") or ""
+
+            return Session(
+                id=session_id,
+                agent=doc.get_first("agent") or "",
+                title=doc.get_first("title") or "",
+                directory=doc.get_first("directory") or "",
+                timestamp=datetime.fromtimestamp(timestamp_float),
+                preview=content[:MAX_PREVIEW_LENGTH],
+                content=content,
+                message_count=doc.get_first("message_count") or 0,
+            )
         except Exception:
             return None
 
-    def needs_rebuild(self, cache_key: str) -> bool:
-        """Check if the index needs to be rebuilt."""
-        stored_key = self.get_stored_cache_key()
-        return stored_key != cache_key
+    def delete_sessions(self, session_ids: list[str]) -> None:
+        """Remove sessions from the index by ID."""
+        if not session_ids:
+            return
 
-    def clear(self) -> None:
-        """Clear the index directory."""
-        self._index = None
-        if self.index_path.exists():
-            shutil.rmtree(self.index_path)
+        index = self._ensure_index()
+        writer = index.writer()
+        for sid in session_ids:
+            writer.delete_documents_by_term("id", sid)
+        writer.commit()
 
-    def build_index(self, sessions: list[Session], cache_key: str) -> None:
-        """Build the index from sessions."""
-        # Clear existing index
-        self.clear()
+    def add_sessions(self, sessions: list[Session]) -> None:
+        """Add sessions to the index."""
+        if not sessions:
+            return
 
-        # Create fresh index
-        self.index_path.mkdir(parents=True, exist_ok=True)
-        self._schema = self._build_schema()
-        self._index = tantivy.Index(self._schema, path=str(self.index_path))
-
-        # Index all sessions
-        writer = self._index.writer()
+        index = self._ensure_index()
+        writer = index.writer()
         for session in sessions:
             writer.add_document(
                 tantivy.Document(
@@ -90,12 +202,12 @@ class TantivyIndex:
                     directory=session.directory,
                     agent=session.agent,
                     content=session.content,
+                    timestamp=session.timestamp.timestamp(),
+                    message_count=session.message_count,
                 )
             )
         writer.commit()
-
-        # Store cache key
-        self._cache_key_file.write_text(cache_key)
+        self._write_version()
 
     def search(
         self,
@@ -108,7 +220,7 @@ class TantivyIndex:
         Uses fuzzy matching with edit distance 1 for typo tolerance.
         """
         index = self._ensure_index()
-        index.reload()  # Ensure we have latest data
+        index.reload()
         searcher = index.searcher()
         schema = index.schema
 

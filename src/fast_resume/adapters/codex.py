@@ -123,6 +123,71 @@ class CodexAdapter:
         except Exception:
             return None
 
+    def _get_session_id_from_file(self, session_file: Path) -> str:
+        """Extract session ID from file content or filename."""
+        # Try to get ID from session_meta in file content first
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = orjson.loads(line)
+                        if data.get("type") == "session_meta":
+                            session_id = data.get("payload", {}).get("id", "")
+                            if session_id:
+                                return session_id
+                            break
+                    except orjson.JSONDecodeError:
+                        continue
+        except Exception:
+            pass
+
+        # Fallback to filename extraction
+        return (
+            session_file.stem.split("-", 1)[-1]
+            if "-" in session_file.stem
+            else session_file.stem
+        )
+
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally, comparing against known sessions."""
+        if not self.is_available():
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        # Scan all session files and build current state
+        current_files: dict[str, tuple[Path, float]] = {}
+
+        for session_file in CODEX_DIR.rglob("*.jsonl"):
+            session_id = self._get_session_id_from_file(session_file)
+            mtime = session_file.stat().st_mtime
+            current_files[session_id] = (session_file, mtime)
+
+        # Find new and modified sessions
+        # Use 1ms tolerance for mtime comparison due to datetime precision loss
+        new_or_modified = []
+        for session_id, (path, mtime) in current_files.items():
+            known_entry = known.get(session_id)
+            if known_entry is None or mtime > known_entry[0] + 0.001:
+                session = self._parse_session(path)
+                if session:
+                    new_or_modified.append(session)
+
+        # Find deleted sessions
+        current_ids = set(current_files.keys())
+        deleted_ids = [
+            sid
+            for sid, (_, agent) in known.items()
+            if agent == self.name and sid not in current_ids
+        ]
+
+        return new_or_modified, deleted_ids
+
     def get_resume_command(self, session: Session) -> list[str]:
         """Get command to resume a Codex CLI session."""
         return ["codex", "resume", session.id]

@@ -199,6 +199,62 @@ class CrushAdapter:
 
         return " ".join(text_parts)
 
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally, comparing against known sessions."""
+        if not self.is_available():
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        try:
+            with open(CRUSH_PROJECTS_FILE, "rb") as f:
+                projects_data = orjson.loads(f.read())
+        except (orjson.JSONDecodeError, OSError):
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        # For Crush, we track db file mtimes and session IDs within
+        # When a db changes, we reload all sessions from it and diff
+        new_or_modified = []
+        all_current_ids: set[str] = set()
+
+        for project in projects_data.get("projects", []):
+            project_path = project.get("path", "")
+            data_dir = project.get("data_dir", "")
+
+            if not data_dir:
+                continue
+
+            db_path = Path(data_dir) / "crush.db"
+            if not db_path.exists():
+                continue
+
+            # Load all sessions from this db
+            project_sessions = self._load_sessions_from_db(db_path, project_path)
+
+            for session in project_sessions:
+                all_current_ids.add(session.id)
+                known_entry = known.get(session.id)
+                # Use session timestamp for comparison since db doesn't have file mtime
+                # Use 1ms tolerance for comparison due to datetime precision loss
+                session_mtime = session.timestamp.timestamp()
+                if known_entry is None or session_mtime > known_entry[0] + 0.001:
+                    new_or_modified.append(session)
+
+        # Find deleted sessions
+        deleted_ids = [
+            sid
+            for sid, (_, agent) in known.items()
+            if agent == self.name and sid not in all_current_ids
+        ]
+
+        return new_or_modified, deleted_ids
+
     def get_resume_command(self, session: Session) -> list[str]:
         """Get command to resume a Crush session."""
         # Crush is interactive - it shows a session picker when launched in a project directory

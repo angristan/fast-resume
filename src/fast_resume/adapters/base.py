@@ -30,6 +30,19 @@ class AgentAdapter(Protocol):
         """Find all sessions for this agent."""
         ...
 
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally, comparing against known sessions.
+
+        Args:
+            known: Dict mapping session_id to (mtime, agent_name) tuple
+
+        Returns:
+            Tuple of (new_or_modified sessions, deleted session IDs)
+        """
+        ...
+
     def get_resume_command(self, session: "Session") -> list[str]:
         """Get the command to resume a session."""
         ...
