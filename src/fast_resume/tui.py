@@ -823,7 +823,6 @@ class FastResumeApp(App):
     def on_search_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
         self.is_loading = True
-        self._update_session_count()
         self._do_search(event.value)
 
     @on(Input.Submitted, "#search-input")
