@@ -13,19 +13,27 @@ A fuzzy finder TUI for quickly searching and resuming coding agent sessions acro
 
 ## Installation
 
-Requires Python 3.11+.
+Requires Python 3.14+.
 
 ```bash
-uv tool install .
+# Install from GitHub
+uvx --from git+https://github.com/angristan/fast-resume fr
+
+# Or install permanently
+uv tool install git+https://github.com/angristan/fast-resume
 ```
 
-Or install in development mode:
+For development:
 
 ```bash
-uv pip install -e .
+git clone https://github.com/angristan/fast-resume.git
+cd fast-resume
+uv sync
 ```
 
 ## Usage
+
+Both `fr` and `fast-resume` commands are available.
 
 ```bash
 # Open TUI with all sessions
@@ -76,10 +84,8 @@ fr --rebuild
 ## Development
 
 ```bash
-git clone https://github.com/your-username/fast-resume.git
-cd fast-resume
-uv sync
 uv run pre-commit install
+uv run pytest
 ```
 
 ## How It Works

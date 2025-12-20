@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 fr = "fast_resume.cli:main"
+fast-resume = "fast_resume.cli:main"
 
 [build-system]
 requires = ["hatchling"]
