@@ -11,12 +11,14 @@ from rich.console import RenderableType
 from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import on, work
+from textual.events import Click
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Input, Static, Label, Button
+from textual.widgets import DataTable, Footer, Input, Static, Label
 from textual_image.renderable import Image as ImageRenderable
+from textual_image.widget import Image as ImageWidget
 
 from .adapters.base import Session
 from .config import AGENTS
@@ -295,12 +297,12 @@ class FastResumeApp(App):
     }
 
     .filter-btn {
-        min-width: 10;
+        width: auto;
         height: 1;
         margin: 0 1 0 0;
+        padding: 0 1;
         border: none;
         background: transparent;
-        text-style: none;
         color: $text-muted;
     }
 
@@ -315,6 +317,19 @@ class FastResumeApp(App):
     .filter-btn.-active {
         background: $accent 20%;
         color: $accent;
+    }
+
+    .filter-icon {
+        width: 2;
+        height: 1;
+        margin-right: 1;
+    }
+
+    .filter-label {
+        height: 1;
+    }
+
+    .filter-btn.-active .filter-label {
         text-style: bold;
     }
 
@@ -528,7 +543,7 @@ class FastResumeApp(App):
                         value=self.initial_query,
                     )
 
-            # Agent filter buttons - pill style
+            # Agent filter buttons - pill style with icons
             with Horizontal(id="filter-container"):
                 for filter_key, filter_label in [
                     (None, "All"),
@@ -540,14 +555,17 @@ class FastResumeApp(App):
                     ("vibe", "Vibe"),
                 ]:
                     btn_id = f"filter-{filter_key or 'all'}"
-                    # Add colored dot prefix for agents
-                    if filter_key:
-                        label = f"● {filter_label}"
-                    else:
-                        label = filter_label
-                    btn = Button(label, id=btn_id, classes="filter-btn")
-                    self._filter_buttons[filter_key] = btn
-                    yield btn
+                    with Horizontal(id=btn_id, classes="filter-btn") as btn_container:
+                        if filter_key:
+                            icon_path = ASSETS_DIR / f"{filter_key}.png"
+                            if icon_path.exists():
+                                yield ImageWidget(icon_path, classes="filter-icon")
+                            yield Label(
+                                filter_label, classes=f"filter-label agent-{filter_key}"
+                            )
+                        else:
+                            yield Label(filter_label, classes="filter-label")
+                    self._filter_buttons[filter_key] = btn_container
 
             # Main content area
             with Vertical(id="main-container"):
@@ -1057,10 +1075,14 @@ class FastResumeApp(App):
         """Filter to Vibe sessions only."""
         self._set_filter("vibe")
 
-    @on(Button.Pressed, ".filter-btn")
-    def on_filter_click(self, event: Button.Pressed) -> None:
+    @on(Click, ".filter-btn")
+    def on_filter_click(self, event: Click) -> None:
         """Handle click on filter buttons."""
-        btn_id = event.button.id
+        # Walk up to find the filter-btn container (click might be on child widget)
+        widget = event.widget
+        while widget and "filter-btn" not in widget.classes:
+            widget = widget.parent
+        btn_id = widget.id if widget else None
         if btn_id == "filter-all":
             self._set_filter(None)
         elif btn_id == "filter-claude":
