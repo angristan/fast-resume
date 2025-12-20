@@ -1,6 +1,7 @@
 """OpenCode session adapter."""
 
 import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -32,20 +33,55 @@ class OpenCodeAdapter:
         if not session_dir.exists():
             return []
 
+        # Pre-index all messages by session_id: {session_id: [(msg_file, msg_id, role), ...]}
+        messages_by_session: dict[str, list[tuple[Path, str, str]]] = defaultdict(list)
+        if message_dir.exists():
+            for msg_file in message_dir.glob("*/msg_*.json"):
+                try:
+                    with open(msg_file, "r", encoding="utf-8") as f:
+                        msg_data = json.load(f)
+                    session_id = msg_file.parent.name
+                    msg_id = msg_data.get("id", "")
+                    role = msg_data.get("role", "")
+                    if msg_id:
+                        messages_by_session[session_id].append((msg_file, msg_id, role))
+                except Exception:
+                    continue
+
+        # Pre-index all parts by message_id: {msg_id: [text, ...]}
+        parts_by_message: dict[str, list[str]] = defaultdict(list)
+        if part_dir.exists():
+            for part_file in sorted(part_dir.glob("*/*.json")):
+                try:
+                    with open(part_file, "r", encoding="utf-8") as f:
+                        part_data = json.load(f)
+                    msg_id = part_file.parent.name
+                    if part_data.get("type") == "text":
+                        text = part_data.get("text", "")
+                        if text:
+                            parts_by_message[msg_id].append(text)
+                except Exception:
+                    continue
+
         # OpenCode stores sessions in project-hash subdirectories
         for project_dir in session_dir.iterdir():
             if not project_dir.is_dir():
                 continue
 
             for session_file in project_dir.glob("ses_*.json"):
-                session = self._parse_session(session_file, message_dir, part_dir)
+                session = self._parse_session(
+                    session_file, messages_by_session, parts_by_message
+                )
                 if session:
                     sessions.append(session)
 
         return sessions
 
     def _parse_session(
-        self, session_file: Path, message_dir: Path, part_dir: Path
+        self,
+        session_file: Path,
+        messages_by_session: dict[str, list[tuple[Path, str, str]]],
+        parts_by_message: dict[str, list[str]],
     ) -> Session | None:
         """Parse an OpenCode session file."""
         try:
@@ -64,8 +100,10 @@ class OpenCodeAdapter:
             else:
                 timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
 
-            # Get message content from parts
-            messages = self._get_session_messages(session_id, message_dir, part_dir)
+            # Get message content from pre-indexed data
+            messages = self._get_session_messages(
+                session_id, messages_by_session, parts_by_message
+            )
 
             full_content = "\n\n".join(messages)[:MAX_CONTENT_LENGTH]
             preview = full_content[:MAX_PREVIEW_LENGTH]
@@ -84,46 +122,23 @@ class OpenCodeAdapter:
             return None
 
     def _get_session_messages(
-        self, session_id: str, message_dir: Path, part_dir: Path
+        self,
+        session_id: str,
+        messages_by_session: dict[str, list[tuple[Path, str, str]]],
+        parts_by_message: dict[str, list[str]],
     ) -> list[str]:
-        """Get all messages for a session from parts."""
+        """Get all messages for a session from pre-indexed parts."""
         messages: list[str] = []
 
-        # Find message directory for this session
-        session_msg_dir = message_dir / session_id
-        if not session_msg_dir.exists():
-            return messages
+        # Sort by filename to maintain order
+        session_msgs = sorted(
+            messages_by_session.get(session_id, []), key=lambda x: x[0].name
+        )
 
-        # Get all message files
-        for msg_file in sorted(session_msg_dir.glob("msg_*.json")):
-            try:
-                with open(msg_file, "r", encoding="utf-8") as f:
-                    msg_data = json.load(f)
-
-                msg_id = msg_data.get("id", "")
-                role = msg_data.get("role", "")
-                if not msg_id:
-                    continue
-
-                role_prefix = "» " if role == "user" else "  "
-
-                # Get parts for this message
-                msg_part_dir = part_dir / msg_id
-                if msg_part_dir.exists():
-                    for part_file in sorted(msg_part_dir.glob("*.json")):
-                        try:
-                            with open(part_file, "r", encoding="utf-8") as f:
-                                part_data = json.load(f)
-
-                            part_type = part_data.get("type", "")
-                            if part_type == "text":
-                                text = part_data.get("text", "")
-                                if text:
-                                    messages.append(f"{role_prefix}{text}")
-                        except Exception:
-                            continue
-            except Exception:
-                continue
+        for _msg_file, msg_id, role in session_msgs:
+            role_prefix = "» " if role == "user" else "  "
+            for text in parts_by_message.get(msg_id, []):
+                messages.append(f"{role_prefix}{text}")
 
         return messages
 

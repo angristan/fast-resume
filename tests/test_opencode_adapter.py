@@ -1,7 +1,9 @@
 """Tests for OpenCode session adapter."""
 
 import json
+from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +15,41 @@ from fast_resume.adapters.opencode import OpenCodeAdapter
 def adapter():
     """Create an OpenCodeAdapter instance."""
     return OpenCodeAdapter()
+
+
+def build_indexes(
+    message_dir: Path, part_dir: Path
+) -> tuple[dict[str, list[tuple[Path, str, str]]], dict[str, list[str]]]:
+    """Build pre-indexed message and part dicts from directories."""
+    messages_by_session: dict[str, list[tuple[Path, str, str]]] = defaultdict(list)
+    if message_dir.exists():
+        for msg_file in message_dir.glob("*/msg_*.json"):
+            try:
+                with open(msg_file, "r", encoding="utf-8") as f:
+                    msg_data = json.load(f)
+                session_id = msg_file.parent.name
+                msg_id = msg_data.get("id", "")
+                role = msg_data.get("role", "")
+                if msg_id:
+                    messages_by_session[session_id].append((msg_file, msg_id, role))
+            except Exception:
+                continue
+
+    parts_by_message: dict[str, list[str]] = defaultdict(list)
+    if part_dir.exists():
+        for part_file in sorted(part_dir.glob("*/*.json")):
+            try:
+                with open(part_file, "r", encoding="utf-8") as f:
+                    part_data = json.load(f)
+                msg_id = part_file.parent.name
+                if part_data.get("type") == "text":
+                    text = part_data.get("text", "")
+                    if text:
+                        parts_by_message[msg_id].append(text)
+            except Exception:
+                continue
+
+    return messages_by_session, parts_by_message
 
 
 def create_opencode_structure(base_dir, sessions):
@@ -108,8 +145,11 @@ class TestOpenCodeAdapter:
         create_opencode_structure(temp_dir, sessions)
 
         session_file = temp_dir / "session" / "proj_abc" / "ses_ses_001.json"
+        messages_by_session, parts_by_message = build_indexes(
+            temp_dir / "message", temp_dir / "part"
+        )
         session = adapter._parse_session(
-            session_file, temp_dir / "message", temp_dir / "part"
+            session_file, messages_by_session, parts_by_message
         )
 
         assert session is not None
@@ -130,10 +170,12 @@ class TestOpenCodeAdapter:
         with open(session_file, "w") as f:
             json.dump({"id": "test", "title": "Test", "directory": "/test"}, f)
 
-        message_dir = temp_dir / "message"
-        part_dir = temp_dir / "part"
-
-        session = adapter._parse_session(session_file, message_dir, part_dir)
+        messages_by_session, parts_by_message = build_indexes(
+            temp_dir / "message", temp_dir / "part"
+        )
+        session = adapter._parse_session(
+            session_file, messages_by_session, parts_by_message
+        )
 
         assert session is not None
         # Should use file mtime, which will be recent
@@ -156,7 +198,10 @@ class TestOpenCodeAdapter:
         with open(parts_dir / "part_001.json", "w") as f:
             json.dump({"type": "text", "text": "User message here"}, f)
 
-        messages = adapter._get_session_messages("ses_001", message_dir, part_dir)
+        messages_by_session, parts_by_message = build_indexes(message_dir, part_dir)
+        messages = adapter._get_session_messages(
+            "ses_001", messages_by_session, parts_by_message
+        )
 
         assert len(messages) == 1
         assert "» User message here" in messages[0]
@@ -178,7 +223,10 @@ class TestOpenCodeAdapter:
         with open(parts_dir / "part_002.json", "w") as f:
             json.dump({"type": "text", "text": "Here's the file content"}, f)
 
-        messages = adapter._get_session_messages("ses_001", message_dir, part_dir)
+        messages_by_session, parts_by_message = build_indexes(message_dir, part_dir)
+        messages = adapter._get_session_messages(
+            "ses_001", messages_by_session, parts_by_message
+        )
 
         assert len(messages) == 1
         assert "Here's the file content" in messages[0]
@@ -186,10 +234,12 @@ class TestOpenCodeAdapter:
 
     def test_get_session_messages_handles_missing_dir(self, adapter, temp_dir):
         """Test handling of missing message directory."""
-        message_dir = temp_dir / "message"
-        part_dir = temp_dir / "part"
-
-        messages = adapter._get_session_messages("nonexistent", message_dir, part_dir)
+        messages_by_session, parts_by_message = build_indexes(
+            temp_dir / "message", temp_dir / "part"
+        )
+        messages = adapter._get_session_messages(
+            "nonexistent", messages_by_session, parts_by_message
+        )
 
         assert messages == []
 
