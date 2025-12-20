@@ -491,6 +491,7 @@ class FastResumeApp(App):
     active_filter: reactive[str | None] = reactive(None)
     is_loading: reactive[bool] = reactive(True)
     preview_height: reactive[int] = reactive(12)
+    search_query: reactive[str] = reactive("", init=False)
     _spinner_frame: int = 0
     _spinner_chars: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -825,7 +826,11 @@ class FastResumeApp(App):
     def on_search_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
         self.is_loading = True
-        self._do_search(event.value)
+        self.search_query = event.value
+
+    def watch_search_query(self, query: str) -> None:
+        """React to search query changes."""
+        self._do_search(query)
 
     @on(Input.Submitted, "#search-input")
     def on_search_submitted(self, event: Input.Submitted) -> None:
