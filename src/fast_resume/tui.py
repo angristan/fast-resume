@@ -836,23 +836,23 @@ class FastResumeApp(App):
 
             # Interpolate through color stops: green → yellow → orange → gray
             if t < 0.3:
-                # Green to yellow
+                # Muted green to yellow
                 s = t / 0.3
-                r = int(50 + s * 205)  # 50 → 255
-                g = int(255 - s * 55)  # 255 → 200
-                b = 0
+                r = int(100 + s * 100)  # 100 → 200
+                g = int(200 - s * 20)  # 200 → 180
+                b = int(50 - s * 50)  # 50 → 0
             elif t < 0.6:
-                # Yellow to orange
+                # Yellow to muted orange
                 s = (t - 0.3) / 0.3
-                r = 255
-                g = int(200 - s * 130)  # 200 → 70
-                b = 0
+                r = 200
+                g = int(180 - s * 80)  # 180 → 100
+                b = int(0 + s * 50)  # 0 → 50
             else:
-                # Orange to dim gray
+                # Muted orange to dim gray
                 s = (t - 0.6) / 0.4
-                r = int(255 - s * 155)  # 255 → 100
-                g = int(70 + s * 30)  # 70 → 100
-                b = int(0 + s * 100)  # 0 → 100
+                r = int(200 - s * 100)  # 200 → 100
+                g = int(100)  # 100 → 100
+                b = int(50 + s * 50)  # 50 → 100
 
             time_text.stylize(f"#{r:02x}{g:02x}{b:02x}")
 
