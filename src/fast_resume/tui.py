@@ -1,5 +1,6 @@
 """Textual TUI for fast-resume."""
 
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -794,18 +795,41 @@ class FastResumeApp(App):
             # Format message count
             msgs_text = str(session.message_count) if session.message_count > 0 else "-"
 
-            # Format time with age-based coloring
+            # Format time with age-based gradient coloring
             time_ago = format_time_ago(session.timestamp)
             time_text = Text(time_ago.rjust(8))
-            # Color based on age: green=today, yellow=this week, dim=older
             now = datetime.now()
             age = now - session.timestamp
-            if age.days == 0:
-                time_text.stylize("green")
-            elif age.days < 7:
-                time_text.stylize("yellow")
+            age_hours = age.total_seconds() / 3600
+
+            # Continuous gradient using exponential decay
+            # Green (0h) → Yellow (12h) → Orange (3d) → Dim (30d+)
+            decay_rate = 0.005  # Controls how fast colors fade
+            t = 1 - math.exp(
+                -decay_rate * age_hours
+            )  # 0 at 0h, approaches 1 asymptotically
+
+            # Interpolate through color stops: green → yellow → orange → gray
+            if t < 0.3:
+                # Green to yellow
+                s = t / 0.3
+                r = int(50 + s * 205)  # 50 → 255
+                g = int(255 - s * 55)  # 255 → 200
+                b = 0
+            elif t < 0.6:
+                # Yellow to orange
+                s = (t - 0.3) / 0.3
+                r = 255
+                g = int(200 - s * 130)  # 200 → 70
+                b = 0
             else:
-                time_text.stylize("dim")
+                # Orange to dim gray
+                s = (t - 0.6) / 0.4
+                r = int(255 - s * 155)  # 255 → 100
+                g = int(70 + s * 30)  # 70 → 100
+                b = int(0 + s * 100)  # 0 → 100
+
+            time_text.stylize(f"#{r:02x}{g:02x}{b:02x}")
 
             table.add_row(icon, title, dir_text, msgs_text, time_text)
 
