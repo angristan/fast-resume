@@ -9,6 +9,7 @@ AGENTS = {
     "opencode": {"color": "#CFCECD", "badge": "opencode"},
     "vibe": {"color": "#FF6B35", "badge": "vibe"},
     "crush": {"color": "#6B51FF", "badge": "crush"},
+    "copilot": {"color": "#9CA3AF", "badge": "copilot"},
 }
 
 # Storage paths
@@ -17,10 +18,11 @@ CODEX_DIR = Path.home() / ".codex" / "sessions"
 OPENCODE_DIR = Path.home() / ".local" / "share" / "opencode" / "storage"
 VIBE_DIR = Path.home() / ".vibe" / "logs" / "session"
 CRUSH_PROJECTS_FILE = Path.home() / ".local" / "share" / "crush" / "projects.json"
+COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Cache location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
-CACHE_VERSION = 5  # Bump when adapter output format changes
+CACHE_VERSION = 6  # Bump when adapter output format changes
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

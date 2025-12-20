@@ -16,7 +16,7 @@ from .tui import run_tui
 @click.option(
     "-a",
     "--agent",
-    type=click.Choice(["claude", "codex", "crush", "opencode", "vibe"]),
+    type=click.Choice(["claude", "codex", "copilot", "crush", "opencode", "vibe"]),
     help="Filter by agent",
 )
 @click.option("-d", "--directory", help="Filter by directory (substring match)")
@@ -36,7 +36,7 @@ def main(
 ) -> None:
     """Fast fuzzy finder for coding agent session history.
 
-    Search across Claude Code, Codex CLI, Crush, OpenCode, and Vibe sessions.
+    Search across Claude Code, Codex CLI, Copilot CLI, Crush, OpenCode, and Vibe sessions.
     Select a session to resume it with the appropriate agent.
 
     Examples:

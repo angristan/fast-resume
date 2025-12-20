@@ -351,6 +351,10 @@ class FastResumeApp(App):
         color: #00A67E;
     }
 
+    .agent-copilot {
+        color: #9CA3AF;
+    }
+
     .agent-opencode {
         color: #6366F1;
     }
@@ -392,9 +396,10 @@ class FastResumeApp(App):
         Binding("1", "filter_all", "All", show=False),
         Binding("2", "filter_claude", "Claude", show=False),
         Binding("3", "filter_codex", "Codex", show=False),
-        Binding("4", "filter_crush", "Crush", show=False),
-        Binding("5", "filter_opencode", "OpenCode", show=False),
-        Binding("6", "filter_vibe", "Vibe", show=False),
+        Binding("4", "filter_copilot", "Copilot", show=False),
+        Binding("5", "filter_crush", "Crush", show=False),
+        Binding("6", "filter_opencode", "OpenCode", show=False),
+        Binding("7", "filter_vibe", "Vibe", show=False),
         Binding("ctrl+p", "command_palette", "Commands"),
     ]
 
@@ -436,6 +441,7 @@ class FastResumeApp(App):
                     (None, "All"),
                     ("claude", "Claude"),
                     ("codex", "Codex"),
+                    ("copilot", "Copilot"),
                     ("crush", "Crush"),
                     ("opencode", "OpenCode"),
                     ("vibe", "Vibe"),
@@ -774,6 +780,10 @@ class FastResumeApp(App):
         """Filter to Codex sessions only."""
         self._set_filter("codex")
 
+    def action_filter_copilot(self) -> None:
+        """Filter to Copilot sessions only."""
+        self._set_filter("copilot")
+
     def action_filter_crush(self) -> None:
         """Filter to Crush sessions only."""
         self._set_filter("crush")
@@ -796,6 +806,8 @@ class FastResumeApp(App):
             self._set_filter("claude")
         elif btn_id == "filter-codex":
             self._set_filter("codex")
+        elif btn_id == "filter-copilot":
+            self._set_filter("copilot")
         elif btn_id == "filter-crush":
             self._set_filter("crush")
         elif btn_id == "filter-opencode":
