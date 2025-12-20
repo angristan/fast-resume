@@ -507,6 +507,7 @@ class FastResumeApp(App):
         self._current_query: str = ""
         self._filter_buttons: dict[str | None, Static] = {}
         self._total_loaded: int = 0
+        self._search_timer: object | None = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
@@ -824,9 +825,16 @@ class FastResumeApp(App):
 
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
-        """Handle search input changes."""
+        """Handle search input changes with debouncing."""
+        # Cancel previous timer if still pending
+        if self._search_timer:
+            self._search_timer.stop()
         self.is_loading = True
-        self.search_query = event.value
+        # Debounce: wait 50ms before triggering search
+        value = event.value
+        self._search_timer = self.set_timer(
+            0.05, lambda: setattr(self, "search_query", value)
+        )
 
     def watch_search_query(self, query: str) -> None:
         """React to search query changes."""
