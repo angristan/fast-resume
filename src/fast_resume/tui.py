@@ -66,6 +66,8 @@ def format_time_ago(dt: datetime) -> str:
 
 def format_directory(path: str) -> str:
     """Format directory path, replacing home with ~."""
+    if not path:
+        return "n/a"
     home = os.path.expanduser("~")
     if path.startswith(home):
         return "~" + path[len(home) :]

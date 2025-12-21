@@ -41,9 +41,9 @@ class TestFormatDirectory:
         assert result == "~"
 
     def test_handles_empty_string(self):
-        """Test that empty string is returned unchanged."""
+        """Test that empty string returns n/a."""
         result = format_directory("")
-        assert result == ""
+        assert result == "n/a"
 
     def test_handles_root_path(self):
         """Test that root path is unchanged."""
