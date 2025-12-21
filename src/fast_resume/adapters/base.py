@@ -1,8 +1,35 @@
-"""Base protocol for agent adapters."""
+"""Base protocol and abstract class for agent adapters."""
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
+
+# 1ms tolerance for mtime comparison due to datetime precision loss
+MTIME_TOLERANCE = 0.001
+
+
+def truncate_title(text: str, max_length: int = 100, word_break: bool = True) -> str:
+    """Truncate title text with optional word-break.
+
+    Args:
+        text: The text to truncate
+        max_length: Maximum length before truncation (default 100)
+        word_break: If True, break at last word boundary; if False, hard truncate
+
+    Returns:
+        Truncated title with "..." suffix if text exceeded max_length
+    """
+    text = text.strip()
+    if len(text) <= max_length:
+        return text
+
+    truncated = text[:max_length]
+    if word_break:
+        # Break at last word boundary
+        truncated = truncated.rsplit(" ", 1)[0]
+    return truncated + "..."
 
 
 @dataclass
@@ -57,3 +84,98 @@ class AgentAdapter(Protocol):
     def is_available(self) -> bool:
         """Check if this agent's data directory exists."""
         ...
+
+
+class BaseSessionAdapter(ABC):
+    """Base class for file-based session adapters.
+
+    Provides a template method for find_sessions_incremental().
+    Used by Claude, Copilot, Codex, and Vibe adapters.
+
+    Subclasses implement:
+        - _scan_session_files(): Return dict of session_id -> (path, mtime)
+        - _parse_session_file(): Parse a single file into a Session
+        - find_sessions(): Find all sessions
+        - get_resume_command(): Command to resume a session
+    """
+
+    name: str
+    color: str
+    badge: str
+    _sessions_dir: Path
+
+    def is_available(self) -> bool:
+        """Check if data directory exists."""
+        return self._sessions_dir.exists()
+
+    @abstractmethod
+    def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
+        """Scan session files and return current state.
+
+        Returns:
+            Dict mapping session_id to (file_path, mtime) tuple
+        """
+        ...
+
+    @abstractmethod
+    def _parse_session_file(self, session_file: Path) -> Session | None:
+        """Parse a single session file.
+
+        Args:
+            session_file: Path to the session file
+
+        Returns:
+            Session object or None if parsing failed
+        """
+        ...
+
+    @abstractmethod
+    def find_sessions(self) -> list[Session]:
+        """Find all sessions for this agent."""
+        ...
+
+    @abstractmethod
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
+        """Get command to resume a session."""
+        ...
+
+    def find_sessions_incremental(
+        self, known: dict[str, tuple[float, str]]
+    ) -> tuple[list[Session], list[str]]:
+        """Find sessions incrementally using template method pattern.
+
+        Args:
+            known: Dict mapping session_id to (mtime, agent_name) tuple
+
+        Returns:
+            Tuple of (new_or_modified sessions, deleted session IDs)
+        """
+        if not self.is_available():
+            # All known sessions from this agent are deleted
+            deleted_ids = [
+                sid for sid, (_, agent) in known.items() if agent == self.name
+            ]
+            return [], deleted_ids
+
+        # Scan current session files
+        current_files = self._scan_session_files()
+
+        # Find new and modified sessions
+        new_or_modified = []
+        for session_id, (path, mtime) in current_files.items():
+            known_entry = known.get(session_id)
+            if known_entry is None or mtime > known_entry[0] + MTIME_TOLERANCE:
+                session = self._parse_session_file(path)
+                if session:
+                    session.mtime = mtime
+                    new_or_modified.append(session)
+
+        # Find deleted sessions (in known but not in current, for this agent only)
+        current_ids = set(current_files.keys())
+        deleted_ids = [
+            sid
+            for sid, (_, agent) in known.items()
+            if agent == self.name and sid not in current_ids
+        ]
+
+        return new_or_modified, deleted_ids

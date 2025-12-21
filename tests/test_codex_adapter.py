@@ -71,7 +71,7 @@ class TestCodexAdapter:
 
     def test_parse_session_basic(self, adapter, codex_session_file):
         """Test parsing a basic Codex session file."""
-        session = adapter._parse_session(codex_session_file)
+        session = adapter._parse_session_file(codex_session_file)
 
         assert session is not None
         assert session.agent == "codex"
@@ -104,7 +104,7 @@ class TestCodexAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "First prompt" in session.title
@@ -140,7 +140,7 @@ class TestCodexAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "<environment_context>" not in session.content
@@ -160,7 +160,7 @@ class TestCodexAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "2025-12-20T10-00-00-fallback123" in session.id
@@ -184,7 +184,7 @@ class TestCodexAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
@@ -205,7 +205,7 @@ class TestCodexAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert len(session.title) <= 83  # 80 + "..."
@@ -236,7 +236,7 @@ class TestCodexAdapter:
                 + "\n"
             )
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Valid" in session.content

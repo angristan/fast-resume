@@ -65,7 +65,7 @@ class TestClaudeAdapter:
 
     def test_parse_session_basic(self, adapter, claude_session_file):
         """Test parsing a basic Claude session file."""
-        session = adapter._parse_session(claude_session_file)
+        session = adapter._parse_session_file(claude_session_file)
 
         assert session is not None
         assert session.agent == "claude"
@@ -98,7 +98,7 @@ class TestClaudeAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Implement a new feature" in session.title
@@ -127,7 +127,7 @@ class TestClaudeAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Hello from list content" in session.content
@@ -157,7 +157,7 @@ class TestClaudeAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Meta message" not in session.content
@@ -187,7 +187,7 @@ class TestClaudeAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "<command>" not in session.content
@@ -199,7 +199,7 @@ class TestClaudeAdapter:
         session_file = project_dir / "session-empty.jsonl"
         session_file.touch()
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
@@ -217,7 +217,7 @@ class TestClaudeAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
@@ -245,7 +245,7 @@ class TestClaudeAdapter:
                 + "\n"
             )
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Valid message" in session.content

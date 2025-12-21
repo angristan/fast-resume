@@ -5,10 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CLAUDE_DIR, MAX_PREVIEW_LENGTH
-from .base import Session
+from .base import BaseSessionAdapter, Session, truncate_title
 
 
-class ClaudeAdapter:
+class ClaudeAdapter(BaseSessionAdapter):
     """Adapter for Claude Code sessions."""
 
     name = "claude"
@@ -17,10 +17,6 @@ class ClaudeAdapter:
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else CLAUDE_DIR
-
-    def is_available(self) -> bool:
-        """Check if Claude Code data directory exists."""
-        return self._sessions_dir.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all Claude Code sessions."""
@@ -37,13 +33,13 @@ class ClaudeAdapter:
                 if session_file.name.startswith("agent-"):
                     continue
 
-                session = self._parse_session(session_file)
+                session = self._parse_session_file(session_file)
                 if session:
                     sessions.append(session)
 
         return sessions
 
-    def _parse_session(self, session_file: Path) -> Session | None:
+    def _parse_session_file(self, session_file: Path) -> Session | None:
         """Parse a Claude Code session file."""
         try:
             title = ""
@@ -136,10 +132,7 @@ class ClaudeAdapter:
 
             # Use first user message as title if no summary
             if not title:
-                # Truncate and clean up
-                title = first_user_message.strip()[:100]
-                if len(first_user_message) > 100:
-                    title = title.rsplit(" ", 1)[0] + "..."
+                title = truncate_title(first_user_message)
 
             # Skip sessions with no actual conversation content
             if not messages:
@@ -161,19 +154,9 @@ class ClaudeAdapter:
         except Exception:
             return None
 
-    def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
-    ) -> tuple[list[Session], list[str]]:
-        """Find sessions incrementally, comparing against known sessions."""
-        if not self.is_available():
-            # If adapter not available, all known sessions from this agent are deleted
-            deleted_ids = [
-                sid for sid, (_, agent) in known.items() if agent == self.name
-            ]
-            return [], deleted_ids
-
-        # Scan all session files and build current state
-        current_files: dict[str, tuple[Path, float]] = {}  # session_id -> (path, mtime)
+    def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
+        """Scan all Claude Code session files."""
+        current_files: dict[str, tuple[Path, float]] = {}
 
         for project_dir in self._sessions_dir.iterdir():
             if not project_dir.is_dir():
@@ -187,27 +170,7 @@ class ClaudeAdapter:
                 mtime = session_file.stat().st_mtime
                 current_files[session_id] = (session_file, mtime)
 
-        # Find new and modified sessions
-        # Use 1ms tolerance for mtime comparison due to datetime precision loss
-        new_or_modified = []
-        for session_id, (path, mtime) in current_files.items():
-            known_entry = known.get(session_id)
-            if known_entry is None or mtime > known_entry[0] + 0.001:
-                # New or modified - parse it
-                session = self._parse_session(path)
-                if session:
-                    session.mtime = mtime
-                    new_or_modified.append(session)
-
-        # Find deleted sessions (in known but not in current, for this agent only)
-        current_ids = set(current_files.keys())
-        deleted_ids = [
-            sid
-            for sid, (_, agent) in known.items()
-            if agent == self.name and sid not in current_ids
-        ]
-
-        return new_or_modified, deleted_ids
+        return current_files
 
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Claude Code session."""

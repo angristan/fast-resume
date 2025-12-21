@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH
-from .base import Session
+from .base import Session, truncate_title
 
 # VS Code storage paths vary by platform
 if sys.platform == "darwin":
@@ -166,9 +166,7 @@ class CopilotVSCodeAdapter:
             # Use first user message as title if no custom title
             if not title and messages:
                 first_msg = messages[0].lstrip("» ").strip()
-                title = first_msg[:100]
-                if len(first_msg) > 100:
-                    title = title.rsplit(" ", 1)[0] + "..."
+                title = truncate_title(first_msg)
 
             # Get timestamp from file or data
             creation_date = data.get("creationDate")

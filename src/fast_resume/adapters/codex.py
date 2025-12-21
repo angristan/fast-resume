@@ -5,10 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CODEX_DIR, MAX_PREVIEW_LENGTH
-from .base import Session
+from .base import BaseSessionAdapter, Session, truncate_title
 
 
-class CodexAdapter:
+class CodexAdapter(BaseSessionAdapter):
     """Adapter for Codex CLI sessions."""
 
     name = "codex"
@@ -18,10 +18,6 @@ class CodexAdapter:
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else CODEX_DIR
 
-    def is_available(self) -> bool:
-        """Check if Codex CLI data directory exists."""
-        return self._sessions_dir.exists()
-
     def find_sessions(self) -> list[Session]:
         """Find all Codex CLI sessions."""
         if not self.is_available():
@@ -30,13 +26,13 @@ class CodexAdapter:
         sessions = []
         # Codex stores sessions in YYYY/MM/DD subdirectories
         for session_file in self._sessions_dir.rglob("*.jsonl"):
-            session = self._parse_session(session_file)
+            session = self._parse_session_file(session_file)
             if session:
                 sessions.append(session)
 
         return sessions
 
-    def _parse_session(self, session_file: Path) -> Session | None:
+    def _parse_session_file(self, session_file: Path) -> Session | None:
         """Parse a Codex CLI session file."""
         try:
             session_id = ""
@@ -121,10 +117,8 @@ class CodexAdapter:
             if not user_prompts:
                 return None
 
-            # Generate title from first actual user prompt
-            title = user_prompts[0][:80]
-            if len(user_prompts[0]) > 80:
-                title += "..."
+            # Generate title from first actual user prompt (80-char hard truncate)
+            title = truncate_title(user_prompts[0], max_length=80, word_break=False)
 
             full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
@@ -170,17 +164,8 @@ class CodexAdapter:
             else session_file.stem
         )
 
-    def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
-    ) -> tuple[list[Session], list[str]]:
-        """Find sessions incrementally, comparing against known sessions."""
-        if not self.is_available():
-            deleted_ids = [
-                sid for sid, (_, agent) in known.items() if agent == self.name
-            ]
-            return [], deleted_ids
-
-        # Scan all session files and build current state
+    def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
+        """Scan all Codex CLI session files."""
         current_files: dict[str, tuple[Path, float]] = {}
 
         for session_file in self._sessions_dir.rglob("*.jsonl"):
@@ -188,26 +173,7 @@ class CodexAdapter:
             mtime = session_file.stat().st_mtime
             current_files[session_id] = (session_file, mtime)
 
-        # Find new and modified sessions
-        # Use 1ms tolerance for mtime comparison due to datetime precision loss
-        new_or_modified = []
-        for session_id, (path, mtime) in current_files.items():
-            known_entry = known.get(session_id)
-            if known_entry is None or mtime > known_entry[0] + 0.001:
-                session = self._parse_session(path)
-                if session:
-                    session.mtime = mtime
-                    new_or_modified.append(session)
-
-        # Find deleted sessions
-        current_ids = set(current_files.keys())
-        deleted_ids = [
-            sid
-            for sid, (_, agent) in known.items()
-            if agent == self.name and sid not in current_ids
-        ]
-
-        return new_or_modified, deleted_ids
+        return current_files
 
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Codex CLI session."""

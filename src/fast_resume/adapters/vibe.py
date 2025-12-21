@@ -5,10 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH, VIBE_DIR
-from .base import Session
+from .base import BaseSessionAdapter, Session, truncate_title
 
 
-class VibeAdapter:
+class VibeAdapter(BaseSessionAdapter):
     """Adapter for Vibe (Mistral) sessions."""
 
     name = "vibe"
@@ -18,10 +18,6 @@ class VibeAdapter:
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else VIBE_DIR
 
-    def is_available(self) -> bool:
-        """Check if Vibe data directory exists."""
-        return self._sessions_dir.exists()
-
     def find_sessions(self) -> list[Session]:
         """Find all Vibe sessions."""
         if not self.is_available():
@@ -29,13 +25,13 @@ class VibeAdapter:
 
         sessions = []
         for session_file in self._sessions_dir.glob("session_*.json"):
-            session = self._parse_session(session_file)
+            session = self._parse_session_file(session_file)
             if session:
                 sessions.append(session)
 
         return sessions
 
-    def _parse_session(self, session_file: Path) -> Session | None:
+    def _parse_session_file(self, session_file: Path) -> Session | None:
         """Parse a Vibe session file."""
         try:
             with open(session_file, "rb") as f:
@@ -84,21 +80,18 @@ class VibeAdapter:
                             if text:
                                 messages.append(f"{role_prefix}{text}")
 
-            # Generate title from first user message
+            # Generate title from first user message (80-char hard truncate)
             user_messages = [
                 m for i, m in enumerate(messages_data) if m.get("role") == "user"
             ]
             if user_messages:
                 first_msg = user_messages[0].get("content", "")
                 if isinstance(first_msg, str):
-                    title = first_msg[:80]
+                    title = truncate_title(first_msg, max_length=80, word_break=False)
                 else:
                     title = "Vibe session"
             else:
                 title = "Vibe session"
-
-            if len(title) == 80:
-                title += "..."
 
             full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
@@ -117,19 +110,11 @@ class VibeAdapter:
         except Exception:
             return None
 
-    def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
-    ) -> tuple[list[Session], list[str]]:
-        """Find sessions incrementally, comparing against known sessions."""
-        if not self.is_available():
-            deleted_ids = [
-                sid for sid, (_, agent) in known.items() if agent == self.name
-            ]
-            return [], deleted_ids
+    def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
+        """Scan all Vibe session files.
 
-        # Scan all session files and build current state
-        # For Vibe, we use the 'start_time' timestamp from the file content
-        # (not file mtime) because that's what we store in the index
+        Uses start_time from JSON metadata as mtime for consistency with parsing.
+        """
         current_files: dict[str, tuple[Path, float]] = {}
 
         for session_file in self._sessions_dir.glob("session_*.json"):
@@ -139,7 +124,7 @@ class VibeAdapter:
                 metadata = data.get("metadata", {})
                 session_id = metadata.get("session_id", session_file.stem)
 
-                # Use start_time to match what _parse_session stores
+                # Use start_time to match what _parse_session_file stores
                 start_time = metadata.get("start_time", "")
                 if start_time:
                     try:
@@ -153,26 +138,7 @@ class VibeAdapter:
             except Exception:
                 continue
 
-        # Find new and modified sessions
-        # Use 1ms tolerance for mtime comparison due to datetime precision loss
-        new_or_modified = []
-        for session_id, (path, mtime) in current_files.items():
-            known_entry = known.get(session_id)
-            if known_entry is None or mtime > known_entry[0] + 0.001:
-                session = self._parse_session(path)
-                if session:
-                    session.mtime = mtime
-                    new_or_modified.append(session)
-
-        # Find deleted sessions
-        current_ids = set(current_files.keys())
-        deleted_ids = [
-            sid
-            for sid, (_, agent) in known.items()
-            if agent == self.name and sid not in current_ids
-        ]
-
-        return new_or_modified, deleted_ids
+        return current_files
 
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Vibe session."""

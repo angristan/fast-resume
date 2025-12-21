@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_PREVIEW_LENGTH
-from .base import Session
+from .base import Session, truncate_title
 
 
 class CrushAdapter:
@@ -152,9 +152,7 @@ class CrushAdapter:
 
             # Use first user message as title if none set
             if not title:
-                title = first_user_message.strip()[:100]
-                if len(first_user_message) > 100:
-                    title = title.rsplit(" ", 1)[0] + "..."
+                title = truncate_title(first_user_message)
 
             full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]

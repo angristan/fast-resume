@@ -88,7 +88,7 @@ class TestCopilotAdapter:
 
     def test_parse_session_basic(self, adapter, copilot_session_file):
         """Test parsing a basic Copilot session file."""
-        session = adapter._parse_session(copilot_session_file)
+        session = adapter._parse_session_file(copilot_session_file)
 
         assert session is not None
         assert session.agent == "copilot-cli"
@@ -123,7 +123,7 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.id == "real-session-id-123"
@@ -149,7 +149,7 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.id == "my-session-file"
@@ -184,14 +184,14 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.directory == "/Users/dev/my-project"
 
     def test_parse_session_counts_human_turns(self, adapter, copilot_session_file):
         """Test that human turns are counted correctly."""
-        session = adapter._parse_session(copilot_session_file)
+        session = adapter._parse_session_file(copilot_session_file)
 
         assert session is not None
         assert session.message_count == 2  # Two user.message entries
@@ -203,7 +203,7 @@ class TestCopilotAdapter:
         session_file = session_dir / "session-empty.jsonl"
         session_file.touch()
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
@@ -228,7 +228,7 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
@@ -257,7 +257,7 @@ class TestCopilotAdapter:
                 + "\n"
             )
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Valid message" in session.content
@@ -357,7 +357,7 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.directory == ""  # No folder_trust info
@@ -385,7 +385,7 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert len(session.title) <= 103  # 100 chars + "..."

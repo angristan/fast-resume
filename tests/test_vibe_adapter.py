@@ -57,7 +57,7 @@ class TestVibeAdapter:
 
     def test_parse_session_basic(self, adapter, vibe_session_file):
         """Test parsing a basic Vibe session file."""
-        session = adapter._parse_session(vibe_session_file)
+        session = adapter._parse_session_file(vibe_session_file)
 
         assert session is not None
         assert session.agent == "vibe"
@@ -69,7 +69,7 @@ class TestVibeAdapter:
 
     def test_parse_session_skips_system_messages(self, adapter, vibe_session_file):
         """Test that system messages are skipped in content."""
-        session = adapter._parse_session(vibe_session_file)
+        session = adapter._parse_session_file(vibe_session_file)
 
         assert session is not None
         assert "You are a helpful assistant" not in session.content
@@ -97,7 +97,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Multi-part message" in session.content
@@ -118,7 +118,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.id == "actual-session-id"
@@ -135,7 +135,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.id == "session_fallback123"
@@ -155,7 +155,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.timestamp.year >= 2024
@@ -176,7 +176,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         # Should fall back to file mtime
@@ -203,7 +203,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert "Implement OAuth2 authentication" in session.title
@@ -224,7 +224,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert len(session.title) <= 83  # 80 + "..."
@@ -245,7 +245,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             json.dump(data, f)
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.title == "Vibe session"
@@ -256,7 +256,7 @@ class TestVibeAdapter:
         with open(session_file, "w") as f:
             f.write("not valid json")
 
-        session = adapter._parse_session(session_file)
+        session = adapter._parse_session_file(session_file)
 
         assert session is None
 
