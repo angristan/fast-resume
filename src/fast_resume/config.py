@@ -2,15 +2,15 @@
 
 from pathlib import Path
 
-# Agent colors and badges
+# Agent colors and badges (badge is the display name shown in UI)
 AGENTS = {
-    "claude": {"color": "#E87B35", "badge": "claude"},
-    "codex": {"color": "#00A67E", "badge": "codex"},
-    "opencode": {"color": "#CFCECD", "badge": "opencode"},
-    "vibe": {"color": "#FF6B35", "badge": "vibe"},
-    "crush": {"color": "#6B51FF", "badge": "crush"},
-    "copilot-cli": {"color": "#9CA3AF", "badge": "copilot-cli"},
-    "copilot-vscode": {"color": "#007ACC", "badge": "vscode copilot"},
+    "claude": {"color": "#E87B35", "badge": "Claude Code"},
+    "codex": {"color": "#00A67E", "badge": "Codex CLI"},
+    "opencode": {"color": "#CFCECD", "badge": "OpenCode"},
+    "vibe": {"color": "#FF6B35", "badge": "Vibe"},
+    "crush": {"color": "#6B51FF", "badge": "Crush"},
+    "copilot-cli": {"color": "#9CA3AF", "badge": "Copilot CLI"},
+    "copilot-vscode": {"color": "#007ACC", "badge": "VS Code Copilot"},
 }
 
 # Storage paths

@@ -53,7 +53,7 @@ class TestVibeAdapter:
         """Test adapter has correct name and attributes."""
         assert adapter.name == "vibe"
         assert adapter.color is not None
-        assert adapter.badge == "vibe"
+        assert adapter.badge == "Vibe"
 
     def test_parse_session_basic(self, adapter, vibe_session_file):
         """Test parsing a basic Vibe session file."""

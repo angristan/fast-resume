@@ -85,7 +85,7 @@ class TestCopilotAdapter:
         """Test adapter has correct name and attributes."""
         assert adapter.name == "copilot-cli"
         assert adapter.color is not None
-        assert adapter.badge == "copilot-cli"
+        assert adapter.badge == "Copilot CLI"
 
     def test_parse_session_basic(self, adapter, copilot_session_file):
         """Test parsing a basic Copilot session file."""
