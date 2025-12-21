@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CODEX_DIR, MAX_PREVIEW_LENGTH
-from .base import BaseSessionAdapter, Session, truncate_title
+from ..logging_config import log_parse_error
+from .base import BaseSessionAdapter, ErrorCallback, ParseError, Session, truncate_title
 
 
 class CodexAdapter(BaseSessionAdapter):
@@ -32,7 +33,9 @@ class CodexAdapter(BaseSessionAdapter):
 
         return sessions
 
-    def _parse_session_file(self, session_file: Path) -> Session | None:
+    def _parse_session_file(
+        self, session_file: Path, on_error: ErrorCallback = None
+    ) -> Session | None:
         """Parse a Codex CLI session file."""
         try:
             session_id = ""
@@ -49,6 +52,7 @@ class CodexAdapter(BaseSessionAdapter):
                     try:
                         data = orjson.loads(line)
                     except orjson.JSONDecodeError:
+                        # Skip malformed lines within the file
                         continue
 
                     msg_type = data.get("type", "")
@@ -134,7 +138,31 @@ class CodexAdapter(BaseSessionAdapter):
                 message_count=len(user_prompts),
                 yolo=yolo,
             )
-        except Exception:
+        except OSError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="OSError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except (KeyError, TypeError, AttributeError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def _get_session_id_from_file(self, session_file: Path) -> str:

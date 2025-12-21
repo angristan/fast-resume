@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CLAUDE_DIR, MAX_PREVIEW_LENGTH
-from .base import BaseSessionAdapter, Session, truncate_title
+from ..logging_config import log_parse_error
+from .base import BaseSessionAdapter, ErrorCallback, ParseError, Session, truncate_title
 
 
 class ClaudeAdapter(BaseSessionAdapter):
@@ -39,7 +40,9 @@ class ClaudeAdapter(BaseSessionAdapter):
 
         return sessions
 
-    def _parse_session_file(self, session_file: Path) -> Session | None:
+    def _parse_session_file(
+        self, session_file: Path, on_error: ErrorCallback = None
+    ) -> Session | None:
         """Parse a Claude Code session file."""
         try:
             title = ""
@@ -57,6 +60,7 @@ class ClaudeAdapter(BaseSessionAdapter):
                     try:
                         data = orjson.loads(line)
                     except orjson.JSONDecodeError:
+                        # Skip malformed lines within the file
                         continue
 
                     msg_type = data.get("type", "")
@@ -151,7 +155,31 @@ class ClaudeAdapter(BaseSessionAdapter):
                 content=full_content,
                 message_count=human_turn_count,
             )
-        except Exception:
+        except OSError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="OSError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except (KeyError, TypeError, AttributeError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:

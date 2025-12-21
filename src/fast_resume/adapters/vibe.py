@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH, VIBE_DIR
-from .base import BaseSessionAdapter, Session, truncate_title
+from ..logging_config import log_parse_error
+from .base import BaseSessionAdapter, ErrorCallback, ParseError, Session, truncate_title
 
 
 class VibeAdapter(BaseSessionAdapter):
@@ -31,7 +32,9 @@ class VibeAdapter(BaseSessionAdapter):
 
         return sessions
 
-    def _parse_session_file(self, session_file: Path) -> Session | None:
+    def _parse_session_file(
+        self, session_file: Path, on_error: ErrorCallback = None
+    ) -> Session | None:
         """Parse a Vibe session file."""
         try:
             with open(session_file, "rb") as f:
@@ -107,7 +110,44 @@ class VibeAdapter(BaseSessionAdapter):
                 message_count=len(messages),
                 yolo=yolo,
             )
-        except Exception:
+        except OSError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="OSError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except orjson.JSONDecodeError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="JSONDecodeError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except (KeyError, TypeError, AttributeError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:

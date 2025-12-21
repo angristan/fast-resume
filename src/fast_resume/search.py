@@ -9,6 +9,7 @@ from .adapters import (
     CopilotAdapter,
     CopilotVSCodeAdapter,
     CrushAdapter,
+    ErrorCallback,
     OpenCodeAdapter,
     Session,
     VibeAdapter,
@@ -112,12 +113,18 @@ class SessionSearch:
         return self._sessions
 
     def get_sessions_streaming(
-        self, on_progress: Callable[[], None]
+        self,
+        on_progress: Callable[[], None],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], int, int, int]:
         """Load sessions with progress callback for each adapter that completes.
 
         Sessions are indexed incrementally as each adapter completes, allowing
         Tantivy search to work during streaming.
+
+        Args:
+            on_progress: Callback for progress updates
+            on_error: Optional callback for parse errors
 
         Returns:
             Tuple of (sessions, new_count, updated_count, deleted_count)
@@ -138,7 +145,7 @@ class SessionSearch:
         total_deleted = 0
 
         def get_incremental(adapter):
-            return adapter.find_sessions_incremental(known)
+            return adapter.find_sessions_incremental(known, on_error=on_error)
 
         try:
             with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:

@@ -22,7 +22,9 @@ CRUSH_PROJECTS_FILE = Path.home() / ".local" / "share" / "crush" / "projects.jso
 COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Storage location
-INDEX_DIR = Path.home() / ".cache" / "fast-resume" / "tantivy_index"
+CACHE_DIR = Path.home() / ".cache" / "fast-resume"
+INDEX_DIR = CACHE_DIR / "tantivy_index"
+LOG_FILE = CACHE_DIR / "parse-errors.log"
 SCHEMA_VERSION = 15  # Bump when schema changes (15: add yolo field)
 
 # Search settings

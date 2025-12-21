@@ -1,10 +1,14 @@
 """Base protocol and abstract class for agent adapters."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 # 1ms tolerance for mtime comparison due to datetime precision loss
 MTIME_TOLERANCE = 0.001
@@ -48,6 +52,20 @@ class Session:
     yolo: bool = False  # Session was started with auto-approve/skip-permissions
 
 
+@dataclass
+class ParseError:
+    """Represents a session parsing error."""
+
+    agent: str  # Which adapter encountered the error
+    file_path: str  # Path to the problematic file
+    error_type: str  # e.g., "JSONDecodeError", "KeyError", "OSError"
+    message: str  # Human-readable error message
+
+
+# Type alias for error callback
+ErrorCallback = Callable[["ParseError"], None] | None
+
+
 class AgentAdapter(Protocol):
     """Protocol for agent-specific session adapters."""
 
@@ -60,12 +78,15 @@ class AgentAdapter(Protocol):
         ...
 
     def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
+        self,
+        known: dict[str, tuple[float, str]],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions.
 
         Args:
             known: Dict mapping session_id to (mtime, agent_name) tuple
+            on_error: Optional callback for parse errors
 
         Returns:
             Tuple of (new_or_modified sessions, deleted session IDs)
@@ -118,11 +139,14 @@ class BaseSessionAdapter(ABC):
         ...
 
     @abstractmethod
-    def _parse_session_file(self, session_file: Path) -> Session | None:
+    def _parse_session_file(
+        self, session_file: Path, on_error: ErrorCallback = None
+    ) -> Session | None:
         """Parse a single session file.
 
         Args:
             session_file: Path to the session file
+            on_error: Optional callback for parse errors
 
         Returns:
             Session object or None if parsing failed
@@ -140,12 +164,15 @@ class BaseSessionAdapter(ABC):
         ...
 
     def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
+        self,
+        known: dict[str, tuple[float, str]],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally using template method pattern.
 
         Args:
             known: Dict mapping session_id to (mtime, agent_name) tuple
+            on_error: Optional callback for parse errors
 
         Returns:
             Tuple of (new_or_modified sessions, deleted session IDs)
@@ -165,7 +192,7 @@ class BaseSessionAdapter(ABC):
         for session_id, (path, mtime) in current_files.items():
             known_entry = known.get(session_id)
             if known_entry is None or mtime > known_entry[0] + MTIME_TOLERANCE:
-                session = self._parse_session_file(path)
+                session = self._parse_session_file(path, on_error=on_error)
                 if session:
                     session.mtime = mtime
                     new_or_modified.append(session)

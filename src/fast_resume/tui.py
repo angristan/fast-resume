@@ -20,8 +20,8 @@ from textual.widgets import DataTable, Footer, Input, Static, Label
 from textual_image.renderable import Image as ImageRenderable
 from textual_image.widget import Image as ImageWidget
 
-from .adapters.base import Session
-from .config import AGENTS
+from .adapters.base import ParseError, Session
+from .config import AGENTS, LOG_FILE
 from .search import SessionSearch
 
 # Asset paths for agent icons
@@ -742,6 +742,8 @@ class FastResumeApp(App):
     @work(exclusive=True, thread=True)
     def _do_streaming_load(self) -> None:
         """Load sessions with progressive updates as each adapter completes."""
+        # Collect parse errors (thread-safe list)
+        parse_errors: list[ParseError] = []
 
         def on_progress():
             # Use Tantivy search with initial_query
@@ -752,11 +754,16 @@ class FastResumeApp(App):
             total = self.search_engine.get_session_count()
             self.call_from_thread(self._update_results_streaming, sessions, total)
 
+        def on_error(error: ParseError):
+            parse_errors.append(error)
+
         _, new, updated, deleted = self.search_engine.get_sessions_streaming(
-            on_progress
+            on_progress, on_error=on_error
         )
         # Mark loading complete and show toast if there were changes
-        self.call_from_thread(self._finish_loading, new, updated, deleted)
+        self.call_from_thread(
+            self._finish_loading, new, updated, deleted, len(parse_errors)
+        )
 
     def _update_results_streaming(self, sessions: list[Session], total: int) -> None:
         """Update UI with streaming results (keeps loading state)."""
@@ -765,7 +772,9 @@ class FastResumeApp(App):
         self._update_table()
         self._update_session_count()
 
-    def _finish_loading(self, new: int = 0, updated: int = 0, deleted: int = 0) -> None:
+    def _finish_loading(
+        self, new: int = 0, updated: int = 0, deleted: int = 0, errors: int = 0
+    ) -> None:
         """Mark loading as complete and show toast if there were changes."""
         self.is_loading = False
         if hasattr(self, "_spinner_timer"):
@@ -794,6 +803,19 @@ class FastResumeApp(App):
                 else:
                     parts.append(f"{deleted} deleted")
             self.notify(", ".join(parts), title="Index updated")
+
+        # Show warning toast for parse errors
+        if errors:
+            home = os.path.expanduser("~")
+            log_path = str(LOG_FILE)
+            if log_path.startswith(home):
+                log_path = "~" + log_path[len(home) :]
+            self.notify(
+                f"{errors} session{'s' if errors != 1 else ''} failed to parse. "
+                f"See {log_path}",
+                severity="warning",
+                timeout=5,
+            )
 
     @work(exclusive=True, thread=True)
     def _do_search(self, query: str) -> None:

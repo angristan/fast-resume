@@ -1,6 +1,6 @@
 """Agent adapters for different coding tools."""
 
-from .base import AgentAdapter, Session
+from .base import AgentAdapter, ErrorCallback, ParseError, Session
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 from .copilot import CopilotAdapter
@@ -11,6 +11,8 @@ from .vibe import VibeAdapter
 
 __all__ = [
     "AgentAdapter",
+    "ErrorCallback",
+    "ParseError",
     "Session",
     "ClaudeAdapter",
     "CodexAdapter",

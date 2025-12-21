@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_PREVIEW_LENGTH
-from .base import Session, truncate_title
+from ..logging_config import log_parse_error
+from .base import ErrorCallback, ParseError, Session, truncate_title
 
 
 class CrushAdapter:
@@ -55,7 +56,9 @@ class CrushAdapter:
 
         return sessions
 
-    def _load_sessions_from_db(self, db_path: Path, project_path: str) -> list[Session]:
+    def _load_sessions_from_db(
+        self, db_path: Path, project_path: str, on_error: ErrorCallback = None
+    ) -> list[Session]:
         """Load sessions from a Crush SQLite database."""
         sessions = []
 
@@ -102,12 +105,23 @@ class CrushAdapter:
                     data,
                     session_messages[session_id],
                     project_path,
+                    on_error=on_error,
                 )
                 if session:
                     sessions.append(session)
 
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(db_path),
+                error_type="sqlite3.Error",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
 
         return sessions
 
@@ -117,6 +131,7 @@ class CrushAdapter:
         data: dict,
         messages_raw: list[tuple[str, str]],
         project_path: str,
+        on_error: ErrorCallback = None,
     ) -> Session | None:
         """Build a Session object from pre-fetched data."""
         try:
@@ -167,7 +182,18 @@ class CrushAdapter:
                 content=full_content,
                 message_count=len(messages),
             )
-        except Exception:
+        except (KeyError, TypeError, AttributeError, ValueError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=f"crush_db:{session_id}",
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def _extract_text_from_parts(self, parts_json: str) -> str:
@@ -203,7 +229,9 @@ class CrushAdapter:
         return " ".join(text_parts)
 
     def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
+        self,
+        known: dict[str, tuple[float, str]],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions."""
         if not self.is_available():
@@ -238,7 +266,9 @@ class CrushAdapter:
                 continue
 
             # Load all sessions from this db
-            project_sessions = self._load_sessions_from_db(db_path, project_path)
+            project_sessions = self._load_sessions_from_db(
+                db_path, project_path, on_error=on_error
+            )
 
             for session in project_sessions:
                 all_current_ids.add(session.id)

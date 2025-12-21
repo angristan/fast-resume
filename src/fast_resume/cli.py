@@ -9,6 +9,7 @@ from rich.table import Table
 
 from .config import AGENTS, INDEX_DIR
 from .index import TantivyIndex
+from .logging_config import setup_logging
 from .search import SessionSearch
 from .tui import run_tui
 
@@ -69,6 +70,9 @@ def main(
 
         fr --no-tui           # List sessions in terminal
     """
+    # Initialize logging for parse errors
+    setup_logging()
+
     if stats:
         _show_stats()
         return

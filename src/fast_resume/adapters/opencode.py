@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH, OPENCODE_DIR
-from .base import Session
+from ..logging_config import log_parse_error
+from .base import ErrorCallback, ParseError, Session
 
 
 class OpenCodeAdapter:
@@ -85,6 +86,7 @@ class OpenCodeAdapter:
         session_file: Path,
         messages_by_session: dict[str, list[tuple[Path, str, str]]],
         parts_by_message: dict[str, list[str]],
+        on_error: ErrorCallback = None,
     ) -> Session | None:
         """Parse an OpenCode session file."""
         try:
@@ -121,7 +123,44 @@ class OpenCodeAdapter:
                 content=full_content,
                 message_count=len(messages),
             )
-        except Exception:
+        except OSError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="OSError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except orjson.JSONDecodeError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="JSONDecodeError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except (KeyError, TypeError, AttributeError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def _get_session_messages(
@@ -146,7 +185,9 @@ class OpenCodeAdapter:
         return messages
 
     def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
+        self,
+        known: dict[str, tuple[float, str]],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions."""
         if not self.is_available():
@@ -184,7 +225,8 @@ class OpenCodeAdapter:
                         else:
                             mtime = session_file.stat().st_mtime
                         current_sessions[session_id] = (session_file, mtime)
-                except Exception:
+                except (OSError, orjson.JSONDecodeError):
+                    # Skip files that can't be read during scanning
                     continue
 
         # Check which sessions need parsing
@@ -221,7 +263,8 @@ class OpenCodeAdapter:
                     role = msg_data.get("role", "")
                     if msg_id:
                         messages_by_session[session_id].append((msg_file, msg_id, role))
-                except Exception:
+                except (OSError, orjson.JSONDecodeError):
+                    # Skip files that can't be read during indexing
                     continue
 
         parts_by_message: dict[str, list[str]] = defaultdict(list)
@@ -235,13 +278,16 @@ class OpenCodeAdapter:
                         text = part_data.get("text", "")
                         if text:
                             parts_by_message[msg_id].append(text)
-                except Exception:
+                except (OSError, orjson.JSONDecodeError):
+                    # Skip files that can't be read during indexing
                     continue
 
         # Parse the changed sessions
         new_or_modified = []
         for session_id, path, mtime in sessions_to_parse:
-            session = self._parse_session(path, messages_by_session, parts_by_message)
+            session = self._parse_session(
+                path, messages_by_session, parts_by_message, on_error=on_error
+            )
             if session:
                 session.mtime = mtime
                 new_or_modified.append(session)

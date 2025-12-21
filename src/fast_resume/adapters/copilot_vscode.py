@@ -7,7 +7,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH
-from .base import Session, truncate_title
+from ..logging_config import log_parse_error
+from .base import ErrorCallback, ParseError, Session, truncate_title
 
 # VS Code storage paths vary by platform
 if sys.platform == "darwin":
@@ -114,7 +115,10 @@ class CopilotVSCodeAdapter:
         return sessions
 
     def _parse_session(
-        self, session_file: Path, workspace_directory: str = ""
+        self,
+        session_file: Path,
+        workspace_directory: str = "",
+        on_error: ErrorCallback = None,
     ) -> Session | None:
         """Parse a VS Code Copilot Chat session file."""
         try:
@@ -192,11 +196,50 @@ class CopilotVSCodeAdapter:
                 message_count=human_turn_count,
                 mtime=session_file.stat().st_mtime,
             )
-        except Exception:
+        except OSError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="OSError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except orjson.JSONDecodeError as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type="JSONDecodeError",
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
+            return None
+        except (KeyError, TypeError, AttributeError) as e:
+            error = ParseError(
+                agent=self.name,
+                file_path=str(session_file),
+                error_type=type(e).__name__,
+                message=str(e),
+            )
+            log_parse_error(
+                error.agent, error.file_path, error.error_type, error.message
+            )
+            if on_error:
+                on_error(error)
             return None
 
     def find_sessions_incremental(
-        self, known: dict[str, tuple[float, str]]
+        self,
+        known: dict[str, tuple[float, str]],
+        on_error: ErrorCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions."""
         if not self.is_available():
@@ -218,7 +261,7 @@ class CopilotVSCodeAdapter:
         for session_id, (path, mtime, ws_directory) in current_files.items():
             known_entry = known.get(session_id)
             if known_entry is None or mtime > known_entry[0] + 0.001:
-                session = self._parse_session(path, ws_directory)
+                session = self._parse_session(path, ws_directory, on_error=on_error)
                 if session:
                     new_or_modified.append(session)
 
