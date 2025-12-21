@@ -83,16 +83,16 @@ class TestCopilotAdapter:
 
     def test_name_and_attributes(self, adapter):
         """Test adapter has correct name and attributes."""
-        assert adapter.name == "copilot"
+        assert adapter.name == "copilot-cli"
         assert adapter.color is not None
-        assert adapter.badge == "copilot"
+        assert adapter.badge == "copilot-cli"
 
     def test_parse_session_basic(self, adapter, copilot_session_file):
         """Test parsing a basic Copilot session file."""
         session = adapter._parse_session(copilot_session_file)
 
         assert session is not None
-        assert session.agent == "copilot"
+        assert session.agent == "copilot-cli"
         assert session.id == "abc123-def456"
         assert session.title == "Help me implement a REST API endpoint"
         assert session.directory == "/home/user/project"

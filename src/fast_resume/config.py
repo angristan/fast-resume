@@ -9,7 +9,8 @@ AGENTS = {
     "opencode": {"color": "#CFCECD", "badge": "opencode"},
     "vibe": {"color": "#FF6B35", "badge": "vibe"},
     "crush": {"color": "#6B51FF", "badge": "crush"},
-    "copilot": {"color": "#9CA3AF", "badge": "copilot"},
+    "copilot-cli": {"color": "#9CA3AF", "badge": "copilot-cli"},
+    "copilot-vscode": {"color": "#007ACC", "badge": "vscode copilot"},
 }
 
 # Storage paths

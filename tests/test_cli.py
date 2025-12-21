@@ -102,6 +102,8 @@ def patched_cli_env(cli_env):
         "fast_resume.adapters.vibe.VIBE_DIR": cli_env["vibe_dir"],
         "fast_resume.adapters.codex.CODEX_DIR": nonexistent,
         "fast_resume.adapters.copilot.COPILOT_DIR": nonexistent,
+        "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR": nonexistent,
+        "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR": nonexistent,
         "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE": nonexistent / "projects.json",
         "fast_resume.adapters.opencode.OPENCODE_DIR": nonexistent,
     }
@@ -132,6 +134,14 @@ class TestListSessionsIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -176,6 +186,14 @@ class TestListSessionsIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -214,6 +232,14 @@ class TestListSessionsIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -257,6 +283,14 @@ class TestListSessionsIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -295,6 +329,14 @@ class TestListSessionsIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -338,6 +380,14 @@ class TestShowStatsIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -413,6 +463,14 @@ class TestMainCommandIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -460,6 +518,14 @@ class TestMainCommandIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -497,6 +563,14 @@ class TestMainCommandIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -540,6 +614,14 @@ class TestMainCommandIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -580,6 +662,14 @@ class TestMainCommandIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -617,6 +707,14 @@ class TestMainCommandIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -664,6 +762,14 @@ class TestMainCommandIntegration:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -703,6 +809,14 @@ class TestTUIResumeIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -746,6 +860,14 @@ class TestTUIResumeIntegration:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -794,6 +916,14 @@ class TestOutputFormatting:
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
             ),
             patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
+            ),
+            patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
                 patches["fast_resume.adapters.crush.CRUSH_PROJECTS_FILE"],
             ),
@@ -835,6 +965,14 @@ class TestOutputFormatting:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
@@ -890,6 +1028,10 @@ class TestOutputFormatting:
             patch("fast_resume.adapters.vibe.VIBE_DIR", nonexistent),
             patch("fast_resume.adapters.codex.CODEX_DIR", nonexistent),
             patch("fast_resume.adapters.copilot.COPILOT_DIR", nonexistent),
+            patch("fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR", nonexistent),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR", nonexistent
+            ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE", nonexistent / "p.json"
             ),
@@ -929,6 +1071,14 @@ class TestOutputFormatting:
             patch(
                 "fast_resume.adapters.copilot.COPILOT_DIR",
                 patches["fast_resume.adapters.copilot.COPILOT_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR",
+                patches["fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR"],
+            ),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR",
+                patches["fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR"],
             ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",

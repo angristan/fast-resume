@@ -350,12 +350,20 @@ class FastResumeApp(App):
         color: #00A67E;
     }
 
-    #filter-copilot {
+    #filter-copilot-cli {
         color: #9CA3AF;
     }
-    #filter-copilot.-active {
+    #filter-copilot-cli.-active {
         background: #9CA3AF 20%;
         color: #9CA3AF;
+    }
+
+    #filter-copilot-vscode {
+        color: #007ACC;
+    }
+    #filter-copilot-vscode.-active {
+        background: #007ACC 20%;
+        color: #007ACC;
     }
 
     #filter-crush {
@@ -495,10 +503,11 @@ class FastResumeApp(App):
         Binding("1", "filter_all", "All", show=False),
         Binding("2", "filter_claude", "Claude", show=False),
         Binding("3", "filter_codex", "Codex", show=False),
-        Binding("4", "filter_copilot", "Copilot", show=False),
-        Binding("5", "filter_crush", "Crush", show=False),
-        Binding("6", "filter_opencode", "OpenCode", show=False),
-        Binding("7", "filter_vibe", "Vibe", show=False),
+        Binding("4", "filter_copilot_cli", "Copilot", show=False),
+        Binding("5", "filter_copilot_vscode", "VS Code", show=False),
+        Binding("6", "filter_crush", "Crush", show=False),
+        Binding("7", "filter_opencode", "OpenCode", show=False),
+        Binding("8", "filter_vibe", "Vibe", show=False),
         Binding("ctrl+p", "command_palette", "Commands"),
     ]
 
@@ -549,7 +558,8 @@ class FastResumeApp(App):
                     (None, "All"),
                     ("claude", "Claude"),
                     ("codex", "Codex"),
-                    ("copilot", "Copilot"),
+                    ("copilot-cli", "Copilot"),
+                    ("copilot-vscode", "VS Code"),
                     ("crush", "Crush"),
                     ("opencode", "OpenCode"),
                     ("vibe", "Vibe"),
@@ -674,28 +684,28 @@ class FastResumeApp(App):
         padding = 8  # column gaps + scrollbar
 
         # Responsive column widths based on terminal width
-        # Agent column: icon (2) + space (1) + name (~8) = ~12
+        # Agent column: icon (2) + space (1) + name (up to 13 for "vscode copilot") = 16
         if width >= 120:
             # Wide: show everything
-            agent_w = 14
+            agent_w = 17
             dir_w = 30
             msgs_w = 6
             date_w = 18
         elif width >= 90:
             # Medium: slightly smaller
-            agent_w = 12
+            agent_w = 17
             dir_w = 22
             msgs_w = 5
             date_w = 15
         elif width >= 60:
             # Narrow: compact
-            agent_w = 12
+            agent_w = 17
             dir_w = 16
             msgs_w = 5
             date_w = 12
         else:
             # Very narrow: minimal
-            agent_w = 10
+            agent_w = 15
             dir_w = 0  # hide directory
             msgs_w = 4
             date_w = 10
@@ -1059,9 +1069,13 @@ class FastResumeApp(App):
         """Filter to Codex sessions only."""
         self._set_filter("codex")
 
-    def action_filter_copilot(self) -> None:
-        """Filter to Copilot sessions only."""
-        self._set_filter("copilot")
+    def action_filter_copilot_cli(self) -> None:
+        """Filter to Copilot CLI sessions only."""
+        self._set_filter("copilot-cli")
+
+    def action_filter_copilot_vscode(self) -> None:
+        """Filter to VS Code Copilot sessions only."""
+        self._set_filter("copilot-vscode")
 
     def action_filter_crush(self) -> None:
         """Filter to Crush sessions only."""
@@ -1089,8 +1103,10 @@ class FastResumeApp(App):
             self._set_filter("claude")
         elif btn_id == "filter-codex":
             self._set_filter("codex")
-        elif btn_id == "filter-copilot":
-            self._set_filter("copilot")
+        elif btn_id == "filter-copilot-cli":
+            self._set_filter("copilot-cli")
+        elif btn_id == "filter-copilot-vscode":
+            self._set_filter("copilot-vscode")
         elif btn_id == "filter-crush":
             self._set_filter("crush")
         elif btn_id == "filter-opencode":

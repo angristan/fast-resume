@@ -94,6 +94,8 @@ def patched_search(search_env):
         patch("fast_resume.adapters.vibe.VIBE_DIR", search_env["vibe_dir"]),
         patch("fast_resume.adapters.codex.CODEX_DIR", nonexistent),
         patch("fast_resume.adapters.copilot.COPILOT_DIR", nonexistent),
+        patch("fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR", nonexistent),
+        patch("fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR", nonexistent),
         patch(
             "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
             nonexistent / "projects.json",
@@ -339,6 +341,10 @@ class TestEdgeCases:
             patch("fast_resume.adapters.vibe.VIBE_DIR", empty_dir),
             patch("fast_resume.adapters.codex.CODEX_DIR", nonexistent),
             patch("fast_resume.adapters.copilot.COPILOT_DIR", nonexistent),
+            patch("fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR", nonexistent),
+            patch(
+                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR", nonexistent
+            ),
             patch(
                 "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE", nonexistent / "p.json"
             ),

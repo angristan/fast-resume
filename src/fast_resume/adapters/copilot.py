@@ -12,9 +12,9 @@ from .base import Session
 class CopilotAdapter:
     """Adapter for GitHub Copilot CLI sessions."""
 
-    name = "copilot"
-    color = AGENTS["copilot"]["color"]
-    badge = AGENTS["copilot"]["badge"]
+    name = "copilot-cli"
+    color = AGENTS["copilot-cli"]["color"]
+    badge = AGENTS["copilot-cli"]["badge"]
 
     def is_available(self) -> bool:
         """Check if Copilot CLI data directory exists."""

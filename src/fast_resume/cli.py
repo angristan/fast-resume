@@ -18,7 +18,17 @@ from .tui import run_tui
 @click.option(
     "-a",
     "--agent",
-    type=click.Choice(["claude", "codex", "copilot", "crush", "opencode", "vibe"]),
+    type=click.Choice(
+        [
+            "claude",
+            "codex",
+            "copilot-cli",
+            "copilot-vscode",
+            "crush",
+            "opencode",
+            "vibe",
+        ]
+    ),
     help="Filter by agent",
 )
 @click.option("-d", "--directory", help="Filter by directory (substring match)")

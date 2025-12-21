@@ -23,14 +23,15 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 
 ## Supported Agents
 
-| Agent              | Data Location                        | Resume Command                  |
-| ------------------ | ------------------------------------ | ------------------------------- |
-| **Claude Code**    | `~/.claude/projects/`                | `claude --resume <id>`          |
-| **Codex CLI**      | `~/.codex/sessions/`                 | `codex resume <id>`             |
-| **GitHub Copilot** | `~/.copilot/session-state/`          | `copilot --resume <id>`         |
-| **Crush**          | `~/.local/share/crush/projects.json` | _(interactive only)_            |
-| **OpenCode**       | `~/.local/share/opencode/storage/`   | `opencode <dir> --session <id>` |
-| **Vibe**           | `~/.vibe/logs/session/`              | `vibe --resume <id>`            |
+| Agent                  | Data Location                                  | Resume Command                  |
+| ---------------------- | ---------------------------------------------- | ------------------------------- |
+| **Claude Code**        | `~/.claude/projects/`                          | `claude --resume <id>`          |
+| **Codex CLI**          | `~/.codex/sessions/`                           | `codex resume <id>`             |
+| **Copilot CLI**        | `~/.copilot/session-state/`                    | `copilot --resume <id>`         |
+| **VS Code Copilot**    | `~/Library/Application Support/Code/` (macOS) | `code <directory>`              |
+| **Crush**              | `~/.local/share/crush/projects.json`           | _(interactive only)_            |
+| **OpenCode**           | `~/.local/share/opencode/storage/`             | `opencode <dir> --session <id>` |
+| **Vibe**               | `~/.vibe/logs/session/`                        | `vibe --resume <id>`            |
 
 ## Installation
 
@@ -95,7 +96,7 @@ Arguments:
   QUERY                    Search query (optional)
 
 Options:
-  -a, --agent [claude|codex|copilot|crush|opencode|vibe]
+  -a, --agent [claude|codex|copilot-cli|copilot-vscode|crush|opencode|vibe]
                           Filter by agent
   -d, --directory TEXT    Filter by directory (substring match)
   --no-tui                Output list to stdout instead of TUI
@@ -191,29 +192,31 @@ Directory                            Sessions
                       │                                       │
          ┌────────────┴────────────┐                          │
          ▼                         ▼                          ▼
-┌──────────────────┐    ┌────────────────────────────────────────────────────────────────┐
-│  TantivyIndex    │    │                          Adapters                              │
-│                  │    │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────┐ │
-│ • Fuzzy search   │◄───│  │ Claude │ │ Codex  │ │Copilot │ │ Crush  │ │OpenCode│ │Vibe│ │
-│ • mtime tracking │    │  └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └─┬──┘ │
-│                  │    │      │          │          │          │          │        │    │
-│ ~/.cache/        │    └──────┼──────────┼──────────┼──────────┼──────────┼────────┼────┘
-│   fast-resume/   │           ▼          ▼          ▼          ▼          ▼        ▼
-└──────────────────┘      ~/.claude/ ~/.codex/ ~/.copilot/ crush.db  opencode/  ~/.vibe/
+┌──────────────────┐    ┌───────────────────────────────────────────────────────────────────────────────┐
+│  TantivyIndex    │    │                                 Adapters                                       │
+│                  │    │  ┌────────┐ ┌───────┐ ┌───────┐ ┌─────────┐ ┌───────┐ ┌────────┐ ┌────┐        │
+│ • Fuzzy search   │◄───│  │ Claude │ │ Codex │ │Copilot│ │ Copilot │ │ Crush │ │OpenCode│ │Vibe│        │
+│ • mtime tracking │    │  │        │ │       │ │  CLI  │ │ VS Code │ │       │ │        │ │    │        │
+│                  │    │  └───┬────┘ └───┬───┘ └───┬───┘ └────┬────┘ └───┬───┘ └───┬────┘ └─┬──┘        │
+│ ~/.cache/        │    │      │          │         │          │          │         │        │           │
+│   fast-resume/   │    └──────┼──────────┼─────────┼──────────┼──────────┼─────────┼────────┼───────────┘
+└──────────────────┘           ▼          ▼         ▼          ▼          ▼         ▼        ▼
+                          ~/.claude/ ~/.codex/ ~/.copilot/  VS Code/   crush.db opencode/ ~/.vibe/
 ```
 
 ### Session Parsing
 
 Each agent stores sessions differently. Adapters normalize them into a common `Session` structure:
 
-| Agent       | Format                                           | Parsing Strategy                                                                            |
-| ----------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Claude Code | JSONL in `~/.claude/projects/<project>/*.jsonl`  | Stream line-by-line, extract `user`/`assistant` messages, skip `agent-*` subprocess files   |
-| Codex       | JSONL in `~/.codex/sessions/**/*.jsonl`          | Line-by-line parsing, extract from `session_meta`, `response_item`, and `event_msg` entries |
-| Copilot     | JSONL in `~/.copilot/session-state/*.jsonl`      | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
-| Crush       | SQLite DB at `<project>/crush.db`                | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
-| OpenCode    | Split JSON in `~/.local/share/opencode/storage/` | Join `session/<hash>/ses_*.json` + `message/<id>/msg_*.json` + `part/<id>/*.json`           |
-| Vibe        | JSON in `~/.vibe/logs/session/session_*.json`    | Parse `messages` array with role-based content                                              |
+| Agent          | Format                                                 | Parsing Strategy                                                                            |
+| -------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Claude Code    | JSONL in `~/.claude/projects/<project>/*.jsonl`        | Stream line-by-line, extract `user`/`assistant` messages, skip `agent-*` subprocess files   |
+| Codex          | JSONL in `~/.codex/sessions/**/*.jsonl`                | Line-by-line parsing, extract from `session_meta`, `response_item`, and `event_msg` entries |
+| Copilot CLI    | JSONL in `~/.copilot/session-state/*.jsonl`            | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
+| Copilot VSCode | JSON in VS Code's `workspaceStorage/*/chatSessions/`   | Parse `requests` array with message text and response values                                |
+| Crush          | SQLite DB at `<project>/crush.db`                      | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
+| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`       | Join `session/<hash>/ses_*.json` + `message/<id>/msg_*.json` + `part/<id>/*.json`           |
+| Vibe           | JSON in `~/.vibe/logs/session/session_*.json`          | Parse `messages` array with role-based content                                              |
 
 **The normalized Session structure:**
 
@@ -221,7 +224,7 @@ Each agent stores sessions differently. Adapters normalize them into a common `S
 @dataclass
 class Session:
     id: str              # Unique identifier (usually filename or UUID)
-    agent: str           # "claude", "codex", "copilot", "crush", "opencode", "vibe"
+    agent: str           # "claude", "codex", "copilot-cli", "copilot-vscode", "crush", "opencode", "vibe"
     title: str           # Summary or first user message (max 100 chars)
     directory: str       # Working directory where session was created
     timestamp: datetime  # Last modified time
@@ -336,7 +339,8 @@ Each adapter returns the appropriate command:
 |-------|----------------|
 | Claude | `["claude", "--resume", session.id]` |
 | Codex | `["codex", "resume", session.id]` |
-| Copilot | `["copilot", "--resume", session.id]` |
+| Copilot CLI | `["copilot", "--resume", session.id]` |
+| Copilot VSCode | `["code", session.directory]` (no session resume, opens workspace) |
 | OpenCode | `["opencode", session.directory, "--session", session.id]` |
 | Vibe | `["vibe", "--resume", session.id]` |
 | Crush | `["crush"]` (no CLI resume, opens picker) |
@@ -396,7 +400,8 @@ fast-resume/
 │       ├── base.py         # Session dataclass, AgentAdapter protocol
 │       ├── claude.py       # Claude Code adapter
 │       ├── codex.py        # Codex CLI adapter
-│       ├── copilot.py      # GitHub Copilot adapter
+│       ├── copilot.py      # GitHub Copilot CLI adapter
+│       ├── copilot_vscode.py # VS Code Copilot Chat adapter
 │       ├── crush.py        # Crush adapter
 │       ├── opencode.py     # OpenCode adapter
 │       └── vibe.py         # Vibe adapter
