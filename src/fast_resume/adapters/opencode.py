@@ -245,6 +245,6 @@ class OpenCodeAdapter:
 
         return new_or_modified, deleted_ids
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume an OpenCode session."""
         return ["opencode", session.directory, "--session", session.id]

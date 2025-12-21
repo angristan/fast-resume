@@ -38,6 +38,11 @@ from .tui import run_tui
 )
 @click.option("--rebuild", is_flag=True, help="Force rebuild the session index")
 @click.option("--stats", is_flag=True, help="Show index statistics")
+@click.option(
+    "--yolo",
+    is_flag=True,
+    help="Resume sessions with auto-approve/skip-permissions flags",
+)
 @click.version_option()
 def main(
     query: str,
@@ -47,6 +52,7 @@ def main(
     list_only: bool,
     rebuild: bool,
     stats: bool,
+    yolo: bool,
 ) -> None:
     """Fast fuzzy finder for coding agent session history.
 
@@ -78,7 +84,7 @@ def main(
     if no_tui or list_only:
         _list_sessions(query, agent, directory)
     else:
-        resume_cmd, resume_dir = run_tui(query=query, agent_filter=agent)
+        resume_cmd, resume_dir = run_tui(query=query, agent_filter=agent, yolo=yolo)
         if resume_cmd:
             # Change to session directory before running command
             if resume_dir:

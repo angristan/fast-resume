@@ -18,6 +18,7 @@ class Session:
     content: str  # Full searchable content
     message_count: int = 0  # Number of user + assistant messages
     mtime: float = 0.0  # File modification time for incremental updates
+    yolo: bool = False  # Session was started with auto-approve/skip-permissions
 
 
 class AgentAdapter(Protocol):
@@ -44,8 +45,13 @@ class AgentAdapter(Protocol):
         """
         ...
 
-    def get_resume_command(self, session: "Session") -> list[str]:
-        """Get the command to resume a session."""
+    def get_resume_command(self, session: "Session", yolo: bool = False) -> list[str]:
+        """Get the command to resume a session.
+
+        Args:
+            session: The session to resume
+            yolo: If True, add auto-approve/skip-permissions flags
+        """
         ...
 
     def is_available(self) -> bool:

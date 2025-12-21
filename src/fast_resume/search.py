@@ -241,9 +241,9 @@ class SessionSearch:
                 return adapter
         return None
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get the resume command for a session."""
         adapter = self.get_adapter_for_session(session)
         if adapter:
-            return adapter.get_resume_command(session)
+            return adapter.get_resume_command(session, yolo=yolo)
         return []

@@ -625,7 +625,7 @@ class TestFastResumeAppResumeCommand:
         """Test navigating to a different session and resuming it."""
         with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
             # Set up mock to return different command for each session
-            def mock_resume_cmd(session):
+            def mock_resume_cmd(session, yolo=False):
                 if session.id == "session-2":
                     return ["vibe", "resume", "session-2"]
                 return ["claude", "--resume", session.id]

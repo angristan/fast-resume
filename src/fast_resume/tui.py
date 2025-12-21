@@ -522,11 +522,17 @@ class FastResumeApp(App):
     _spinner_frame: int = 0
     _spinner_chars: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-    def __init__(self, initial_query: str = "", agent_filter: str | None = None):
+    def __init__(
+        self,
+        initial_query: str = "",
+        agent_filter: str | None = None,
+        yolo: bool = False,
+    ):
         super().__init__()
         self.search_engine = SessionSearch()
         self.initial_query = initial_query
         self.agent_filter = agent_filter
+        self.yolo = yolo
         self.sessions: list[Session] = []
         self._displayed_sessions: list[Session] = []
         self._resume_command: list[str] | None = None
@@ -980,7 +986,11 @@ class FastResumeApp(App):
             import sys
 
             # Build full resume command: cd <dir> && <resume command>
-            resume_cmd = self.search_engine.get_resume_command(self.selected_session)
+            # Use yolo mode if CLI flag set OR session was started in yolo mode
+            use_yolo = self.yolo or self.selected_session.yolo
+            resume_cmd = self.search_engine.get_resume_command(
+                self.selected_session, yolo=use_yolo
+            )
             if not resume_cmd:
                 self.notify(
                     "No resume command available", severity="warning", timeout=2
@@ -1049,8 +1059,10 @@ class FastResumeApp(App):
                 )
                 return
 
+            # Use yolo mode if CLI flag set OR session was started in yolo mode
+            use_yolo = self.yolo or self.selected_session.yolo
             self._resume_command = self.search_engine.get_resume_command(
-                self.selected_session
+                self.selected_session, yolo=use_yolo
             )
             self._resume_directory = self.selected_session.directory
             self.exit()
@@ -1128,9 +1140,9 @@ class FastResumeApp(App):
 
 
 def run_tui(
-    query: str = "", agent_filter: str | None = None
+    query: str = "", agent_filter: str | None = None, yolo: bool = False
 ) -> tuple[list[str] | None, str | None]:
     """Run the TUI and return the resume command and directory if selected."""
-    app = FastResumeApp(initial_query=query, agent_filter=agent_filter)
+    app = FastResumeApp(initial_query=query, agent_filter=agent_filter, yolo=yolo)
     app.run()
     return app.get_resume_command(), app.get_resume_directory()

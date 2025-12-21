@@ -41,6 +41,7 @@ class CodexAdapter:
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
             user_prompts: list[str] = []  # Actual human inputs for title and count
+            yolo = False  # Track if session was started in yolo mode
 
             with open(session_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -58,6 +59,21 @@ class CodexAdapter:
                     if msg_type == "session_meta":
                         session_id = payload.get("id", "")
                         directory = payload.get("cwd", "")
+
+                    # Check turn_context for yolo mode
+                    if msg_type == "turn_context":
+                        approval_policy = payload.get("approval_policy", "")
+                        sandbox_policy = payload.get("sandbox_policy", {})
+                        sandbox_mode = (
+                            sandbox_policy.get("mode", "")
+                            if isinstance(sandbox_policy, dict)
+                            else ""
+                        )
+                        if (
+                            approval_policy == "never"
+                            or sandbox_mode == "danger-full-access"
+                        ):
+                            yolo = True
 
                     # Extract response items for preview content
                     if msg_type == "response_item":
@@ -119,6 +135,7 @@ class CodexAdapter:
                 preview=preview,
                 content=full_content,
                 message_count=len(user_prompts),
+                yolo=yolo,
             )
         except Exception:
             return None
@@ -189,6 +206,10 @@ class CodexAdapter:
 
         return new_or_modified, deleted_ids
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Codex CLI session."""
-        return ["codex", "resume", session.id]
+        cmd = ["codex"]
+        if yolo:
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        cmd.extend(["resume", session.id])
+        return cmd

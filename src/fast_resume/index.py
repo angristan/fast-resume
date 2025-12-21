@@ -73,6 +73,8 @@ class TantivyIndex:
         schema_builder.add_integer_field("message_count", stored=True)
         # File modification time - for incremental updates
         schema_builder.add_float_field("mtime", stored=True)
+        # Yolo mode - session was started with auto-approve/skip-permissions
+        schema_builder.add_boolean_field("yolo", stored=True)
         return schema_builder.build()
 
     def _check_version(self) -> bool:
@@ -359,6 +361,7 @@ class TantivyIndex:
                 content=content,
                 message_count=doc.get_first("message_count") or 0,
                 mtime=doc.get_first("mtime") or 0.0,
+                yolo=doc.get_first("yolo") or False,
             )
         except Exception:
             return None
@@ -392,6 +395,7 @@ class TantivyIndex:
                     timestamp=session.timestamp.timestamp(),
                     message_count=session.message_count,
                     mtime=session.mtime,
+                    yolo=session.yolo,
                 )
             )
         writer.commit()
@@ -419,6 +423,7 @@ class TantivyIndex:
                     timestamp=session.timestamp.timestamp(),
                     message_count=session.message_count,
                     mtime=session.mtime,
+                    yolo=session.yolo,
                 )
             )
         writer.commit()

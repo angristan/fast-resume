@@ -45,6 +45,9 @@ class VibeAdapter:
             env = metadata.get("environment", {})
             directory = env.get("working_directory", "")
 
+            # Check if session was started with auto_approve
+            yolo = metadata.get("auto_approve", False)
+
             # Parse timestamps
             start_time = metadata.get("start_time", "")
             if start_time:
@@ -106,6 +109,7 @@ class VibeAdapter:
                 preview=preview,
                 content=full_content,
                 message_count=len(messages),
+                yolo=yolo,
             )
         except Exception:
             return None
@@ -167,6 +171,10 @@ class VibeAdapter:
 
         return new_or_modified, deleted_ids
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Vibe session."""
-        return ["vibe", "--resume", session.id]
+        cmd = ["vibe"]
+        if yolo:
+            cmd.append("--auto-approve")
+        cmd.extend(["--resume", session.id])
+        return cmd

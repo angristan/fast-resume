@@ -23,7 +23,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Storage location
 INDEX_DIR = Path.home() / ".cache" / "fast-resume" / "tantivy_index"
-SCHEMA_VERSION = 14  # Bump when schema changes (14: copilot -> copilot-cli rename)
+SCHEMA_VERSION = 15  # Bump when schema changes (15: add yolo field)
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500

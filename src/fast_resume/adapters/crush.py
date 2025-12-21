@@ -256,7 +256,7 @@ class CrushAdapter:
 
         return new_or_modified, deleted_ids
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Crush session."""
         # Crush is interactive - it shows a session picker when launched in a project directory
         # fast-resume changes to session.directory before executing this command

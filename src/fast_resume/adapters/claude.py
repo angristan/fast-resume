@@ -206,6 +206,10 @@ class ClaudeAdapter:
 
         return new_or_modified, deleted_ids
 
-    def get_resume_command(self, session: Session) -> list[str]:
+    def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Claude Code session."""
-        return ["claude", "--resume", session.id]
+        cmd = ["claude"]
+        if yolo:
+            cmd.append("--dangerously-skip-permissions")
+        cmd.extend(["--resume", session.id])
+        return cmd
