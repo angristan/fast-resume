@@ -554,16 +554,18 @@ class FastResumeApp(App):
 
             # Agent filter buttons - pill style with icons
             with Horizontal(id="filter-container"):
-                for filter_key, filter_label in [
-                    (None, "All"),
-                    ("claude", "Claude Code"),
-                    ("codex", "Codex CLI"),
-                    ("copilot-cli", "Copilot CLI"),
-                    ("copilot-vscode", "VS Code Copilot"),
-                    ("crush", "Crush"),
-                    ("opencode", "OpenCode"),
-                    ("vibe", "Vibe"),
-                ]:
+                filter_keys = [
+                    None,
+                    "claude",
+                    "codex",
+                    "copilot-cli",
+                    "copilot-vscode",
+                    "crush",
+                    "opencode",
+                    "vibe",
+                ]
+                for filter_key in filter_keys:
+                    filter_label = AGENTS[filter_key]["badge"] if filter_key else "All"
                     btn_id = f"filter-{filter_key or 'all'}"
                     with Horizontal(id=btn_id, classes="filter-btn") as btn_container:
                         if filter_key:
@@ -684,28 +686,28 @@ class FastResumeApp(App):
         padding = 8  # column gaps + scrollbar
 
         # Responsive column widths based on terminal width
-        # Agent column: icon (2) + space (1) + name (up to 15 for "VS Code Copilot") = 18
+        # Agent column: icon (2) + space (1) + name (up to 11 for "claude-code") = 14
         if width >= 120:
             # Wide: show everything
-            agent_w = 19
+            agent_w = 15
             dir_w = 30
             msgs_w = 6
             date_w = 18
         elif width >= 90:
             # Medium: slightly smaller
-            agent_w = 19
+            agent_w = 15
             dir_w = 22
             msgs_w = 5
             date_w = 15
         elif width >= 60:
             # Narrow: compact
-            agent_w = 19
+            agent_w = 15
             dir_w = 16
             msgs_w = 5
             date_w = 12
         else:
             # Very narrow: minimal
-            agent_w = 17
+            agent_w = 13
             dir_w = 0  # hide directory
             msgs_w = 4
             date_w = 10

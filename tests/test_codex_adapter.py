@@ -68,7 +68,7 @@ class TestCodexAdapter:
         """Test adapter has correct name and attributes."""
         assert adapter.name == "codex"
         assert adapter.color is not None
-        assert adapter.badge == "Codex CLI"
+        assert adapter.badge == "codex-cli"
 
     def test_parse_session_basic(self, adapter, codex_session_file):
         """Test parsing a basic Codex session file."""

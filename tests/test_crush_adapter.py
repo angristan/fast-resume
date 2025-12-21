@@ -79,7 +79,7 @@ class TestCrushAdapter:
         """Test adapter has correct name and attributes."""
         assert adapter.name == "crush"
         assert adapter.color is not None
-        assert adapter.badge == "Crush"
+        assert adapter.badge == "crush"
 
     def test_parse_session_basic(self, adapter, temp_dir):
         """Test parsing a basic Crush session from database."""
