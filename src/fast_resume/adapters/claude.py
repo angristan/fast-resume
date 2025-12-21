@@ -15,9 +15,12 @@ class ClaudeAdapter:
     color = AGENTS["claude"]["color"]
     badge = AGENTS["claude"]["badge"]
 
+    def __init__(self, sessions_dir: Path | None = None) -> None:
+        self._sessions_dir = sessions_dir if sessions_dir is not None else CLAUDE_DIR
+
     def is_available(self) -> bool:
         """Check if Claude Code data directory exists."""
-        return CLAUDE_DIR.exists()
+        return self._sessions_dir.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all Claude Code sessions."""
@@ -25,7 +28,7 @@ class ClaudeAdapter:
             return []
 
         sessions = []
-        for project_dir in CLAUDE_DIR.iterdir():
+        for project_dir in self._sessions_dir.iterdir():
             if not project_dir.is_dir():
                 continue
 
@@ -172,7 +175,7 @@ class ClaudeAdapter:
         # Scan all session files and build current state
         current_files: dict[str, tuple[Path, float]] = {}  # session_id -> (path, mtime)
 
-        for project_dir in CLAUDE_DIR.iterdir():
+        for project_dir in self._sessions_dir.iterdir():
             if not project_dir.is_dir():
                 continue
 

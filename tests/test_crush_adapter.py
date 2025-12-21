@@ -3,7 +3,6 @@
 import json
 import sqlite3
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
@@ -296,7 +295,7 @@ class TestCrushAdapter:
         # Crush just opens in the project directory
         assert cmd == ["crush"]
 
-    def test_find_sessions_from_projects_file(self, adapter, temp_dir):
+    def test_find_sessions_from_projects_file(self, temp_dir):
         """Test finding sessions from projects.json file."""
         # Create project data directory with database
         data_dir = temp_dir / "project1_data"
@@ -340,13 +339,13 @@ class TestCrushAdapter:
         with open(projects_file, "w") as f:
             json.dump(projects, f)
 
-        with patch("fast_resume.adapters.crush.CRUSH_PROJECTS_FILE", projects_file):
-            sessions = adapter.find_sessions()
+        adapter = CrushAdapter(projects_file=projects_file)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 1
         assert sessions[0].directory == "/home/user/project1"
 
-    def test_find_sessions_handles_missing_db(self, adapter, temp_dir):
+    def test_find_sessions_handles_missing_db(self, temp_dir):
         """Test that missing database files are handled gracefully."""
         # Create projects.json pointing to non-existent db
         projects_file = temp_dir / "projects.json"
@@ -361,7 +360,7 @@ class TestCrushAdapter:
         with open(projects_file, "w") as f:
             json.dump(projects, f)
 
-        with patch("fast_resume.adapters.crush.CRUSH_PROJECTS_FILE", projects_file):
-            sessions = adapter.find_sessions()
+        adapter = CrushAdapter(projects_file=projects_file)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 0

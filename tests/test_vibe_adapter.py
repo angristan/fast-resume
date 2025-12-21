@@ -278,7 +278,7 @@ class TestVibeAdapter:
 
         assert cmd == ["vibe", "--resume", "vibe-abc123"]
 
-    def test_find_sessions(self, adapter, temp_dir):
+    def test_find_sessions(self, temp_dir):
         """Test finding all Vibe sessions."""
         # Create multiple session files
         for i in range(3):
@@ -295,12 +295,12 @@ class TestVibeAdapter:
             with open(session_file, "w") as f:
                 json.dump(data, f)
 
-        with patch("fast_resume.adapters.vibe.VIBE_DIR", temp_dir):
-            sessions = adapter.find_sessions()
+        adapter = VibeAdapter(sessions_dir=temp_dir)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 3
 
-    def test_find_sessions_only_matches_session_files(self, adapter, temp_dir):
+    def test_find_sessions_only_matches_session_files(self, temp_dir):
         """Test that only session_*.json files are matched."""
         # Create a valid session file
         session_file = temp_dir / "session_valid.json"
@@ -319,8 +319,8 @@ class TestVibeAdapter:
         with open(other_file, "w") as f:
             json.dump({"not": "a session"}, f)
 
-        with patch("fast_resume.adapters.vibe.VIBE_DIR", temp_dir):
-            sessions = adapter.find_sessions()
+        adapter = VibeAdapter(sessions_dir=temp_dir)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 1
         assert sessions[0].id == "valid"

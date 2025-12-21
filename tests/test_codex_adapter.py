@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
@@ -260,7 +259,7 @@ class TestCodexAdapter:
 
         assert cmd == ["codex", "resume", "session-abc123"]
 
-    def test_find_sessions_recursive(self, adapter, temp_dir):
+    def test_find_sessions_recursive(self, temp_dir):
         """Test that find_sessions searches recursively in date directories."""
         # Create sessions in different date directories
         dir1 = temp_dir / "2025" / "12" / "19"
@@ -293,7 +292,7 @@ class TestCodexAdapter:
                     + "\n"
                 )
 
-        with patch("fast_resume.adapters.codex.CODEX_DIR", temp_dir):
-            sessions = adapter.find_sessions()
+        adapter = CodexAdapter(sessions_dir=temp_dir)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 2

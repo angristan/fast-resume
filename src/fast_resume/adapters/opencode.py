@@ -16,9 +16,12 @@ class OpenCodeAdapter:
     color = AGENTS["opencode"]["color"]
     badge = AGENTS["opencode"]["badge"]
 
+    def __init__(self, sessions_dir: Path | None = None) -> None:
+        self._sessions_dir = sessions_dir if sessions_dir is not None else OPENCODE_DIR
+
     def is_available(self) -> bool:
         """Check if OpenCode data directory exists."""
-        return OPENCODE_DIR.exists()
+        return self._sessions_dir.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all OpenCode sessions."""
@@ -26,9 +29,9 @@ class OpenCodeAdapter:
             return []
 
         sessions = []
-        session_dir = OPENCODE_DIR / "session"
-        message_dir = OPENCODE_DIR / "message"
-        part_dir = OPENCODE_DIR / "part"
+        session_dir = self._sessions_dir / "session"
+        message_dir = self._sessions_dir / "message"
+        part_dir = self._sessions_dir / "part"
 
         if not session_dir.exists():
             return []
@@ -152,7 +155,7 @@ class OpenCodeAdapter:
             ]
             return [], deleted_ids
 
-        session_dir = OPENCODE_DIR / "session"
+        session_dir = self._sessions_dir / "session"
         if not session_dir.exists():
             deleted_ids = [
                 sid for sid, (_, agent) in known.items() if agent == self.name
@@ -204,8 +207,8 @@ class OpenCodeAdapter:
             return [], deleted_ids
 
         # Build indexes only for sessions we need to parse
-        message_dir = OPENCODE_DIR / "message"
-        part_dir = OPENCODE_DIR / "part"
+        message_dir = self._sessions_dir / "message"
+        part_dir = self._sessions_dir / "part"
 
         messages_by_session: dict[str, list[tuple[Path, str, str]]] = defaultdict(list)
         if message_dir.exists():

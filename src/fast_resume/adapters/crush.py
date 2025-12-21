@@ -17,9 +17,14 @@ class CrushAdapter:
     color = AGENTS["crush"]["color"]
     badge = AGENTS["crush"]["badge"]
 
+    def __init__(self, projects_file: Path | None = None) -> None:
+        self._projects_file = (
+            projects_file if projects_file is not None else CRUSH_PROJECTS_FILE
+        )
+
     def is_available(self) -> bool:
         """Check if Crush projects file exists."""
-        return CRUSH_PROJECTS_FILE.exists()
+        return self._projects_file.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all Crush sessions across all projects."""
@@ -29,7 +34,7 @@ class CrushAdapter:
         sessions = []
 
         try:
-            with open(CRUSH_PROJECTS_FILE, "rb") as f:
+            with open(self._projects_file, "rb") as f:
                 projects_data = orjson.loads(f.read())
         except (orjson.JSONDecodeError, OSError):
             return []
@@ -210,7 +215,7 @@ class CrushAdapter:
             return [], deleted_ids
 
         try:
-            with open(CRUSH_PROJECTS_FILE, "rb") as f:
+            with open(self._projects_file, "rb") as f:
                 projects_data = orjson.loads(f.read())
         except (orjson.JSONDecodeError, OSError):
             deleted_ids = [

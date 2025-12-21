@@ -30,14 +30,30 @@ class CopilotVSCodeAdapter:
     color = AGENTS["copilot-vscode"]["color"]
     badge = AGENTS["copilot-vscode"]["badge"]
 
+    def __init__(
+        self,
+        chat_sessions_dir: Path | None = None,
+        workspace_storage_dir: Path | None = None,
+    ) -> None:
+        self._chat_sessions_dir = (
+            chat_sessions_dir if chat_sessions_dir is not None else CHAT_SESSIONS_DIR
+        )
+        self._workspace_storage_dir = (
+            workspace_storage_dir
+            if workspace_storage_dir is not None
+            else WORKSPACE_STORAGE_DIR
+        )
+
     def is_available(self) -> bool:
         """Check if VS Code Copilot Chat data exists."""
         # Check empty window sessions
-        if CHAT_SESSIONS_DIR.exists() and any(CHAT_SESSIONS_DIR.glob("*.json")):
+        if self._chat_sessions_dir.exists() and any(
+            self._chat_sessions_dir.glob("*.json")
+        ):
             return True
         # Check workspace sessions
-        if WORKSPACE_STORAGE_DIR.exists():
-            for ws_dir in WORKSPACE_STORAGE_DIR.iterdir():
+        if self._workspace_storage_dir.exists():
+            for ws_dir in self._workspace_storage_dir.iterdir():
                 chat_dir = ws_dir / "chatSessions"
                 if chat_dir.exists() and any(chat_dir.glob("*.json")):
                     return True
@@ -67,13 +83,13 @@ class CopilotVSCodeAdapter:
         session_files: list[tuple[Path, str]] = []
 
         # Empty window sessions (no workspace directory)
-        if CHAT_SESSIONS_DIR.exists():
-            for session_file in CHAT_SESSIONS_DIR.glob("*.json"):
+        if self._chat_sessions_dir.exists():
+            for session_file in self._chat_sessions_dir.glob("*.json"):
                 session_files.append((session_file, ""))
 
         # Workspace-specific sessions
-        if WORKSPACE_STORAGE_DIR.exists():
-            for ws_dir in WORKSPACE_STORAGE_DIR.iterdir():
+        if self._workspace_storage_dir.exists():
+            for ws_dir in self._workspace_storage_dir.iterdir():
                 if not ws_dir.is_dir():
                     continue
                 chat_dir = ws_dir / "chatSessions"

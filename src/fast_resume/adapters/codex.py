@@ -15,9 +15,12 @@ class CodexAdapter:
     color = AGENTS["codex"]["color"]
     badge = AGENTS["codex"]["badge"]
 
+    def __init__(self, sessions_dir: Path | None = None) -> None:
+        self._sessions_dir = sessions_dir if sessions_dir is not None else CODEX_DIR
+
     def is_available(self) -> bool:
         """Check if Codex CLI data directory exists."""
-        return CODEX_DIR.exists()
+        return self._sessions_dir.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all Codex CLI sessions."""
@@ -26,7 +29,7 @@ class CodexAdapter:
 
         sessions = []
         # Codex stores sessions in YYYY/MM/DD subdirectories
-        for session_file in CODEX_DIR.rglob("*.jsonl"):
+        for session_file in self._sessions_dir.rglob("*.jsonl"):
             session = self._parse_session(session_file)
             if session:
                 sessions.append(session)
@@ -180,7 +183,7 @@ class CodexAdapter:
         # Scan all session files and build current state
         current_files: dict[str, tuple[Path, float]] = {}
 
-        for session_file in CODEX_DIR.rglob("*.jsonl"):
+        for session_file in self._sessions_dir.rglob("*.jsonl"):
             session_id = self._get_session_id_from_file(session_file)
             mtime = session_file.stat().st_mtime
             current_files[session_id] = (session_file, mtime)

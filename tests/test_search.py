@@ -6,11 +6,12 @@ actual data flow through the search system.
 
 import json
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
 from fast_resume.adapters.base import Session
+from fast_resume.adapters.claude import ClaudeAdapter
+from fast_resume.adapters.vibe import VibeAdapter
 from fast_resume.index import TantivyIndex
 from fast_resume.search import SessionSearch
 
@@ -84,40 +85,23 @@ def search_env(temp_dir):
 
 
 @pytest.fixture
-def patched_search(search_env):
-    """Create a SessionSearch with patched adapter directories."""
-    # Patch the config module constants where they're imported from
-    nonexistent = search_env["temp_dir"] / "nonexistent"
-
-    with (
-        patch("fast_resume.adapters.claude.CLAUDE_DIR", search_env["claude_dir"]),
-        patch("fast_resume.adapters.vibe.VIBE_DIR", search_env["vibe_dir"]),
-        patch("fast_resume.adapters.codex.CODEX_DIR", nonexistent),
-        patch("fast_resume.adapters.copilot.COPILOT_DIR", nonexistent),
-        patch("fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR", nonexistent),
-        patch("fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR", nonexistent),
-        patch(
-            "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE",
-            nonexistent / "projects.json",
-        ),
-        patch("fast_resume.adapters.opencode.OPENCODE_DIR", nonexistent),
-        patch("fast_resume.search.TantivyIndex") as MockIndex,
-    ):
-        # Use real index with temp path
-        real_index = TantivyIndex(index_path=search_env["index_dir"])
-        MockIndex.return_value = real_index
-
-        search = SessionSearch()
-        search._index = real_index
-        yield search
+def configured_search(search_env):
+    """Create a SessionSearch with test-configured adapters."""
+    search = SessionSearch()
+    search.adapters = [
+        ClaudeAdapter(sessions_dir=search_env["claude_dir"]),
+        VibeAdapter(sessions_dir=search_env["vibe_dir"]),
+    ]
+    search._index = TantivyIndex(index_path=search_env["index_dir"])
+    return search
 
 
 class TestSessionDiscovery:
     """Tests for session discovery across adapters."""
 
-    def test_discovers_sessions_from_multiple_adapters(self, patched_search):
+    def test_discovers_sessions_from_multiple_adapters(self, configured_search):
         """Test that sessions are discovered from different adapter types."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
 
         assert len(sessions) == 2
 
@@ -125,9 +109,9 @@ class TestSessionDiscovery:
         assert "claude" in agents
         assert "vibe" in agents
 
-    def test_sessions_have_correct_metadata(self, patched_search):
+    def test_sessions_have_correct_metadata(self, configured_search):
         """Test that discovered sessions have correct metadata."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
 
         claude_session = next(s for s in sessions if s.agent == "claude")
         assert claude_session.title == "Fix authentication bug in login"
@@ -138,9 +122,9 @@ class TestSessionDiscovery:
         assert "REST API" in vibe_session.title
         assert vibe_session.directory == "/home/user/api-project"
 
-    def test_sessions_sorted_by_timestamp_newest_first(self, patched_search):
+    def test_sessions_sorted_by_timestamp_newest_first(self, configured_search):
         """Test that sessions are sorted by timestamp, newest first."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
 
         timestamps = [s.timestamp for s in sessions]
         assert timestamps == sorted(timestamps, reverse=True)
@@ -149,109 +133,109 @@ class TestSessionDiscovery:
 class TestSearchFunctionality:
     """Tests for full-text search."""
 
-    def test_search_finds_content_in_messages(self, patched_search):
+    def test_search_finds_content_in_messages(self, configured_search):
         """Test that search finds content within session messages."""
         # First load sessions
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
         # Search for term in Claude session
-        results = patched_search.search("authentication")
+        results = configured_search.search("authentication")
         assert len(results) >= 1
         assert any(s.agent == "claude" for s in results)
 
-    def test_search_finds_content_across_adapters(self, patched_search):
+    def test_search_finds_content_across_adapters(self, configured_search):
         """Test that search works across different adapter types."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
         # Search for term in Vibe session
-        results = patched_search.search("endpoint")
+        results = configured_search.search("endpoint")
         assert len(results) >= 1
         assert any(s.agent == "vibe" for s in results)
 
-    def test_empty_query_returns_all_sessions(self, patched_search):
+    def test_empty_query_returns_all_sessions(self, configured_search):
         """Test that empty query returns all sessions."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        results = patched_search.search("")
+        results = configured_search.search("")
         assert len(results) == 2
 
-    def test_no_match_returns_empty(self, patched_search):
+    def test_no_match_returns_empty(self, configured_search):
         """Test that non-matching query returns empty list."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        results = patched_search.search("xyznonexistent123")
+        results = configured_search.search("xyznonexistent123")
         assert len(results) == 0
 
 
 class TestFiltering:
     """Tests for session filtering."""
 
-    def test_filter_by_agent(self, patched_search):
+    def test_filter_by_agent(self, configured_search):
         """Test filtering sessions by agent type."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        claude_only = patched_search.search("", agent_filter="claude")
+        claude_only = configured_search.search("", agent_filter="claude")
         assert len(claude_only) == 1
         assert claude_only[0].agent == "claude"
 
-        vibe_only = patched_search.search("", agent_filter="vibe")
+        vibe_only = configured_search.search("", agent_filter="vibe")
         assert len(vibe_only) == 1
         assert vibe_only[0].agent == "vibe"
 
-    def test_filter_by_directory(self, patched_search):
+    def test_filter_by_directory(self, configured_search):
         """Test filtering sessions by directory substring."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        results = patched_search.search("", directory_filter="web-app")
+        results = configured_search.search("", directory_filter="web-app")
         assert len(results) == 1
         assert results[0].agent == "claude"
 
-    def test_filter_by_directory_case_insensitive(self, patched_search):
+    def test_filter_by_directory_case_insensitive(self, configured_search):
         """Test that directory filter is case-insensitive."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        results = patched_search.search("", directory_filter="WEB-APP")
+        results = configured_search.search("", directory_filter="WEB-APP")
         assert len(results) == 1
 
-    def test_combine_filters(self, patched_search):
+    def test_combine_filters(self, configured_search):
         """Test combining agent and directory filters."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
         # Filter that matches
-        results = patched_search.search(
+        results = configured_search.search(
             "", agent_filter="claude", directory_filter="web"
         )
         assert len(results) == 1
 
         # Filter that doesn't match (wrong agent for directory)
-        results = patched_search.search(
+        results = configured_search.search(
             "", agent_filter="vibe", directory_filter="web-app"
         )
         assert len(results) == 0
 
-    def test_limit_parameter(self, patched_search):
+    def test_limit_parameter(self, configured_search):
         """Test that limit parameter restricts results."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        results = patched_search.search("", limit=1)
+        results = configured_search.search("", limit=1)
         assert len(results) == 1
 
 
 class TestCaching:
     """Tests for session caching behavior."""
 
-    def test_second_call_uses_cache(self, patched_search):
+    def test_second_call_uses_cache(self, configured_search):
         """Test that second call returns cached sessions."""
-        sessions1 = patched_search.get_all_sessions()
-        sessions2 = patched_search.get_all_sessions()
+        sessions1 = configured_search.get_all_sessions()
+        sessions2 = configured_search.get_all_sessions()
 
         # Should be the same list object (cached)
         assert sessions1 is sessions2
 
-    def test_force_refresh_bypasses_cache(self, patched_search):
+    def test_force_refresh_bypasses_cache(self, configured_search):
         """Test that force_refresh=True reloads sessions."""
-        sessions1 = patched_search.get_all_sessions()
-        sessions2 = patched_search.get_all_sessions(force_refresh=True)
+        sessions1 = configured_search.get_all_sessions()
+        sessions2 = configured_search.get_all_sessions(force_refresh=True)
 
         # Should be different list objects
         assert sessions1 is not sessions2
@@ -262,29 +246,29 @@ class TestCaching:
 class TestResumeCommand:
     """Tests for resume command generation."""
 
-    def test_get_resume_command_for_claude(self, patched_search):
+    def test_get_resume_command_for_claude(self, configured_search):
         """Test that correct resume command is generated for Claude."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
         claude_session = next(s for s in sessions if s.agent == "claude")
 
-        cmd = patched_search.get_resume_command(claude_session)
+        cmd = configured_search.get_resume_command(claude_session)
         assert cmd[0] == "claude"
         assert "--resume" in cmd or "-c" in cmd
 
-    def test_get_resume_command_for_vibe(self, patched_search):
+    def test_get_resume_command_for_vibe(self, configured_search):
         """Test that correct resume command is generated for Vibe."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
         vibe_session = next(s for s in sessions if s.agent == "vibe")
 
-        cmd = patched_search.get_resume_command(vibe_session)
+        cmd = configured_search.get_resume_command(vibe_session)
         assert cmd[0] == "vibe"
 
-    def test_get_adapter_for_session(self, patched_search):
+    def test_get_adapter_for_session(self, configured_search):
         """Test that correct adapter is returned for session."""
-        sessions = patched_search.get_all_sessions()
+        sessions = configured_search.get_all_sessions()
 
         for session in sessions:
-            adapter = patched_search.get_adapter_for_session(session)
+            adapter = configured_search.get_adapter_for_session(session)
             assert adapter is not None
             assert adapter.name == session.agent
 
@@ -292,10 +276,10 @@ class TestResumeCommand:
 class TestIncrementalUpdates:
     """Tests for incremental update detection."""
 
-    def test_detects_new_session(self, search_env, patched_search):
+    def test_detects_new_session(self, search_env, configured_search):
         """Test that new sessions are detected on refresh."""
         # Initial load
-        sessions1 = patched_search.get_all_sessions()
+        sessions1 = configured_search.get_all_sessions()
         assert len(sessions1) == 2
 
         # Add a new Vibe session
@@ -315,14 +299,14 @@ class TestIncrementalUpdates:
             json.dump(new_data, f)
 
         # Force refresh should find new session
-        sessions2 = patched_search.get_all_sessions(force_refresh=True)
+        sessions2 = configured_search.get_all_sessions(force_refresh=True)
         assert len(sessions2) == 3
 
-    def test_session_count_from_index(self, patched_search):
+    def test_session_count_from_index(self, configured_search):
         """Test that session count reflects indexed sessions."""
-        patched_search.get_all_sessions()
+        configured_search.get_all_sessions()
 
-        count = patched_search.get_session_count()
+        count = configured_search.get_session_count()
         assert count == 2
 
 
@@ -333,34 +317,18 @@ class TestEdgeCases:
         """Test that empty directories return no sessions."""
         empty_dir = temp_dir / "empty"
         empty_dir.mkdir()
-        index_dir = temp_dir / "index"
-        nonexistent = temp_dir / "nonexistent"
 
-        with (
-            patch("fast_resume.adapters.claude.CLAUDE_DIR", empty_dir),
-            patch("fast_resume.adapters.vibe.VIBE_DIR", empty_dir),
-            patch("fast_resume.adapters.codex.CODEX_DIR", nonexistent),
-            patch("fast_resume.adapters.copilot.COPILOT_DIR", nonexistent),
-            patch("fast_resume.adapters.copilot_vscode.CHAT_SESSIONS_DIR", nonexistent),
-            patch(
-                "fast_resume.adapters.copilot_vscode.WORKSPACE_STORAGE_DIR", nonexistent
-            ),
-            patch(
-                "fast_resume.adapters.crush.CRUSH_PROJECTS_FILE", nonexistent / "p.json"
-            ),
-            patch("fast_resume.adapters.opencode.OPENCODE_DIR", nonexistent),
-            patch("fast_resume.search.TantivyIndex") as MockIndex,
-        ):
-            real_index = TantivyIndex(index_path=index_dir)
-            MockIndex.return_value = real_index
+        search = SessionSearch()
+        search.adapters = [
+            ClaudeAdapter(sessions_dir=empty_dir),
+            VibeAdapter(sessions_dir=empty_dir),
+        ]
+        search._index = TantivyIndex(index_path=temp_dir / "index")
 
-            search = SessionSearch()
-            search._index = real_index
+        sessions = search.get_all_sessions()
+        assert sessions == []
 
-            sessions = search.get_all_sessions()
-            assert sessions == []
-
-    def test_unknown_agent_returns_none(self, patched_search):
+    def test_unknown_agent_returns_none(self, configured_search):
         """Test that unknown agent returns no adapter."""
         fake_session = Session(
             id="fake",
@@ -374,8 +342,8 @@ class TestEdgeCases:
             mtime=0,
         )
 
-        adapter = patched_search.get_adapter_for_session(fake_session)
+        adapter = configured_search.get_adapter_for_session(fake_session)
         assert adapter is None
 
-        cmd = patched_search.get_resume_command(fake_session)
+        cmd = configured_search.get_resume_command(fake_session)
         assert cmd == []

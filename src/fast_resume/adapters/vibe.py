@@ -15,9 +15,12 @@ class VibeAdapter:
     color = AGENTS["vibe"]["color"]
     badge = AGENTS["vibe"]["badge"]
 
+    def __init__(self, sessions_dir: Path | None = None) -> None:
+        self._sessions_dir = sessions_dir if sessions_dir is not None else VIBE_DIR
+
     def is_available(self) -> bool:
         """Check if Vibe data directory exists."""
-        return VIBE_DIR.exists()
+        return self._sessions_dir.exists()
 
     def find_sessions(self) -> list[Session]:
         """Find all Vibe sessions."""
@@ -25,7 +28,7 @@ class VibeAdapter:
             return []
 
         sessions = []
-        for session_file in VIBE_DIR.glob("session_*.json"):
+        for session_file in self._sessions_dir.glob("session_*.json"):
             session = self._parse_session(session_file)
             if session:
                 sessions.append(session)
@@ -129,7 +132,7 @@ class VibeAdapter:
         # (not file mtime) because that's what we store in the index
         current_files: dict[str, tuple[Path, float]] = {}
 
-        for session_file in VIBE_DIR.glob("session_*.json"):
+        for session_file in self._sessions_dir.glob("session_*.json"):
             try:
                 with open(session_file, "rb") as f:
                     data = orjson.loads(f.read())

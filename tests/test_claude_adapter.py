@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
@@ -269,7 +268,7 @@ class TestClaudeAdapter:
 
         assert cmd == ["claude", "--resume", "session-abc123"]
 
-    def test_find_sessions_skips_agent_files(self, adapter, temp_dir):
+    def test_find_sessions_skips_agent_files(self, temp_dir):
         """Test that agent subprocess files are skipped."""
         project_dir = temp_dir / "project-abc"
         project_dir.mkdir(parents=True)
@@ -306,8 +305,8 @@ class TestClaudeAdapter:
                 + "\n"
             )
 
-        with patch("fast_resume.adapters.claude.CLAUDE_DIR", temp_dir):
-            sessions = adapter.find_sessions()
+        adapter = ClaudeAdapter(sessions_dir=temp_dir)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 1
         assert "Regular session" in sessions[0].content

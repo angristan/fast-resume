@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
@@ -281,7 +280,7 @@ class TestCopilotAdapter:
 
         assert cmd == ["copilot", "--resume", "abc123-def456-ghi789"]
 
-    def test_find_sessions(self, adapter, temp_dir):
+    def test_find_sessions(self, temp_dir):
         """Test finding sessions in the session directory."""
         session_dir = temp_dir / "session-state"
         session_dir.mkdir(parents=True)
@@ -303,25 +302,25 @@ class TestCopilotAdapter:
                 for entry in data:
                     f.write(json.dumps(entry) + "\n")
 
-        with patch("fast_resume.adapters.copilot.COPILOT_DIR", session_dir):
-            sessions = adapter.find_sessions()
+        adapter = CopilotAdapter(sessions_dir=session_dir)
+        sessions = adapter.find_sessions()
 
         assert len(sessions) == 2
 
-    def test_is_available_when_dir_exists(self, adapter, temp_dir):
+    def test_is_available_when_dir_exists(self, temp_dir):
         """Test is_available returns True when directory exists."""
         session_dir = temp_dir / "session-state"
         session_dir.mkdir(parents=True)
 
-        with patch("fast_resume.adapters.copilot.COPILOT_DIR", session_dir):
-            assert adapter.is_available() is True
+        adapter = CopilotAdapter(sessions_dir=session_dir)
+        assert adapter.is_available() is True
 
-    def test_is_available_when_dir_missing(self, adapter, temp_dir):
+    def test_is_available_when_dir_missing(self, temp_dir):
         """Test is_available returns False when directory doesn't exist."""
         missing_dir = temp_dir / "nonexistent"
 
-        with patch("fast_resume.adapters.copilot.COPILOT_DIR", missing_dir):
-            assert adapter.is_available() is False
+        adapter = CopilotAdapter(sessions_dir=missing_dir)
+        assert adapter.is_available() is False
 
     def test_parse_session_ignores_other_info_types(self, adapter, temp_dir):
         """Test that non-folder_trust info types don't set directory."""

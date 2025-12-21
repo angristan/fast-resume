@@ -261,7 +261,7 @@ class TestOpenCodeAdapter:
 
         assert cmd == ["opencode", "/home/user/project", "--session", "ses_abc123"]
 
-    def test_find_sessions(self, adapter, temp_dir):
+    def test_find_sessions(self, temp_dir):
         """Test finding all sessions."""
         sessions = [
             {
@@ -293,8 +293,8 @@ class TestOpenCodeAdapter:
         ]
         create_opencode_structure(temp_dir, sessions)
 
-        with patch("fast_resume.adapters.opencode.OPENCODE_DIR", temp_dir):
-            found = adapter.find_sessions()
+        adapter = OpenCodeAdapter(sessions_dir=temp_dir)
+        found = adapter.find_sessions()
 
         assert len(found) == 2
         titles = {s.title for s in found}
