@@ -2,6 +2,7 @@
 
 import math
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -483,6 +484,12 @@ class FastResumeApp(App):
     Footer > .footer--description {
         color: $text-muted;
     }
+
+    #query-time {
+        width: auto;
+        padding: 0 1;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
@@ -519,6 +526,7 @@ class FastResumeApp(App):
     is_loading: reactive[bool] = reactive(True)
     preview_height: reactive[int] = reactive(12)
     search_query: reactive[str] = reactive("", init=False)
+    query_time_ms: reactive[float | None] = reactive(None)
     _spinner_frame: int = 0
     _spinner_chars: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -559,6 +567,7 @@ class FastResumeApp(App):
                         id="search-input",
                         value=self.initial_query,
                     )
+                    yield Label("", id="query-time")
 
             # Agent filter buttons - pill style with icons
             with Horizontal(id="filter-container"):
@@ -638,9 +647,11 @@ class FastResumeApp(App):
             # Index is current - load synchronously, no flicker
             self.search_engine._sessions = sessions
             self._total_loaded = len(sessions)
+            start_time = time.perf_counter()
             self.sessions = self.search_engine.search(
                 self.initial_query, agent_filter=self.active_filter, limit=100
             )
+            self.query_time_ms = (time.perf_counter() - start_time) * 1000
             self._finish_loading()
             self._update_table()
         else:
@@ -669,8 +680,10 @@ class FastResumeApp(App):
     def _update_session_count(self) -> None:
         """Update the session count display."""
         count_label = self.query_one("#session-count", Label)
+        time_label = self.query_one("#query-time", Label)
         if self.is_loading:
             count_label.update(f"{self._total_loaded} sessions loaded")
+            time_label.update("")
         else:
             shown = len(self.sessions)
             total = self._total_loaded
@@ -678,6 +691,11 @@ class FastResumeApp(App):
                 count_label.update(f"{shown}/{total} sessions")
             else:
                 count_label.update(f"{total} sessions")
+            # Update query time in search box
+            if self.query_time_ms is not None:
+                time_label.update(f"{self.query_time_ms:.1f}ms")
+            else:
+                time_label.update("")
 
     def on_resize(self) -> None:
         """Handle terminal resize."""
@@ -748,11 +766,15 @@ class FastResumeApp(App):
         def on_progress():
             # Use Tantivy search with initial_query
             query = self.initial_query
+            start_time = time.perf_counter()
             sessions = self.search_engine.search(
                 query, agent_filter=self.active_filter, limit=100
             )
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
             total = self.search_engine.get_session_count()
-            self.call_from_thread(self._update_results_streaming, sessions, total)
+            self.call_from_thread(
+                self._update_results_streaming, sessions, total, elapsed_ms
+            )
 
         def on_error(error: ParseError):
             parse_errors.append(error)
@@ -765,10 +787,14 @@ class FastResumeApp(App):
             self._finish_loading, new, updated, deleted, len(parse_errors)
         )
 
-    def _update_results_streaming(self, sessions: list[Session], total: int) -> None:
+    def _update_results_streaming(
+        self, sessions: list[Session], total: int, elapsed_ms: float | None = None
+    ) -> None:
         """Update UI with streaming results (keeps loading state)."""
         self.sessions = sessions
         self._total_loaded = total
+        if elapsed_ms is not None:
+            self.query_time_ms = elapsed_ms
         self._update_table()
         self._update_session_count()
 
@@ -821,15 +847,21 @@ class FastResumeApp(App):
     def _do_search(self, query: str) -> None:
         """Perform search and update results in background thread."""
         self._current_query = query
+        start_time = time.perf_counter()
         sessions = self.search_engine.search(
             query, agent_filter=self.active_filter, limit=100
         )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
         # Update UI from worker thread via call_from_thread
-        self.call_from_thread(self._update_results, sessions)
+        self.call_from_thread(self._update_results, sessions, elapsed_ms)
 
-    def _update_results(self, sessions: list[Session]) -> None:
+    def _update_results(
+        self, sessions: list[Session], elapsed_ms: float | None = None
+    ) -> None:
         """Update the UI with search results (called from main thread)."""
         self.sessions = sessions
+        if elapsed_ms is not None:
+            self.query_time_ms = elapsed_ms
         # Only stop loading spinner if streaming indexing is also done
         if not self.search_engine._streaming_in_progress:
             self.is_loading = False
