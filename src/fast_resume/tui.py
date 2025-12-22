@@ -1,5 +1,6 @@
 """Textual TUI for fast-resume."""
 
+import logging
 import math
 import os
 import time
@@ -24,6 +25,8 @@ from textual_image.widget import Image as ImageWidget
 from .adapters.base import ParseError, Session
 from .config import AGENTS, LOG_FILE
 from .search import SessionSearch
+
+logger = logging.getLogger(__name__)
 
 # Asset paths for agent icons
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -553,6 +556,7 @@ class FastResumeApp(App):
         self._filter_buttons: dict[str | None, Static] = {}
         self._total_loaded: int = 0
         self._search_timer: object | None = None
+        self._available_update: str | None = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
@@ -632,6 +636,9 @@ class FastResumeApp(App):
 
         # Try fast sync load first (index hit), fall back to async
         self._initial_load()
+
+        # Check for updates asynchronously
+        self._check_for_updates()
 
     def _initial_load(self) -> None:
         """Load sessions - sync if index is current, async with streaming otherwise."""
@@ -861,6 +868,34 @@ class FastResumeApp(App):
             self.is_loading = False
         self._update_table()
         self._update_session_count()
+
+    @work(thread=True)
+    def _check_for_updates(self) -> None:
+        """Check PyPI for newer version and notify if available."""
+        import json
+        import urllib.request
+
+        from fast_resume import __version__
+
+        try:
+            url = "https://pypi.org/pypi/fast-resume/json"
+            with urllib.request.urlopen(url, timeout=3) as response:
+                data = json.load(response)
+                latest = data["info"]["version"]
+
+            logger.debug(f"Update check: current={__version__}, latest={latest}")
+
+            if latest != __version__:
+                logger.info(f"Update available: {__version__} → {latest}")
+                self._available_update = latest
+                self.call_from_thread(
+                    self.notify,
+                    f"{__version__} → {latest}\nRun [bold]uv tool upgrade fast-resume[/bold] to update",
+                    title="Update available",
+                    timeout=5,
+                )
+        except Exception as e:
+            logger.debug(f"Update check failed: {e}")
 
     def _update_table(self) -> None:
         """Update the results table with current sessions."""
@@ -1200,6 +1235,15 @@ def run_tui(
     query: str = "", agent_filter: str | None = None, yolo: bool = False
 ) -> tuple[list[str] | None, str | None]:
     """Run the TUI and return the resume command and directory if selected."""
+    from fast_resume import __version__
+
     app = FastResumeApp(initial_query=query, agent_filter=agent_filter, yolo=yolo)
     app.run()
+
+    if app._available_update:
+        print(
+            f"\nUpdate available: {__version__} → {app._available_update}\n"
+            f"Run: uv tool upgrade fast-resume"
+        )
+
     return app.get_resume_command(), app.get_resume_directory()

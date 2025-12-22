@@ -1,5 +1,8 @@
 # fast-resume
 
+[![PyPI version](https://img.shields.io/pypi/v/fast-resume)](https://pypi.org/project/fast-resume/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/fast-resume)](https://pypi.org/project/fast-resume/)
+
 Search and resume conversations across Claude Code, Codex, and more, all from a single place.
 
 ## Why fast-resume?
@@ -20,6 +23,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Fuzzy Matching**: Typo-tolerant search with smart ranking (exact matches boosted)
 - **Direct Resume**: Select, Enter, you're back in your session
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
+- **Update Notifications**: Get notified when a new version is available
 
 ## Supported Agents
 
@@ -35,18 +39,13 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 
 ## Installation
 
-**Requirements:** Python 3.14+
-
 ```bash
 # Run directly (no install needed)
-uvx --from git+https://github.com/angristan/fast-resume fr
+uvx --from fast-resume fr
 
 # Or install permanently
-uv tool install git+https://github.com/angristan/fast-resume
-
-# Then use either command:
+uv tool install fast-resume
 fr
-fast-resume
 ```
 
 ## Usage
