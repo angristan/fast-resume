@@ -15,7 +15,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 ## Features
 
 - **Unified Search**: One search box to find sessions across all your coding agents
-- **Full-Text Search**: Search not just titles, but the entire conversation content, including tool outputs
+- **Full-Text Search**: Search not just titles, but the entire conversation content (user messages and assistant responses)
 - **Very fast**: Built on the Rust-powered Tantivy search engine for blazing-fast indexing and searching
 - **Fuzzy Matching**: Typo-tolerant search with smart ranking (exact matches boosted)
 - **Direct Resume**: Select, Enter, you're back in your session
@@ -252,6 +252,20 @@ class Session:
     message_count: int   # Human turns (excludes tool results)
     mtime: float         # File mtime for incremental update detection
 ```
+
+**What gets indexed:**
+
+- User text messages (the actual prompts you typed)
+- Assistant text responses
+
+**What's excluded from indexing:**
+
+- Tool results (file contents, command outputs, API responses)
+- Tool use/calls (function invocations)
+- Meta messages (system prompts, context summaries)
+- Local command outputs (slash commands like `/context`)
+
+This keeps the index focused on the actual conversation and avoids bloating it with large tool outputs that are rarely useful for search.
 
 ### Indexing
 
