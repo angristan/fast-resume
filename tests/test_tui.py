@@ -498,26 +498,24 @@ class TestFastResumeAppFilters:
                 assert vibe_filter is not None
 
     @pytest.mark.asyncio
-    async def test_number_keys_change_filter(self, mock_search_engine):
-        """Test that number keys change the active filter."""
+    async def test_tab_cycles_through_filters(self, mock_search_engine):
+        """Test that Tab cycles through agent filters."""
         with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
-                # Focus table first (away from search input which captures key presses)
-                table = app.query_one("#results-table")
-                table.focus()
-                await pilot.pause()
+                # Should start with no filter (All)
+                assert app.active_filter is None
 
-                # Press '2' for Claude filter
-                await pilot.press("2")
+                # Tab should cycle to first agent filter (claude)
+                await pilot.press("tab")
                 await pilot.pause()
                 assert app.active_filter == "claude"
 
-                # Press '1' for All
-                await pilot.press("1")
+                # Tab again should go to codex
+                await pilot.press("tab")
                 await pilot.pause()
-                assert app.active_filter is None
+                assert app.active_filter == "codex"
 
 
 class TestFastResumeAppPreview:

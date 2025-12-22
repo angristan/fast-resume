@@ -521,14 +521,6 @@ class FastResumeApp(App):
         Binding("plus", "increase_preview", "+Preview", show=False),
         Binding("equals", "increase_preview", "+Preview", show=False),
         Binding("minus", "decrease_preview", "-Preview", show=False),
-        Binding("1", "filter_all", "All", show=False),
-        Binding("2", "filter_claude", "Claude", show=False),
-        Binding("3", "filter_codex", "Codex", show=False),
-        Binding("4", "filter_copilot_cli", "Copilot", show=False),
-        Binding("5", "filter_copilot_vscode", "VS Code", show=False),
-        Binding("6", "filter_crush", "Crush", show=False),
-        Binding("7", "filter_opencode", "OpenCode", show=False),
-        Binding("8", "filter_vibe", "Vibe", show=False),
         Binding("ctrl+p", "command_palette", "Commands"),
     ]
 
