@@ -492,6 +492,17 @@ class FastResumeApp(App):
     }
     """
 
+    FILTER_KEYS: list[str | None] = [
+        None,
+        "claude",
+        "codex",
+        "copilot-cli",
+        "copilot-vscode",
+        "crush",
+        "opencode",
+        "vibe",
+    ]
+
     BINDINGS = [
         Binding("escape", "quit", "Quit", priority=True),
         Binding("q", "quit", "Quit", show=False),
@@ -499,7 +510,8 @@ class FastResumeApp(App):
         Binding("/", "focus_search", "Search", priority=True),
         Binding("enter", "resume_session", "Resume"),
         Binding("c", "copy_path", "Copy resume command", priority=True),
-        Binding("tab", "toggle_preview", "Preview", priority=True),
+        Binding("ctrl+grave_accent", "toggle_preview", "Preview", priority=True),
+        Binding("tab", "cycle_filter", "Next Filter", priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
@@ -571,17 +583,7 @@ class FastResumeApp(App):
 
             # Agent filter buttons - pill style with icons
             with Horizontal(id="filter-container"):
-                filter_keys = [
-                    None,
-                    "claude",
-                    "codex",
-                    "copilot-cli",
-                    "copilot-vscode",
-                    "crush",
-                    "opencode",
-                    "vibe",
-                ]
-                for filter_key in filter_keys:
+                for filter_key in self.FILTER_KEYS:
                     filter_label = AGENTS[filter_key]["badge"] if filter_key else "All"
                     btn_id = f"filter-{filter_key or 'all'}"
                     with Horizontal(id=btn_id, classes="filter-btn") as btn_container:
@@ -1158,6 +1160,15 @@ class FastResumeApp(App):
     def action_filter_vibe(self) -> None:
         """Filter to Vibe sessions only."""
         self._set_filter("vibe")
+
+    def action_cycle_filter(self) -> None:
+        """Cycle to the next agent filter."""
+        try:
+            current_index = self.FILTER_KEYS.index(self.active_filter)
+            next_index = (current_index + 1) % len(self.FILTER_KEYS)
+        except ValueError:
+            next_index = 0
+        self._set_filter(self.FILTER_KEYS[next_index])
 
     @on(Click, ".filter-btn")
     def on_filter_click(self, event: Click) -> None:

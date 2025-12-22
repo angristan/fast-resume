@@ -422,8 +422,8 @@ class TestFastResumeAppNavigation:
                 assert search_input.has_focus
 
     @pytest.mark.asyncio
-    async def test_tab_toggles_preview(self, mock_search_engine):
-        """Test that Tab toggles preview pane."""
+    async def test_ctrl_backtick_toggles_preview(self, mock_search_engine):
+        """Test that Ctrl+` toggles preview pane."""
         with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
@@ -431,12 +431,12 @@ class TestFastResumeAppNavigation:
                 # Preview should be visible by default
                 assert app.show_preview is True
 
-                # Tab should toggle it off
-                await pilot.press("tab")
+                # Ctrl+` should toggle it off
+                await pilot.press("ctrl+grave_accent")
                 assert app.show_preview is False
 
-                # Tab again should toggle it back on
-                await pilot.press("tab")
+                # Ctrl+` again should toggle it back on
+                await pilot.press("ctrl+grave_accent")
                 assert app.show_preview is True
 
 
