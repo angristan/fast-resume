@@ -135,7 +135,7 @@ def _show_stats() -> None:
     console.print("\n[bold]Data by Agent[/bold]\n")
     search = SessionSearch()
     agent_table = Table(show_header=True, header_style="bold")
-    agent_table.add_column("Agent")
+    agent_table.add_column("Agent", no_wrap=True)
     agent_table.add_column("Files", justify="right")
     agent_table.add_column("Disk", justify="right")
     agent_table.add_column("Sessions", justify="right")
