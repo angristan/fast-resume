@@ -140,13 +140,14 @@ Options:
 
 ### Preview & Actions
 
-| Key         | Action                                |
-| ----------- | ------------------------------------- |
-| `Tab`       | Toggle preview pane                   |
-| `+` / `-`   | Resize preview pane                   |
-| `c`         | Copy full resume command to clipboard |
-| `Ctrl+P`    | Open command palette                  |
-| `q` / `Esc` | Quit                                  |
+| Key       | Action                                |
+| --------- | ------------------------------------- |
+| `Ctrl+\`` | Toggle preview pane                   |
+| `+` / `-` | Resize preview pane                   |
+| `Tab`     | Cycle through agent filters           |
+| `c`       | Copy full resume command to clipboard |
+| `Ctrl+P`  | Open command palette                  |
+| `q`/`Esc` | Quit                                  |
 
 ## Statistics Dashboard
 
