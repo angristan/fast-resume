@@ -22,6 +22,7 @@ from textual.widgets import DataTable, Footer, Input, Static, Label
 from textual_image.renderable import Image as ImageRenderable
 from textual_image.widget import Image as ImageWidget
 
+from . import __version__
 from .adapters.base import ParseError, Session
 from .config import AGENTS, LOG_FILE
 from .search import SessionSearch
@@ -561,9 +562,9 @@ class FastResumeApp(App):
     def compose(self) -> ComposeResult:
         """Create child widgets."""
         with Vertical():
-            # Title bar: app name + session count
+            # Title bar: app name + version + session count
             with Horizontal(id="title-bar"):
-                yield Label("fast-resume", id="app-title")
+                yield Label(f"fast-resume v{__version__}", id="app-title")
                 yield Label("", id="session-count")
 
             # Search row with boxed input
@@ -874,8 +875,6 @@ class FastResumeApp(App):
         """Check PyPI for newer version and notify if available."""
         import json
         import urllib.request
-
-        from fast_resume import __version__
 
         try:
             url = "https://pypi.org/pypi/fast-resume/json"
@@ -1235,8 +1234,6 @@ def run_tui(
     query: str = "", agent_filter: str | None = None, yolo: bool = False
 ) -> tuple[list[str] | None, str | None]:
     """Run the TUI and return the resume command and directory if selected."""
-    from fast_resume import __version__
-
     app = FastResumeApp(initial_query=query, agent_filter=agent_filter, yolo=yolo)
     app.run()
 
