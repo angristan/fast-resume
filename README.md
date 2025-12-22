@@ -155,45 +155,52 @@ Run `fr --stats` to see analytics about your coding sessions:
 ```
 Index Statistics
 
-Total sessions    247
-Total messages    12,456
-Avg messages/session  50.4
-Index size        2.1 MB
-Index location    ~/.cache/fast-resume/tantivy_index
-Date range        2024-08-15 to 2024-12-20
+  Total sessions          751
+  Total messages          13,799
+  Avg messages/session    18.4
+  Index size              15.5 MB
+  Index location          ~/.cache/fast-resume/tantivy_index
+  Date range              2023-11-15 to 2025-12-22
 
-Sessions by Agent
+Data by Agent
 
-Agent      Sessions
-claude          142  ████████████████████ (58%)
-codex            45  ██████ (18%)
-opencode         32  ████ (13%)
-vibe             18  ██ (7%)
-copilot           7  █ (3%)
-crush             3  ▏ (1%)
+┌────────────┬───────┬──────────┬──────────┬──────────┬──────────┬─────────────┐
+│ Agent      │ Files │     Disk │ Sessions │ Messages │  Content │ Data Dir    │
+├────────────┼───────┼──────────┼──────────┼──────────┼──────────┼─────────────┤
+│ claude     │   477 │ 312.9 MB │      377 │   10,415 │   3.1 MB │ ~/.claude/… │
+│ copilot-v… │   191 │ 146.0 MB │      189 │      954 │   1.4 MB │ ~/Library/… │
+│ codex      │   107 │  23.6 MB │       89 │      321 │ 890.6 kB │ ~/.codex/…  │
+│ opencode   │  9275 │  46.3 MB │       72 │    1,912 │ 597.7 kB │ ~/.local/…  │
+│ vibe       │    12 │ 858.2 kB │       12 │      138 │ 380.0 kB │ ~/.vibe/…   │
+│ crush      │     3 │   1.0 MB │        7 │       44 │  15.2 kB │ ~/.local/…  │
+│ copilot-c… │     5 │ 417.1 kB │        5 │       15 │   6.9 kB │ ~/.copilot… │
+└────────────┴───────┴──────────┴──────────┴──────────┴──────────┴─────────────┘
 
 Activity by Day
 
-Mon  ████████████████████  89
-Tue  ██████████████        62
-Wed  ████████████          54
-Thu  ██████████            45
-Fri  ████████              36
-Sat  ██                     8
-Sun  █                      4
+ Mon   ██████████              89
+ Tue   ██████████              86
+ Wed   █████                   44
+ Thu   ██████████████         115
+ Fri   █████████████          112
+ Sat   ████████████████████   163
+ Sun   █████████████████      142
 
 Activity by Hour
 
-  0h ▁▁▁▁▁▁▁▂▃▅▆▇█▇▆▅▄▃▂▁▁▁▁▁ 23h
-  Peak hours: 14:00 (23), 15:00 (21), 13:00 (19)
+  0h ▄▁        ▄▄▅▂▂▂▂▂▃▃▃▅▅█ 23h
+  Peak hours: 23:00 (99), 22:00 (63), 12:00 (63)
 
 Top Directories
 
-Directory                            Sessions
-~/projects/fast-resume                     45
-~/work/api-server                          32
-~/projects/my-app                          28
-...
+┌───────────────────────┬──────────┬──────────┐
+│ Directory             │ Sessions │ Messages │
+├───────────────────────┼──────────┼──────────┤
+│ ~/git/openvpn-install │      234 │    5,597 │
+│ ~/lab/larafeed        │      158 │    2,590 │
+│ ~/lab/fast-resume     │       81 │    2,027 │
+│ ...                   │          │          │
+└───────────────────────┴──────────┴──────────┘
 ```
 
 ## How It Works
