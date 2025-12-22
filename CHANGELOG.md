@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/angristan/fast-resume/compare/v1.0.0...v1.1.0) (2025-12-22)
+
+
+### Features
+
+* add update notifications ([8705aea](https://github.com/angristan/fast-resume/commit/8705aeaaeb660478752817cefead9f9e21129f64))
+
 # 1.0.0 (2025-12-22)
 
 
