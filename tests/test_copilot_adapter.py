@@ -194,7 +194,7 @@ class TestCopilotAdapter:
         session = adapter._parse_session_file(copilot_session_file)
 
         assert session is not None
-        assert session.message_count == 2  # Two user.message entries
+        assert session.message_count == 4  # Two user + two assistant turns
 
     def test_parse_empty_session_returns_none(self, adapter, temp_dir):
         """Test that empty sessions return None."""

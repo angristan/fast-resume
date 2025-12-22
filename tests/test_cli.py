@@ -172,7 +172,7 @@ class TestShowStatsIntegration:
         assert "Index Statistics" in captured.out
         assert "Total sessions" in captured.out
         assert "3" in captured.out
-        assert "Sessions by Agent" in captured.out
+        assert "Data by Agent" in captured.out
         assert "claude" in captured.out
         assert "vibe" in captured.out
 
@@ -320,7 +320,7 @@ class TestOutputFormatting:
             _show_stats()
 
         captured = capsys.readouterr()
-        assert "Sessions by Agent" in captured.out
+        assert "Data by Agent" in captured.out
         assert "claude" in captured.out
         assert "vibe" in captured.out
 

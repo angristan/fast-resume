@@ -8,7 +8,7 @@ from urllib.parse import unquote, urlparse
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, Session, truncate_title
+from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
 
 # VS Code storage paths vary by platform
 if sys.platform == "darwin":
@@ -135,7 +135,7 @@ class CopilotVSCodeAdapter:
             # Extract messages
             messages: list[str] = []
             directory = workspace_directory  # Use workspace directory as default
-            human_turn_count = 0
+            turn_count = 0
 
             for req in requests:
                 # User message
@@ -143,7 +143,7 @@ class CopilotVSCodeAdapter:
                 user_text = msg.get("text", "")
                 if user_text:
                     messages.append(f"» {user_text}")
-                    human_turn_count += 1
+                    turn_count += 1
 
                 # Try to extract directory from content references if not already set
                 if not directory:
@@ -158,11 +158,15 @@ class CopilotVSCodeAdapter:
 
                 # Assistant response
                 response = req.get("response", [])
+                has_response = False
                 for resp_part in response:
                     if isinstance(resp_part, dict):
                         value = resp_part.get("value", "")
                         if value:
                             messages.append(f"  {value}")
+                            has_response = True
+                if has_response:
+                    turn_count += 1
 
             if not messages:
                 return None
@@ -193,7 +197,7 @@ class CopilotVSCodeAdapter:
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
-                message_count=human_turn_count,
+                message_count=turn_count,
                 mtime=session_file.stat().st_mtime,
             )
         except OSError as e:
@@ -284,3 +288,30 @@ class CopilotVSCodeAdapter:
         if session.directory:
             return ["code", session.directory]
         return ["code"]
+
+    def get_raw_stats(self) -> RawAdapterStats:
+        """Get raw statistics from VS Code Copilot data folders."""
+        if not self.is_available():
+            return RawAdapterStats(
+                agent=self.name,
+                data_dir=str(self._chat_sessions_dir),
+                available=False,
+                file_count=0,
+                total_bytes=0,
+            )
+
+        session_files = self._get_all_session_files()
+        total_bytes = 0
+        for path, _ in session_files:
+            try:
+                total_bytes += path.stat().st_size
+            except OSError:
+                pass
+
+        return RawAdapterStats(
+            agent=self.name,
+            data_dir=str(self._chat_sessions_dir),
+            available=True,
+            file_count=len(session_files),
+            total_bytes=total_bytes,
+        )

@@ -53,6 +53,17 @@ class Session:
 
 
 @dataclass
+class RawAdapterStats:
+    """Raw statistics from an adapter's data folder."""
+
+    agent: str
+    data_dir: str  # Path to the data directory
+    available: bool  # Whether the data directory exists
+    file_count: int  # Number of session files
+    total_bytes: int  # Total size in bytes
+
+
+@dataclass
 class ParseError:
     """Represents a session parsing error."""
 
@@ -104,6 +115,10 @@ class AgentAdapter(Protocol):
 
     def is_available(self) -> bool:
         """Check if this agent's data directory exists."""
+        ...
+
+    def get_raw_stats(self) -> RawAdapterStats:
+        """Get raw statistics from the adapter's data folder."""
         ...
 
 
@@ -206,3 +221,31 @@ class BaseSessionAdapter(ABC):
         ]
 
         return new_or_modified, deleted_ids
+
+    def get_raw_stats(self) -> RawAdapterStats:
+        """Get raw statistics from the adapter's data folder."""
+        if not self.is_available():
+            return RawAdapterStats(
+                agent=self.name,
+                data_dir=str(self._sessions_dir),
+                available=False,
+                file_count=0,
+                total_bytes=0,
+            )
+
+        # Use _scan_session_files to get file info
+        files = self._scan_session_files()
+        total_bytes = 0
+        for path, _ in files.values():
+            try:
+                total_bytes += path.stat().st_size
+            except OSError:
+                pass
+
+        return RawAdapterStats(
+            agent=self.name,
+            data_dir=str(self._sessions_dir),
+            available=True,
+            file_count=len(files),
+            total_bytes=total_bytes,
+        )

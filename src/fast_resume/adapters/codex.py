@@ -42,7 +42,8 @@ class CodexAdapter(BaseSessionAdapter):
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
-            user_prompts: list[str] = []  # Actual human inputs for title and count
+            user_prompts: list[str] = []  # Actual human inputs for title
+            turn_count = 0  # Count user + assistant turns
             yolo = False  # Track if session was started in yolo mode
 
             with open(session_file, "r", encoding="utf-8") as f:
@@ -84,6 +85,7 @@ class CodexAdapter(BaseSessionAdapter):
                         content = payload.get("content", [])
                         if role in ("user", "assistant"):
                             role_prefix = "» " if role == "user" else "  "
+                            has_text = False
                             for part in content:
                                 if isinstance(part, dict):
                                     text = part.get("text", "") or part.get(
@@ -95,6 +97,9 @@ class CodexAdapter(BaseSessionAdapter):
                                             "<environment_context>"
                                         ):
                                             messages.append(f"{role_prefix}{text}")
+                                            has_text = True
+                            if has_text:
+                                turn_count += 1
 
                     # Extract event messages (user prompts) - actual human inputs
                     if msg_type == "event_msg":
@@ -135,7 +140,7 @@ class CodexAdapter(BaseSessionAdapter):
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
-                message_count=len(user_prompts),
+                message_count=turn_count,
                 yolo=yolo,
             )
         except OSError as e:

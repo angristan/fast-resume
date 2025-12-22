@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..config import AGENTS, MAX_PREVIEW_LENGTH, OPENCODE_DIR
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, Session
+from .base import ErrorCallback, ParseError, RawAdapterStats, Session
 
 
 class OpenCodeAdapter:
@@ -110,6 +110,9 @@ class OpenCodeAdapter:
                 session_id, messages_by_session, parts_by_message
             )
 
+            # Count actual message turns (not text parts)
+            turn_count = len(messages_by_session.get(session_id, []))
+
             full_content = "\n\n".join(messages)
             preview = full_content[:MAX_PREVIEW_LENGTH]
 
@@ -121,7 +124,7 @@ class OpenCodeAdapter:
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
-                message_count=len(messages),
+                message_count=turn_count,
             )
         except OSError as e:
             error = ParseError(
@@ -297,3 +300,36 @@ class OpenCodeAdapter:
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume an OpenCode session."""
         return ["opencode", session.directory, "--session", session.id]
+
+    def get_raw_stats(self) -> RawAdapterStats:
+        """Get raw statistics from the OpenCode data folder."""
+        if not self.is_available():
+            return RawAdapterStats(
+                agent=self.name,
+                data_dir=str(self._sessions_dir),
+                available=False,
+                file_count=0,
+                total_bytes=0,
+            )
+
+        # Count all files: session, message, and part directories
+        file_count = 0
+        total_bytes = 0
+
+        for subdir in ["session", "message", "part"]:
+            dir_path = self._sessions_dir / subdir
+            if dir_path.exists():
+                for json_file in dir_path.rglob("*.json"):
+                    try:
+                        file_count += 1
+                        total_bytes += json_file.stat().st_size
+                    except OSError:
+                        pass
+
+        return RawAdapterStats(
+            agent=self.name,
+            data_dir=str(self._sessions_dir),
+            available=True,
+            file_count=file_count,
+            total_bytes=total_bytes,
+        )

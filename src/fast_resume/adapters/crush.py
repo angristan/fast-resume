@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_PREVIEW_LENGTH
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, Session, truncate_title
+from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
 
 
 class CrushAdapter:
@@ -294,3 +294,50 @@ class CrushAdapter:
         # Crush is interactive - it shows a session picker when launched in a project directory
         # fast-resume changes to session.directory before executing this command
         return ["crush"]
+
+    def get_raw_stats(self) -> RawAdapterStats:
+        """Get raw statistics from Crush database files."""
+        if not self.is_available():
+            return RawAdapterStats(
+                agent=self.name,
+                data_dir=str(self._projects_file.parent),
+                available=False,
+                file_count=0,
+                total_bytes=0,
+            )
+
+        try:
+            with open(self._projects_file, "rb") as f:
+                projects_data = orjson.loads(f.read())
+        except (orjson.JSONDecodeError, OSError):
+            return RawAdapterStats(
+                agent=self.name,
+                data_dir=str(self._projects_file.parent),
+                available=True,
+                file_count=0,
+                total_bytes=0,
+            )
+
+        file_count = 0
+        total_bytes = 0
+
+        for project in projects_data.get("projects", []):
+            data_dir = project.get("data_dir", "")
+            if not data_dir:
+                continue
+
+            db_path = Path(data_dir) / "crush.db"
+            if db_path.exists():
+                try:
+                    file_count += 1
+                    total_bytes += db_path.stat().st_size
+                except OSError:
+                    pass
+
+        return RawAdapterStats(
+            agent=self.name,
+            data_dir=str(self._projects_file.parent),
+            available=True,
+            file_count=file_count,
+            total_bytes=total_bytes,
+        )

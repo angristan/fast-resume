@@ -50,8 +50,8 @@ class ClaudeAdapter(BaseSessionAdapter):
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
-            # Count actual human interactions (not tool results)
-            human_turn_count = 0
+            # Count conversation turns (user + assistant, not tool results)
+            turn_count = 0
 
             with open(session_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -110,14 +110,16 @@ class ClaudeAdapter(BaseSessionAdapter):
                                     messages.append(f"» {part}")
 
                         if is_human_input:
-                            human_turn_count += 1
+                            turn_count += 1
 
-                    # Extract assistant content for preview (no need to count)
+                    # Extract assistant content
                     if msg_type == "assistant":
                         msg = data.get("message", {})
                         content = msg.get("content", "")
+                        has_text = False
                         if isinstance(content, str) and content:
                             messages.append(f"  {content}")
+                            has_text = True
                         elif isinstance(content, list):
                             for part in content:
                                 if (
@@ -127,8 +129,12 @@ class ClaudeAdapter(BaseSessionAdapter):
                                     text = part.get("text", "")
                                     if text:
                                         messages.append(f"  {text}")
+                                        has_text = True
                                 elif isinstance(part, str):
                                     messages.append(f"  {part}")
+                                    has_text = True
+                        if has_text:
+                            turn_count += 1
 
             # Skip sessions with no actual user message
             if not first_user_message:
@@ -153,7 +159,7 @@ class ClaudeAdapter(BaseSessionAdapter):
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
-                message_count=human_turn_count,
+                message_count=turn_count,
             )
         except OSError as e:
             error = ParseError(

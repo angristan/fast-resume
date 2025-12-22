@@ -249,7 +249,7 @@ class Session:
     timestamp: datetime  # Last modified time
     preview: str         # First 500 chars for preview pane
     content: str         # Full conversation text (» user, ␣␣ assistant)
-    message_count: int   # Human turns (excludes tool results)
+    message_count: int   # Conversation turns (user + assistant, excludes tool results)
     mtime: float         # File mtime for incremental update detection
 ```
 

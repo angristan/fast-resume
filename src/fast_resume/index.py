@@ -24,7 +24,9 @@ class IndexStats:
     total_messages: int
     oldest_session: datetime | None
     newest_session: datetime | None
-    top_directories: list[tuple[str, int]]  # (directory, count) pairs
+    top_directories: list[
+        tuple[str, int, int]
+    ]  # (directory, sessions, messages) tuples
     index_size_bytes: int
     # Time breakdown
     sessions_today: int
@@ -40,6 +42,9 @@ class IndexStats:
     sessions_by_hour: dict[int, int]  # 0-23
     # Daily activity (date string -> (sessions, messages))
     daily_activity: list[tuple[str, int, int]]  # (date, sessions, messages)
+    # Per-agent raw data
+    messages_by_agent: dict[str, int] | None = None
+    content_chars_by_agent: dict[str, int] | None = None
 
 
 class TantivyIndex:
@@ -227,7 +232,10 @@ class TantivyIndex:
 
         # Collect stats from all documents
         agent_counts: Counter[str] = Counter()
+        agent_messages: Counter[str] = Counter()
+        agent_content_chars: Counter[str] = Counter()
         dir_counts: Counter[str] = Counter()
+        dir_messages: Counter[str] = Counter()
         weekday_counts: Counter[str] = Counter()
         hour_counts: Counter[int] = Counter()
         daily_sessions: Counter[str] = Counter()
@@ -267,10 +275,17 @@ class TantivyIndex:
             msg_count = doc.get_first("message_count")
             if msg_count:
                 total_messages += msg_count
+                if directory:
+                    dir_messages[directory] += msg_count
+                if agent:
+                    agent_messages[agent] += msg_count
 
             content = doc.get_first("content")
             if content:
-                total_content_chars += len(content)
+                content_len = len(content)
+                total_content_chars += content_len
+                if agent:
+                    agent_content_chars[agent] += content_len
 
             timestamp = doc.get_first("timestamp")
             if timestamp is not None:
@@ -314,7 +329,9 @@ class TantivyIndex:
             total_messages=total_messages,
             oldest_session=datetime.fromtimestamp(oldest_ts) if oldest_ts else None,
             newest_session=datetime.fromtimestamp(newest_ts) if newest_ts else None,
-            top_directories=dir_counts.most_common(10),
+            top_directories=[
+                (d, count, dir_messages[d]) for d, count in dir_counts.most_common(10)
+            ],
             index_size_bytes=self._get_index_size(),
             sessions_today=sessions_today,
             sessions_this_week=sessions_this_week,
@@ -326,6 +343,8 @@ class TantivyIndex:
             sessions_by_weekday={d: weekday_counts.get(d, 0) for d in weekday_names},
             sessions_by_hour=dict(hour_counts),
             daily_activity=daily_activity,
+            messages_by_agent=dict(agent_messages),
+            content_chars_by_agent=dict(agent_content_chars),
         )
 
     def _get_index_size(self) -> int:

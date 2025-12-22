@@ -131,28 +131,65 @@ def _show_stats() -> None:
 
     console.print(overview)
 
-    # Sessions by agent
-    console.print("\n[bold]Sessions by Agent[/bold]\n")
+    # Data by agent (raw + indexed)
+    console.print("\n[bold]Data by Agent[/bold]\n")
+    search = SessionSearch()
     agent_table = Table(show_header=True, header_style="bold")
     agent_table.add_column("Agent")
+    agent_table.add_column("Files", justify="right")
+    agent_table.add_column("Disk", justify="right")
     agent_table.add_column("Sessions", justify="right")
-    agent_table.add_column("", justify="left")  # Bar
+    agent_table.add_column("Messages", justify="right")
+    agent_table.add_column("Content", justify="right")
+    agent_table.add_column("Data Directory")
 
-    # Sort by count descending
-    sorted_agents = sorted(stats.sessions_by_agent.items(), key=lambda x: -x[1])
-    max_count = max(stats.sessions_by_agent.values()) if stats.sessions_by_agent else 1
+    messages_by_agent = stats.messages_by_agent or {}
+    content_chars_by_agent = stats.content_chars_by_agent or {}
 
-    for agent_name, count in sorted_agents:
+    # Collect data for all agents and sort by indexed session count
+    agent_data = []
+    for adapter in search.adapters:
+        raw_stats = adapter.get_raw_stats()
+        sessions = stats.sessions_by_agent.get(adapter.name, 0)
+        agent_data.append((adapter.name, raw_stats, sessions))
+
+    # Sort by session count descending
+    agent_data.sort(key=lambda x: -x[2])
+
+    for agent_name, raw_stats, sessions in agent_data:
         agent_config = AGENTS.get(agent_name, {"color": "white"})
         color = agent_config["color"]
-        bar_width = int((count / max_count) * 20)
-        bar = "[" + color + "]" + "█" * bar_width + "[/" + color + "]"
-        pct = f"({count * 100 // stats.total_sessions}%)"
-        agent_table.add_row(
-            f"[{color}]{agent_name}[/{color}]",
-            str(count),
-            f"{bar} [dim]{pct}[/dim]",
-        )
+        messages = messages_by_agent.get(agent_name, 0)
+        content_size = content_chars_by_agent.get(agent_name, 0)
+
+        if raw_stats.available:
+            # Shorten home directory in path
+            data_dir = raw_stats.data_dir
+            home = os.path.expanduser("~")
+            if data_dir.startswith(home):
+                data_dir = "~" + data_dir[len(home) :]
+
+            agent_table.add_row(
+                f"[{color}]{agent_name}[/{color}]",
+                str(raw_stats.file_count),
+                humanize.naturalsize(raw_stats.total_bytes),
+                str(sessions) if sessions > 0 else "[dim]0[/dim]",
+                f"{messages:,}" if messages > 0 else "[dim]0[/dim]",
+                humanize.naturalsize(content_size)
+                if content_size > 0
+                else "[dim]-[/dim]",
+                f"[dim]{data_dir}[/dim]",
+            )
+        else:
+            agent_table.add_row(
+                f"[{color}]{agent_name}[/{color}]",
+                "[dim]-[/dim]",
+                "[dim]-[/dim]",
+                "[dim]-[/dim]",
+                "[dim]-[/dim]",
+                "[dim]-[/dim]",
+                "[dim]not found[/dim]",
+            )
 
     console.print(agent_table)
 
@@ -203,13 +240,14 @@ def _show_stats() -> None:
         dir_table = Table(show_header=True, header_style="bold")
         dir_table.add_column("Directory")
         dir_table.add_column("Sessions", justify="right")
+        dir_table.add_column("Messages", justify="right")
 
         home = os.path.expanduser("~")
-        for directory, count in stats.top_directories[:10]:
+        for directory, sessions, messages in stats.top_directories[:10]:
             display_dir = directory
             if display_dir.startswith(home):
                 display_dir = "~" + display_dir[len(home) :]
-            dir_table.add_row(display_dir, str(count))
+            dir_table.add_row(display_dir, str(sessions), f"{messages:,}")
 
         console.print(dir_table)
 

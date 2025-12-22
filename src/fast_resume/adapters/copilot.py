@@ -43,7 +43,7 @@ class CopilotAdapter(BaseSessionAdapter):
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
-            human_turn_count = 0
+            turn_count = 0
 
             with open(session_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -76,7 +76,7 @@ class CopilotAdapter(BaseSessionAdapter):
                         content = data.get("content", "")
                         if content:
                             messages.append(f"» {content}")
-                            human_turn_count += 1
+                            turn_count += 1
                             if not first_user_message and len(content) > 10:
                                 first_user_message = content
 
@@ -85,6 +85,7 @@ class CopilotAdapter(BaseSessionAdapter):
                         content = data.get("content", "")
                         if content:
                             messages.append(f"  {content}")
+                            turn_count += 1
 
             # Skip sessions with no actual user message
             if not first_user_message:
@@ -108,7 +109,7 @@ class CopilotAdapter(BaseSessionAdapter):
                 timestamp=timestamp,
                 preview=preview,
                 content=full_content,
-                message_count=human_turn_count,
+                message_count=turn_count,
             )
         except OSError as e:
             error = ParseError(
