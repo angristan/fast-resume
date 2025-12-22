@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/angristan/fast-resume/compare/v1.1.0...v1.1.1) (2025-12-22)
+
+
+### Bug Fixes
+
+* read version from package metadata instead of hardcoding ([3842c07](https://github.com/angristan/fast-resume/commit/3842c07e6aec0bbc02e5e88e6fdfa33fae90a1c5))
+
 # [1.1.0](https://github.com/angristan/fast-resume/compare/v1.0.0...v1.1.0) (2025-12-22)
 
 
