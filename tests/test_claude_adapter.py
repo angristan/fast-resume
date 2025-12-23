@@ -61,7 +61,7 @@ class TestClaudeAdapter:
         """Test adapter has correct name and attributes."""
         assert adapter.name == "claude"
         assert adapter.color is not None
-        assert adapter.badge == "claude-code"
+        assert adapter.badge == "claude"
 
     def test_parse_session_basic(self, adapter, claude_session_file):
         """Test parsing a basic Claude session file."""

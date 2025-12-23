@@ -817,28 +817,28 @@ class FastResumeApp(App):
         padding = 8  # column gaps + scrollbar
 
         # Responsive column widths based on terminal width
-        # Agent column: icon (2) + space (1) + name (up to 11 for "claude-code") = 14
+        # Agent column: icon (2) + space (1) + name (up to 8 for "opencode") = 11
         if width >= 120:
             # Wide: show everything
-            agent_w = 15
+            agent_w = 12
             dir_w = 30
             msgs_w = 6
             date_w = 18
         elif width >= 90:
             # Medium: slightly smaller
-            agent_w = 15
+            agent_w = 12
             dir_w = 22
             msgs_w = 5
             date_w = 15
         elif width >= 60:
             # Narrow: compact
-            agent_w = 15
+            agent_w = 12
             dir_w = 16
             msgs_w = 5
             date_w = 12
         else:
             # Very narrow: minimal
-            agent_w = 13
+            agent_w = 11
             dir_w = 0  # hide directory
             msgs_w = 4
             date_w = 10

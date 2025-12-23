@@ -4,8 +4,8 @@ from pathlib import Path
 
 # Agent colors and badges (badge is the display name shown in UI)
 AGENTS = {
-    "claude": {"color": "#E87B35", "badge": "claude-code"},
-    "codex": {"color": "#00A67E", "badge": "codex-cli"},
+    "claude": {"color": "#E87B35", "badge": "claude"},
+    "codex": {"color": "#00A67E", "badge": "codex"},
     "opencode": {"color": "#CFCECD", "badge": "opencode"},
     "vibe": {"color": "#FF6B35", "badge": "vibe"},
     "crush": {"color": "#6B51FF", "badge": "crush"},
