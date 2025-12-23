@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/angristan/fast-resume/compare/v1.2.0...v1.3.0) (2025-12-23)
+
+
+### Features
+
+* show yolo mode modal on resume for supported agents ([ea8a6e7](https://github.com/angristan/fast-resume/commit/ea8a6e7f19cb5e2df696acc619befe911325f929))
+
 # [1.2.0](https://github.com/angristan/fast-resume/compare/v1.1.1...v1.2.0) (2025-12-22)
 
 
