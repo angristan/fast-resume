@@ -13,7 +13,7 @@ The problem is that currently, agents do have a resume feature, but either they 
 
 That's why I built `fast-resume`: a command-line tool that aggregates all your coding agent sessions into a single searchable index, so you can quickly find and resume any session.
 
-![demo](https://github.com/user-attachments/assets/752c772e-c23f-4ed6-af3d-add43c7157da)
+![demo](https://github.com/user-attachments/assets/5ea9c2a5-a7c0-41bf-9357-394aeaaa0a06)
 
 ## Features
 
