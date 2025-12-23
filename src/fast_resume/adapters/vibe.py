@@ -15,6 +15,7 @@ class VibeAdapter(BaseSessionAdapter):
     name = "vibe"
     color = AGENTS["vibe"]["color"]
     badge = AGENTS["vibe"]["badge"]
+    supports_yolo = True
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else VIBE_DIR

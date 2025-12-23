@@ -16,6 +16,7 @@ class CopilotAdapter(BaseSessionAdapter):
     name = "copilot-cli"
     color = AGENTS["copilot-cli"]["color"]
     badge = AGENTS["copilot-cli"]["badge"]
+    supports_yolo = True
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else COPILOT_DIR

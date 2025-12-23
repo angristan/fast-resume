@@ -100,9 +100,11 @@ Resume sessions with auto-approve / skip-permissions flags:
 | Crush           | _(no CLI resume)_                            | —             |
 | VS Code Copilot | _(n/a)_                                      | —             |
 
-**Auto-detection:** Codex and Vibe store the permissions mode in their session files. Sessions originally started in yolo mode are automatically resumed in yolo mode—no flag needed.
+**Auto-detection:** Codex and Vibe store the permissions mode in their session files. Sessions originally started in yolo mode are automatically resumed in yolo mode.
 
-**Force yolo:** Use `fr --yolo` to force yolo mode for all sessions, even if they weren't started that way. Useful for Claude and Copilot CLI which don't store this information.
+**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
+
+**Force yolo:** Use `fr --yolo` to skip the prompt and always resume in yolo mode, if supported.
 
 ### Command Reference
 
@@ -147,6 +149,16 @@ Options:
 | `c`       | Copy full resume command to clipboard |
 | `Ctrl+P`  | Open command palette                  |
 | `q`/`Esc` | Quit                                  |
+
+### Yolo Mode Modal
+
+| Key             | Action            |
+| --------------- | ----------------- |
+| `Tab` / `←` `→` | Toggle selection  |
+| `Enter`         | Confirm selection |
+| `y`             | Select Yolo       |
+| `n`             | Select No         |
+| `Esc`           | Cancel            |
 
 ## Statistics Dashboard
 

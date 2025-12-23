@@ -15,6 +15,7 @@ class ClaudeAdapter(BaseSessionAdapter):
     name = "claude"
     color = AGENTS["claude"]["color"]
     badge = AGENTS["claude"]["badge"]
+    supports_yolo = True
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else CLAUDE_DIR

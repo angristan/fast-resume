@@ -18,7 +18,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Input, Static, Label
+from textual.screen import ModalScreen
+from textual.widgets import DataTable, Footer, Input, Static, Label, Button
 from textual_image.renderable import Image as ImageRenderable
 from textual_image.widget import Image as ImageWidget
 
@@ -224,6 +225,108 @@ class SessionPreview(Static):
                         result.append("\n")
 
         self.update(result)
+
+
+class YoloModeModal(ModalScreen[bool]):
+    """Modal to choose yolo mode for resume."""
+
+    BINDINGS = [
+        Binding("y", "select_yolo", "Yolo Mode", show=False),
+        Binding("n", "select_normal", "Normal", show=False),
+        Binding("escape", "dismiss", "Cancel", show=False),
+        Binding("enter", "select_focused", "Select", show=False),
+        Binding("left", "focus_normal", "Left", show=False),
+        Binding("right", "focus_yolo", "Right", show=False),
+    ]
+
+    CSS = """
+    YoloModeModal {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.6);
+    }
+
+    YoloModeModal > Vertical {
+        width: 36;
+        height: auto;
+        background: $surface;
+        border: thick $primary 80%;
+        padding: 1 2;
+    }
+
+    YoloModeModal #title {
+        text-align: center;
+        text-style: bold;
+        width: 100%;
+    }
+
+    YoloModeModal #buttons {
+        width: 100%;
+        height: auto;
+        align: center middle;
+        margin-top: 1;
+    }
+
+    YoloModeModal Button {
+        margin: 0 1;
+        min-width: 10;
+    }
+
+    YoloModeModal Button:focus {
+        background: $warning;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Resume with yolo mode?", id="title")
+            with Horizontal(id="buttons"):
+                yield Button("No", id="normal-btn")
+                yield Button("Yolo", id="yolo-btn")
+
+    def on_mount(self) -> None:
+        """Focus the first button when modal opens."""
+        self.query_one("#normal-btn", Button).focus()
+
+    def key_tab(self) -> None:
+        """Handle tab key to toggle focus."""
+        self.action_toggle_focus()
+
+    def action_toggle_focus(self) -> None:
+        """Toggle focus between the two buttons."""
+        if self.focused and self.focused.id == "yolo-btn":
+            self.query_one("#normal-btn", Button).focus()
+        else:
+            self.query_one("#yolo-btn", Button).focus()
+
+    def action_focus_normal(self) -> None:
+        """Focus the normal button."""
+        self.query_one("#normal-btn", Button).focus()
+
+    def action_focus_yolo(self) -> None:
+        """Focus the yolo button."""
+        self.query_one("#yolo-btn", Button).focus()
+
+    def action_select_focused(self) -> None:
+        """Select whichever button is currently focused."""
+        focused = self.focused
+        if focused and focused.id == "yolo-btn":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+    def action_select_yolo(self) -> None:
+        self.dismiss(True)
+
+    def action_select_normal(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#yolo-btn")
+    def on_yolo_pressed(self) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#normal-btn")
+    def on_normal_pressed(self) -> None:
+        self.dismiss(False)
 
 
 class FastResumeApp(App):
@@ -1062,54 +1165,78 @@ class FastResumeApp(App):
 
     def action_copy_path(self) -> None:
         """Copy the full resume command (cd + agent resume) to clipboard."""
-        if self.selected_session:
-            import shlex
-            import subprocess
-            import sys
+        if not self.selected_session:
+            return
 
-            # Build full resume command: cd <dir> && <resume command>
-            # Use yolo mode if CLI flag set OR session was started in yolo mode
-            use_yolo = self.yolo or self.selected_session.yolo
-            resume_cmd = self.search_engine.get_resume_command(
-                self.selected_session, yolo=use_yolo
+        adapter = self.search_engine.get_adapter_for_session(self.selected_session)
+
+        # If CLI --yolo flag is set, always use yolo
+        if self.yolo:
+            self._do_copy_command(yolo=True)
+            return
+
+        # If session has stored yolo mode, use it directly
+        if self.selected_session.yolo:
+            self._do_copy_command(yolo=True)
+            return
+
+        # If adapter supports yolo but session doesn't have stored value, show modal
+        if adapter and adapter.supports_yolo:
+            self.push_screen(YoloModeModal(), self._on_copy_yolo_modal_result)
+            return
+
+        # Otherwise copy without yolo
+        self._do_copy_command(yolo=False)
+
+    def _do_copy_command(self, yolo: bool) -> None:
+        """Execute the copy command with specified yolo mode."""
+        import shlex
+        import subprocess
+        import sys
+
+        resume_cmd = self.search_engine.get_resume_command(
+            self.selected_session, yolo=yolo
+        )
+        if not resume_cmd:
+            self.notify("No resume command available", severity="warning", timeout=2)
+            return
+
+        directory = self.selected_session.directory
+        cmd_str = shlex.join(resume_cmd)
+        full_cmd = f"cd {shlex.quote(directory)} && {cmd_str}"
+
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["pbcopy"], input=full_cmd.encode(), check=True)
+            elif sys.platform == "win32":
+                subprocess.run(["clip"], input=full_cmd.encode(), check=True)
+            else:
+                # Linux - try xclip or xsel
+                try:
+                    subprocess.run(
+                        ["xclip", "-selection", "clipboard"],
+                        input=full_cmd.encode(),
+                        check=True,
+                    )
+                except FileNotFoundError:
+                    subprocess.run(
+                        ["xsel", "--clipboard", "--input"],
+                        input=full_cmd.encode(),
+                        check=True,
+                    )
+            self.notify(f"Copied: {full_cmd}", timeout=3)
+        except Exception:
+            # Fallback: show command in notification if clipboard fails
+            self.notify(
+                f"{full_cmd}",
+                title="Clipboard unavailable",
+                timeout=5,
             )
-            if not resume_cmd:
-                self.notify(
-                    "No resume command available", severity="warning", timeout=2
-                )
-                return
 
-            directory = self.selected_session.directory
-            cmd_str = shlex.join(resume_cmd)
-            full_cmd = f"cd {shlex.quote(directory)} && {cmd_str}"
-
-            try:
-                if sys.platform == "darwin":
-                    subprocess.run(["pbcopy"], input=full_cmd.encode(), check=True)
-                elif sys.platform == "win32":
-                    subprocess.run(["clip"], input=full_cmd.encode(), check=True)
-                else:
-                    # Linux - try xclip or xsel
-                    try:
-                        subprocess.run(
-                            ["xclip", "-selection", "clipboard"],
-                            input=full_cmd.encode(),
-                            check=True,
-                        )
-                    except FileNotFoundError:
-                        subprocess.run(
-                            ["xsel", "--clipboard", "--input"],
-                            input=full_cmd.encode(),
-                            check=True,
-                        )
-                self.notify(f"Copied: {full_cmd}", timeout=3)
-            except Exception:
-                # Fallback: show command in notification if clipboard fails
-                self.notify(
-                    f"{full_cmd}",
-                    title="Clipboard unavailable",
-                    timeout=5,
-                )
+    def _on_copy_yolo_modal_result(self, result: bool | None) -> None:
+        """Handle result from yolo mode modal for copy action."""
+        if result is not None:
+            self._do_copy_command(yolo=result)
 
     def action_increase_preview(self) -> None:
         """Increase preview pane height."""
@@ -1130,24 +1257,51 @@ class FastResumeApp(App):
 
     def action_resume_session(self) -> None:
         """Resume the selected session."""
-        if self.selected_session:
-            # Crush doesn't support CLI resume - show a toast instead
-            if self.selected_session.agent == "crush":
-                self.notify(
-                    f"Crush doesn't support CLI resume. Open crush in: [bold]{self.selected_session.directory}[/bold] and use ctrl+s to find your session",
-                    title="Cannot resume",
-                    severity="warning",
-                    timeout=5,
-                )
-                return
+        if not self.selected_session:
+            return
 
-            # Use yolo mode if CLI flag set OR session was started in yolo mode
-            use_yolo = self.yolo or self.selected_session.yolo
-            self._resume_command = self.search_engine.get_resume_command(
-                self.selected_session, yolo=use_yolo
+        # Crush doesn't support CLI resume - show a toast instead
+        if self.selected_session.agent == "crush":
+            self.notify(
+                f"Crush doesn't support CLI resume. Open crush in: [bold]{self.selected_session.directory}[/bold] and use ctrl+s to find your session",
+                title="Cannot resume",
+                severity="warning",
+                timeout=5,
             )
-            self._resume_directory = self.selected_session.directory
-            self.exit()
+            return
+
+        adapter = self.search_engine.get_adapter_for_session(self.selected_session)
+
+        # If CLI --yolo flag is set, always use yolo
+        if self.yolo:
+            self._do_resume(yolo=True)
+            return
+
+        # If session has stored yolo mode, use it directly
+        if self.selected_session.yolo:
+            self._do_resume(yolo=True)
+            return
+
+        # If adapter supports yolo but session doesn't have stored value, show modal
+        if adapter and adapter.supports_yolo:
+            self.push_screen(YoloModeModal(), self._on_yolo_modal_result)
+            return
+
+        # Otherwise resume normally
+        self._do_resume(yolo=False)
+
+    def _do_resume(self, yolo: bool) -> None:
+        """Execute the resume with specified yolo mode."""
+        self._resume_command = self.search_engine.get_resume_command(
+            self.selected_session, yolo=yolo
+        )
+        self._resume_directory = self.selected_session.directory
+        self.exit()
+
+    def _on_yolo_modal_result(self, result: bool | None) -> None:
+        """Handle result from yolo mode modal."""
+        if result is not None:
+            self._do_resume(yolo=result)
 
     def _set_filter(self, agent: str | None) -> None:
         """Set the agent filter and refresh results."""
@@ -1189,12 +1343,27 @@ class FastResumeApp(App):
 
     def action_cycle_filter(self) -> None:
         """Cycle to the next agent filter."""
+        # If a modal is open, delegate tab to the modal
+        if len(self.screen_stack) > 1:
+            top_screen = self.screen_stack[-1]
+            if isinstance(top_screen, YoloModeModal):
+                top_screen.action_toggle_focus()
+            return
         try:
             current_index = self.FILTER_KEYS.index(self.active_filter)
             next_index = (current_index + 1) % len(self.FILTER_KEYS)
         except ValueError:
             next_index = 0
         self._set_filter(self.FILTER_KEYS[next_index])
+
+    def action_quit(self) -> None:
+        """Quit the app, or dismiss modal if one is open."""
+        if len(self.screen_stack) > 1:
+            top_screen = self.screen_stack[-1]
+            if isinstance(top_screen, YoloModeModal):
+                top_screen.dismiss(None)
+            return
+        self.exit()
 
     @on(Click, ".filter-btn")
     def on_filter_click(self, event: Click) -> None:

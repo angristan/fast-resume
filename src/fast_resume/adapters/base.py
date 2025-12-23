@@ -121,6 +121,11 @@ class AgentAdapter(Protocol):
         """Get raw statistics from the adapter's data folder."""
         ...
 
+    @property
+    def supports_yolo(self) -> bool:
+        """Whether this adapter supports yolo mode in resume command."""
+        ...
+
 
 class BaseSessionAdapter(ABC):
     """Base class for file-based session adapters.
@@ -143,6 +148,14 @@ class BaseSessionAdapter(ABC):
     def is_available(self) -> bool:
         """Check if data directory exists."""
         return self._sessions_dir.exists()
+
+    @property
+    def supports_yolo(self) -> bool:
+        """Whether this adapter supports yolo mode in resume command.
+
+        Override in subclasses that support yolo flags.
+        """
+        return False
 
     @abstractmethod
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:

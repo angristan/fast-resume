@@ -329,6 +329,10 @@ def mock_search_engine(sample_sessions):
     # Mock streaming to return immediately with no changes
     mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
     mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+    # Mock adapter with supports_yolo=False to skip modal in tests
+    mock_adapter = MagicMock()
+    mock_adapter.supports_yolo = False
+    mock.get_adapter_for_session.return_value = mock_adapter
     return mock
 
 
@@ -685,6 +689,145 @@ class TestFastResumeAppResumeCommand:
                 # Should be first session
                 directory = app.get_resume_directory()
                 assert directory == "/home/user/web-app"
+
+
+class TestFastResumeAppYoloModal:
+    """Tests for yolo mode modal functionality."""
+
+    @pytest.mark.asyncio
+    async def test_modal_shown_when_adapter_supports_yolo(self, sample_sessions):
+        """Test that modal is shown when adapter supports yolo but session doesn't store it."""
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+        mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+        # Adapter supports yolo
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Press Enter to resume - should show modal
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # App should still be running (modal is shown)
+                assert app.is_running
+
+                # Press 'n' to select normal mode
+                await pilot.press("n")
+                await pilot.pause()
+
+                # Now app should have exited
+                assert not app.is_running
+
+    @pytest.mark.asyncio
+    async def test_modal_skipped_when_session_has_yolo(self, sample_sessions):
+        """Test that modal is skipped when session has stored yolo=True."""
+        # Create a session with yolo=True
+        yolo_session = Session(
+            id="session-yolo",
+            agent="codex",
+            title="Yolo session",
+            directory="/home/user/yolo-project",
+            timestamp=sample_sessions[0].timestamp,
+            preview="Test preview",
+            content="Test content",
+            message_count=5,
+            mtime=1705225200.0,
+            yolo=True,  # Session was started in yolo mode
+        )
+        sessions_with_yolo = [yolo_session] + sample_sessions
+
+        mock = MagicMock()
+        mock.search.return_value = sessions_with_yolo
+        mock.get_session_count.return_value = len(sessions_with_yolo)
+        mock._load_from_index.return_value = sessions_with_yolo
+        mock._sessions = sessions_with_yolo
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sessions_with_yolo, 0, 0, 0)
+        mock.get_resume_command.return_value = [
+            "codex",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "resume",
+            "session-yolo",
+        ]
+        # Adapter supports yolo
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Press Enter to resume - should exit immediately (no modal)
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # App should have exited without showing modal
+                assert not app.is_running
+
+                # Resume command should include yolo flag
+                cmd = app.get_resume_command()
+                assert cmd is not None
+                assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+
+    @pytest.mark.asyncio
+    async def test_yolo_selected_in_modal(self, sample_sessions):
+        """Test that selecting yolo in modal adds yolo flag to command."""
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+
+        def mock_resume_cmd(session, yolo=False):
+            if yolo:
+                return [
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "--resume",
+                    session.id,
+                ]
+            return ["claude", "--resume", session.id]
+
+        mock.get_resume_command.side_effect = mock_resume_cmd
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Press Enter to resume - should show modal
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # Press 'y' to select yolo mode
+                await pilot.press("y")
+                await pilot.pause()
+
+                # App should have exited
+                assert not app.is_running
+
+                # Resume command should include yolo flag
+                cmd = app.get_resume_command()
+                assert cmd is not None
+                assert "--dangerously-skip-permissions" in cmd
 
 
 class TestFastResumeAppRunTui:
