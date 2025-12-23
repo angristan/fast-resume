@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/angristan/fast-resume/compare/v1.3.0...v1.3.1) (2025-12-23)
+
+
+### Bug Fixes
+
+* simplify agent badge names and reduce column width ([590d609](https://github.com/angristan/fast-resume/commit/590d609814bf6f8236479769f18b8f2f14a3f4a7))
+
 # [1.3.0](https://github.com/angristan/fast-resume/compare/v1.2.0...v1.3.0) (2025-12-23)
 
 
