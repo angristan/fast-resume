@@ -237,9 +237,13 @@ class SessionSearch:
 
         return matched_sessions[:limit]
 
-    def get_session_count(self) -> int:
-        """Get the total number of sessions in the index."""
-        return self._index.get_session_count()
+    def get_session_count(self, agent_filter: str | None = None) -> int:
+        """Get the total number of sessions in the index.
+
+        Args:
+            agent_filter: If provided, only count sessions for this agent.
+        """
+        return self._index.get_session_count(agent_filter)
 
     def get_adapter_for_session(self, session: Session):
         """Get the adapter for a session."""

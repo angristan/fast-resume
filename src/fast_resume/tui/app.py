@@ -250,7 +250,8 @@ class FastResumeApp(App):
             time_label.update("")
         else:
             shown = len(self.sessions)
-            total = self._total_loaded
+            # Get total for current filter (or all if no filter)
+            total = self.search_engine.get_session_count(self.active_filter)
             if shown < total:
                 count_label.update(f"{shown}/{total} sessions")
             else:

@@ -188,14 +188,26 @@ class TantivyIndex:
 
         return sessions
 
-    def get_session_count(self) -> int:
-        """Get the total number of sessions in the index."""
+    def get_session_count(self, agent_filter: str | None = None) -> int:
+        """Get the total number of sessions in the index.
+
+        Args:
+            agent_filter: If provided, only count sessions for this agent.
+        """
         if not self.index_path.exists() or not self._check_version():
             return 0
 
         index = self._ensure_index()
         index.reload()
-        return index.searcher().num_docs
+        searcher = index.searcher()
+
+        if agent_filter is None:
+            return searcher.num_docs
+
+        # Count sessions for specific agent using term query
+        schema = index.schema
+        query = tantivy.Query.term_query(schema, "agent", agent_filter)
+        return searcher.search(query, limit=0).count
 
     def get_stats(self) -> IndexStats:
         """Get statistics about the index contents."""
