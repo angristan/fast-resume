@@ -390,6 +390,22 @@ class TestFastResumeAppBasic:
                 table = app.query_one("#results-table")
                 assert table is not None
 
+    @pytest.mark.asyncio
+    async def test_table_displays_sessions(self, mock_search_engine, sample_sessions):
+        """Test that sessions are actually displayed in the table."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                table = app.query_one("#results-table")
+                # Table should have rows for the sessions
+                assert table.row_count == len(sample_sessions)
+                # First session should be selected
+                assert app.selected_session is not None
+                assert app.selected_session.id == sample_sessions[0].id
+
 
 class TestFastResumeAppNavigation:
     """Tests for TUI navigation."""
