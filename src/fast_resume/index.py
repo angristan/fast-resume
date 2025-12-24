@@ -207,7 +207,8 @@ class TantivyIndex:
         # Count sessions for specific agent using term query
         schema = index.schema
         query = tantivy.Query.term_query(schema, "agent", agent_filter)
-        return searcher.search(query, limit=0).count
+        # Tantivy requires limit > 0, use count property for total matches
+        return searcher.search(query, limit=1).count
 
     def get_stats(self) -> IndexStats:
         """Get statistics about the index contents."""

@@ -267,3 +267,54 @@ class TestTantivyIndex:
         index.add_sessions(sessions)
 
         assert index.get_session_count() == 5
+
+    def test_get_session_count_with_agent_filter(self, index):
+        """Test getting session count filtered by agent.
+
+        This is a regression test for a bug where limit=0 was passed to
+        Tantivy search, which panics because limit must be > 0.
+        """
+        sessions = [
+            Session(
+                id="session-claude-1",
+                agent="claude",
+                title="Claude session 1",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 30, 0),
+                preview="Content",
+                content="Full content",
+                message_count=1,
+                mtime=1705312200.0,
+            ),
+            Session(
+                id="session-claude-2",
+                agent="claude",
+                title="Claude session 2",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 11, 30, 0),
+                preview="Content",
+                content="Full content",
+                message_count=1,
+                mtime=1705315800.0,
+            ),
+            Session(
+                id="session-vscode-1",
+                agent="copilot-vscode",
+                title="VSCode session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 12, 30, 0),
+                preview="Content",
+                content="Full content",
+                message_count=1,
+                mtime=1705319400.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Total count
+        assert index.get_session_count() == 3
+
+        # Filtered counts
+        assert index.get_session_count(agent_filter="claude") == 2
+        assert index.get_session_count(agent_filter="copilot-vscode") == 1
+        assert index.get_session_count(agent_filter="nonexistent") == 0
