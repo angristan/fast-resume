@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/angristan/fast-resume/compare/v1.3.3...v1.4.0) (2025-12-24)
+
+
+### Features
+
+* **tui:** show filtered session count when agent filter is active ([eb44b63](https://github.com/angristan/fast-resume/commit/eb44b632bb1b8062a283afdb6baa9a4352243991))
+
 ## [1.3.3](https://github.com/angristan/fast-resume/compare/v1.3.2...v1.3.3) (2025-12-24)
 
 
