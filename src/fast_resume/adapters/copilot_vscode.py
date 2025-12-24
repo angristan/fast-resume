@@ -60,6 +60,15 @@ class CopilotVSCodeAdapter:
                     return True
         return False
 
+    def _get_session_id_from_file(self, session_file: Path) -> str | None:
+        """Extract session ID from session file, returns None on error."""
+        try:
+            with open(session_file, "rb") as f:
+                data = orjson.loads(f.read())
+            return data.get("sessionId", session_file.stem)
+        except Exception:
+            return None
+
     def _get_workspace_directory(self, workspace_dir: Path) -> str:
         """Get the workspace folder path from workspace.json."""
         workspace_json = workspace_dir / "workspace.json"
@@ -256,7 +265,9 @@ class CopilotVSCodeAdapter:
         current_files: dict[str, tuple[Path, float, str]] = {}
 
         for session_file, ws_directory in self._get_all_session_files():
-            session_id = session_file.stem
+            session_id = self._get_session_id_from_file(session_file)
+            if session_id is None:
+                continue
             mtime = session_file.stat().st_mtime
             current_files[session_id] = (session_file, mtime, ws_directory)
 
