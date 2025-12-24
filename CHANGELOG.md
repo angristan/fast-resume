@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/angristan/fast-resume/compare/v1.4.0...v1.4.1) (2025-12-24)
+
+
+### Bug Fixes
+
+* **index:** use limit=1 instead of limit=0 for agent count query ([d95fba0](https://github.com/angristan/fast-resume/commit/d95fba07a9b559007d1eaf0e4cf8aa1277e99c49))
+
 # [1.4.0](https://github.com/angristan/fast-resume/compare/v1.3.3...v1.4.0) (2025-12-24)
 
 
