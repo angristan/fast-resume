@@ -68,8 +68,8 @@ class TantivyIndex:
         schema_builder.add_text_field("title", stored=True)
         # Directory - stored and indexed
         schema_builder.add_text_field("directory", stored=True)
-        # Agent - stored for filtering
-        schema_builder.add_text_field("agent", stored=True)
+        # Agent - stored for filtering (raw tokenizer to preserve hyphens)
+        schema_builder.add_text_field("agent", stored=True, tokenizer_name="raw")
         # Content - stored and indexed for full-text search
         schema_builder.add_text_field("content", stored=True)
         # Timestamp - stored as float (Unix timestamp)

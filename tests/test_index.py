@@ -202,6 +202,50 @@ class TestTantivyIndex:
         assert len(results) == 1
         assert results[0][0] == "session-123"
 
+    def test_search_with_hyphenated_agent_filter(self, index):
+        """Test that agent filter works with hyphenated agent names like copilot-vscode.
+
+        This is a regression test for a bug where hyphenated agent names
+        were tokenized by the default tokenizer, splitting "copilot-vscode"
+        into ["copilot", "vscode"] tokens. This caused term_query to fail
+        when filtering by agent name during search.
+        """
+        sessions = [
+            Session(
+                id="session-vscode-1",
+                agent="copilot-vscode",
+                title="Code review feedback",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 30, 0),
+                preview="Review my code",
+                content="Please review my code for bugs",
+                message_count=2,
+                mtime=1705312200.0,
+            ),
+            Session(
+                id="session-claude-1",
+                agent="claude",
+                title="Code review session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 11, 30, 0),
+                preview="Another review",
+                content="Code review for authentication module",
+                message_count=3,
+                mtime=1705315800.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Search with query + hyphenated agent filter should work
+        results = index.search("review", agent_filter="copilot-vscode")
+        assert len(results) == 1
+        assert results[0][0] == "session-vscode-1"
+
+        # Verify other agent still works too
+        results = index.search("review", agent_filter="claude")
+        assert len(results) == 1
+        assert results[0][0] == "session-claude-1"
+
     def test_get_session_count(self, index):
         """Test getting session count."""
         assert index.get_session_count() == 0

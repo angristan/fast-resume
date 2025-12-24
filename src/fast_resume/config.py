@@ -25,7 +25,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
-SCHEMA_VERSION = 15  # Bump when schema changes (15: add yolo field)
+SCHEMA_VERSION = 16  # Bump when schema changes (16: raw tokenizer for agent)
 
 # Search settings
 MAX_PREVIEW_LENGTH = 500
