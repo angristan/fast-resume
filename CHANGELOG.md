@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/angristan/fast-resume/compare/v1.3.2...v1.3.3) (2025-12-24)
+
+
+### Bug Fixes
+
+* **copilot-vscode:** use correct session ID for incremental cache lookup ([f2c8ef8](https://github.com/angristan/fast-resume/commit/f2c8ef834617983c5f13be1b7ab51a8e2ac1e04d))
+
 ## [1.3.2](https://github.com/angristan/fast-resume/compare/v1.3.1...v1.3.2) (2025-12-24)
 
 
