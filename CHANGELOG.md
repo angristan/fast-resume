@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/angristan/fast-resume/compare/v1.3.1...v1.3.2) (2025-12-24)
+
+
+### Bug Fixes
+
+* search with hyphenated agent filter (copilot-vscode, copilot-cli) ([320b706](https://github.com/angristan/fast-resume/commit/320b706b2ebc2b65992020d2b2f6013916556f86))
+
 ## [1.3.1](https://github.com/angristan/fast-resume/compare/v1.3.0...v1.3.1) (2025-12-23)
 
 
