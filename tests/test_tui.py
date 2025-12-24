@@ -342,7 +342,9 @@ class TestFastResumeAppBasic:
     @pytest.mark.asyncio
     async def test_app_launches(self, mock_search_engine):
         """Test that the app launches without errors."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 # Wait for app to settle
@@ -353,7 +355,9 @@ class TestFastResumeAppBasic:
     @pytest.mark.asyncio
     async def test_app_displays_title(self, mock_search_engine):
         """Test that app title is displayed."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -365,7 +369,9 @@ class TestFastResumeAppBasic:
     @pytest.mark.asyncio
     async def test_app_has_search_input(self, mock_search_engine):
         """Test that search input is present."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -375,7 +381,9 @@ class TestFastResumeAppBasic:
     @pytest.mark.asyncio
     async def test_app_has_results_table(self, mock_search_engine):
         """Test that results table is present."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -389,7 +397,9 @@ class TestFastResumeAppNavigation:
     @pytest.mark.asyncio
     async def test_escape_quits_app(self, mock_search_engine):
         """Test that Escape key quits the app."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -400,7 +410,9 @@ class TestFastResumeAppNavigation:
     @pytest.mark.asyncio
     async def test_q_quits_app(self, mock_search_engine):
         """Test that 'q' key quits the app when not in search input."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -414,7 +426,9 @@ class TestFastResumeAppNavigation:
     @pytest.mark.asyncio
     async def test_slash_focuses_search(self, mock_search_engine):
         """Test that '/' focuses the search input."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -428,7 +442,9 @@ class TestFastResumeAppNavigation:
     @pytest.mark.asyncio
     async def test_ctrl_backtick_toggles_preview(self, mock_search_engine):
         """Test that Ctrl+` toggles preview pane."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -450,7 +466,9 @@ class TestFastResumeAppSearch:
     @pytest.mark.asyncio
     async def test_typing_triggers_search(self, mock_search_engine):
         """Test that typing in search triggers a search."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -465,7 +483,9 @@ class TestFastResumeAppSearch:
     @pytest.mark.asyncio
     async def test_initial_query_is_used(self, mock_search_engine):
         """Test that initial query is set in search input."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp(initial_query="test query")
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -479,7 +499,9 @@ class TestFastResumeAppFilters:
     @pytest.mark.asyncio
     async def test_initial_agent_filter(self, mock_search_engine):
         """Test that initial agent filter is applied."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp(agent_filter="claude")
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -488,7 +510,9 @@ class TestFastResumeAppFilters:
     @pytest.mark.asyncio
     async def test_filter_buttons_exist(self, mock_search_engine):
         """Test that filter buttons are present."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -504,7 +528,9 @@ class TestFastResumeAppFilters:
     @pytest.mark.asyncio
     async def test_tab_cycles_through_filters(self, mock_search_engine):
         """Test that Tab cycles through agent filters."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -528,7 +554,9 @@ class TestFastResumeAppPreview:
     @pytest.mark.asyncio
     async def test_preview_pane_visible_by_default(self, mock_search_engine):
         """Test that preview pane is visible by default."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -538,7 +566,9 @@ class TestFastResumeAppPreview:
     @pytest.mark.asyncio
     async def test_preview_height_adjustable(self, mock_search_engine):
         """Test that preview height can be adjusted."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -567,7 +597,9 @@ class TestFastResumeAppResumeCommand:
     @pytest.mark.asyncio
     async def test_get_resume_command_initially_none(self, mock_search_engine):
         """Test that resume command is None before selection."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -576,7 +608,9 @@ class TestFastResumeAppResumeCommand:
     @pytest.mark.asyncio
     async def test_get_resume_directory_initially_none(self, mock_search_engine):
         """Test that resume directory is None before selection."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -587,7 +621,9 @@ class TestFastResumeAppResumeCommand:
         self, mock_search_engine, sample_sessions
     ):
         """Test that pressing Enter in search input resumes the selected session."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -607,7 +643,9 @@ class TestFastResumeAppResumeCommand:
     @pytest.mark.asyncio
     async def test_resume_sets_directory(self, mock_search_engine, sample_sessions):
         """Test that resuming a session sets the directory."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -625,7 +663,9 @@ class TestFastResumeAppResumeCommand:
         self, mock_search_engine, sample_sessions
     ):
         """Test navigating to a different session and resuming it."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             # Set up mock to return different command for each session
             def mock_resume_cmd(session, yolo=False):
                 if session.id == "session-2":
@@ -661,7 +701,9 @@ class TestFastResumeAppResumeCommand:
     @pytest.mark.asyncio
     async def test_vim_navigation_j_k(self, mock_search_engine, sample_sessions):
         """Test vim-style navigation with j/k keys."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -710,7 +752,7 @@ class TestFastResumeAppYoloModal:
         mock_adapter.supports_yolo = True
         mock.get_adapter_for_session.return_value = mock_adapter
 
-        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -765,7 +807,7 @@ class TestFastResumeAppYoloModal:
         mock_adapter.supports_yolo = True
         mock.get_adapter_for_session.return_value = mock_adapter
 
-        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -808,7 +850,7 @@ class TestFastResumeAppYoloModal:
         mock_adapter.supports_yolo = True
         mock.get_adapter_for_session.return_value = mock_adapter
 
-        with patch("fast_resume.tui.SessionSearch", return_value=mock):
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -836,7 +878,9 @@ class TestFastResumeAppRunTui:
     @pytest.mark.asyncio
     async def test_run_tui_returns_none_on_escape(self, mock_search_engine):
         """Test that run_tui returns (None, None) when user presses Escape."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()
@@ -852,7 +896,9 @@ class TestFastResumeAppRunTui:
         self, mock_search_engine, sample_sessions
     ):
         """Test that selected session is accessible after selection."""
-        with patch("fast_resume.tui.SessionSearch", return_value=mock_search_engine):
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()

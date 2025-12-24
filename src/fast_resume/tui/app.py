@@ -1,16 +1,12 @@
-"""Textual TUI for fast-resume."""
+"""Main TUI application for fast-resume."""
 
 import logging
-import math
 import os
+import shlex
 import time
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
 
-import humanize
-from rich.columns import Columns
-from rich.console import RenderableType
-from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import on, work
 from textual.events import Click
@@ -18,315 +14,27 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Static, Label, Button
-from textual_image.renderable import Image as ImageRenderable
+from textual.widgets import DataTable, Footer, Input, Static, Label
 from textual_image.widget import Image as ImageWidget
 
-from . import __version__
-from .adapters.base import ParseError, Session
-from .config import AGENTS, LOG_FILE
-from .search import SessionSearch
+from .. import __version__
+from ..adapters.base import ParseError, Session
+from ..config import AGENTS, LOG_FILE
+from ..search import SessionSearch
+from .modal import YoloModeModal
+from .preview import SessionPreview
+from .styles import APP_CSS
+from .utils import (
+    ASSETS_DIR,
+    copy_to_clipboard,
+    format_directory,
+    format_time_ago,
+    get_age_color,
+    get_agent_icon,
+    highlight_matches,
+)
 
 logger = logging.getLogger(__name__)
-
-# Asset paths for agent icons
-ASSETS_DIR = Path(__file__).parent / "assets"
-
-# Cache for agent icon renderables
-_icon_cache: dict[str, ImageRenderable | None] = {}
-
-
-def get_agent_icon(agent: str) -> RenderableType:
-    """Get the icon + name renderable for an agent."""
-    agent_config = AGENTS.get(agent, {"color": "white", "badge": agent})
-
-    if agent not in _icon_cache:
-        icon_path = ASSETS_DIR / f"{agent}.png"
-        if icon_path.exists():
-            try:
-                _icon_cache[agent] = ImageRenderable(icon_path, width=2, height=1)
-            except Exception:
-                _icon_cache[agent] = None
-        else:
-            _icon_cache[agent] = None
-
-    icon = _icon_cache[agent]
-    name = Text(agent_config["badge"])
-    name.stylize(agent_config["color"])
-
-    if icon is not None:
-        # Combine icon and name horizontally
-        return Columns([icon, name], padding=(0, 1), expand=False)
-
-    # Fallback to just colored name with a dot
-    badge = Text(f"● {agent_config['badge']}")
-    badge.stylize(agent_config["color"], 0, 1)  # Color just the dot
-    return badge
-
-
-def format_time_ago(dt: datetime) -> str:
-    """Format a datetime as a human-readable time ago string."""
-    return humanize.naturaltime(dt)
-
-
-def format_directory(path: str) -> str:
-    """Format directory path, replacing home with ~."""
-    if not path:
-        return "n/a"
-    home = os.path.expanduser("~")
-    if path.startswith(home):
-        return "~" + path[len(home) :]
-    return path
-
-
-def highlight_matches(
-    text: str, query: str, max_len: int | None = None, style: str = "bold reverse"
-) -> Text:
-    """Highlight matching portions of text based on query terms.
-
-    Returns a Rich Text object with matches highlighted.
-    """
-    if max_len and len(text) > max_len:
-        text = text[: max_len - 3] + "..."
-
-    if not query:
-        return Text(text)
-
-    result = Text(text)
-    query_lower = query.lower()
-    text_lower = text.lower()
-
-    # Split query into terms and highlight each
-    terms = query_lower.split()
-    for term in terms:
-        if not term:
-            continue
-        start = 0
-        while True:
-            idx = text_lower.find(term, start)
-            if idx == -1:
-                break
-            result.stylize(style, idx, idx + len(term))
-            start = idx + 1
-
-    return result
-
-
-class SessionPreview(Static):
-    """Preview pane showing session content."""
-
-    # Highlight style for matches in preview
-    MATCH_STYLE = "bold reverse"
-    # Max lines to show for a single assistant message
-    MAX_ASSISTANT_LINES = 4
-
-    def __init__(self) -> None:
-        super().__init__("", id="preview")
-
-    def update_preview(self, session: Session | None, query: str = "") -> None:
-        """Update the preview with session content, highlighting matches."""
-        if session is None:
-            self.update("")
-            return
-
-        content = session.content
-        preview_text = ""
-
-        # If there's a query, try to show the part containing the match
-        if query:
-            query_lower = query.lower()
-            content_lower = content.lower()
-            terms = query_lower.split()
-
-            # Find the first matching term
-            best_pos = -1
-            for term in terms:
-                if term:
-                    pos = content_lower.find(term)
-                    if pos != -1 and (best_pos == -1 or pos < best_pos):
-                        best_pos = pos
-
-            if best_pos != -1:
-                # Show context around the match (start 100 chars before, up to 1500 chars)
-                start = max(0, best_pos - 100)
-                end = min(len(content), start + 1500)
-                preview_text = content[start:end]
-                if start > 0:
-                    preview_text = "..." + preview_text
-                if end < len(content):
-                    preview_text = preview_text + "..."
-
-        # Fall back to regular preview if no match found
-        if not preview_text:
-            preview_text = session.preview
-
-        # Build rich text with role-based styling
-        result = Text()
-
-        # Split by double newlines to get individual messages
-        messages = preview_text.split("\n\n")
-
-        for i, msg in enumerate(messages):
-            msg = escape_markup(msg.strip())
-            if not msg:
-                continue
-
-            # Add separator between messages (not before first)
-            if i > 0:
-                result.append("\n")
-
-            # Detect if this is a user message
-            is_user = msg.startswith("» ")
-
-            # Detect code blocks (``` markers)
-            in_code = False
-            lines = msg.split("\n")
-
-            # Truncate assistant messages
-            if not is_user and len(lines) > self.MAX_ASSISTANT_LINES:
-                lines = lines[: self.MAX_ASSISTANT_LINES]
-                lines.append("...")
-
-            for line in lines:
-                if line.startswith("```"):
-                    in_code = not in_code
-                    result.append(line + "\n", style="dim italic")
-                elif line.startswith("» "):
-                    # User prompt
-                    result.append("» ", style="bold cyan")
-                    content_part = line[2:]
-                    if len(content_part) > 200:
-                        content_part = content_part[:200].rsplit(" ", 1)[0] + " ..."
-                    highlighted = highlight_matches(
-                        content_part, query, style=self.MATCH_STYLE
-                    )
-                    result.append_text(highlighted)
-                    result.append("\n")
-                elif line == "...":
-                    result.append("  ...\n", style="dim")
-                elif in_code:
-                    # Inside code block
-                    result.append("  " + line + "\n", style="dim")
-                elif line.startswith("  "):
-                    # Assistant response
-                    highlighted = highlight_matches(line, query, style=self.MATCH_STYLE)
-                    result.append_text(highlighted)
-                    result.append("\n")
-                else:
-                    # Other content (possibly from truncated context)
-                    if line.startswith("..."):
-                        result.append(line + "\n", style="dim")
-                    else:
-                        highlighted = highlight_matches(
-                            line, query, style=self.MATCH_STYLE
-                        )
-                        result.append_text(highlighted)
-                        result.append("\n")
-
-        self.update(result)
-
-
-class YoloModeModal(ModalScreen[bool]):
-    """Modal to choose yolo mode for resume."""
-
-    BINDINGS = [
-        Binding("y", "select_yolo", "Yolo Mode", show=False),
-        Binding("n", "select_normal", "Normal", show=False),
-        Binding("escape", "dismiss", "Cancel", show=False),
-        Binding("enter", "select_focused", "Select", show=False),
-        Binding("left", "focus_normal", "Left", show=False),
-        Binding("right", "focus_yolo", "Right", show=False),
-    ]
-
-    CSS = """
-    YoloModeModal {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.6);
-    }
-
-    YoloModeModal > Vertical {
-        width: 36;
-        height: auto;
-        background: $surface;
-        border: thick $primary 80%;
-        padding: 1 2;
-    }
-
-    YoloModeModal #title {
-        text-align: center;
-        text-style: bold;
-        width: 100%;
-    }
-
-    YoloModeModal #buttons {
-        width: 100%;
-        height: auto;
-        align: center middle;
-        margin-top: 1;
-    }
-
-    YoloModeModal Button {
-        margin: 0 1;
-        min-width: 10;
-    }
-
-    YoloModeModal Button:focus {
-        background: $warning;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Resume with yolo mode?", id="title")
-            with Horizontal(id="buttons"):
-                yield Button("No", id="normal-btn")
-                yield Button("Yolo", id="yolo-btn")
-
-    def on_mount(self) -> None:
-        """Focus the first button when modal opens."""
-        self.query_one("#normal-btn", Button).focus()
-
-    def key_tab(self) -> None:
-        """Handle tab key to toggle focus."""
-        self.action_toggle_focus()
-
-    def action_toggle_focus(self) -> None:
-        """Toggle focus between the two buttons."""
-        if self.focused and self.focused.id == "yolo-btn":
-            self.query_one("#normal-btn", Button).focus()
-        else:
-            self.query_one("#yolo-btn", Button).focus()
-
-    def action_focus_normal(self) -> None:
-        """Focus the normal button."""
-        self.query_one("#normal-btn", Button).focus()
-
-    def action_focus_yolo(self) -> None:
-        """Focus the yolo button."""
-        self.query_one("#yolo-btn", Button).focus()
-
-    def action_select_focused(self) -> None:
-        """Select whichever button is currently focused."""
-        focused = self.focused
-        if focused and focused.id == "yolo-btn":
-            self.dismiss(True)
-        else:
-            self.dismiss(False)
-
-    def action_select_yolo(self) -> None:
-        self.dismiss(True)
-
-    def action_select_normal(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#yolo-btn")
-    def on_yolo_pressed(self) -> None:
-        self.dismiss(True)
-
-    @on(Button.Pressed, "#normal-btn")
-    def on_normal_pressed(self) -> None:
-        self.dismiss(False)
 
 
 class FastResumeApp(App):
@@ -336,268 +44,7 @@ class FastResumeApp(App):
     TITLE = "fast-resume"
     SUB_TITLE = "Session manager"
 
-    CSS = """
-    Screen {
-        layout: vertical;
-        width: 100%;
-        background: $surface;
-    }
-
-    /* Title bar - branding + session count */
-    #title-bar {
-        height: 1;
-        width: 100%;
-        padding: 0 1;
-        background: $surface;
-    }
-
-    #app-title {
-        width: 1fr;
-        color: $text;
-        text-style: bold;
-    }
-
-    #session-count {
-        dock: right;
-        color: $text-muted;
-        width: auto;
-    }
-
-    /* Search row */
-    #search-row {
-        height: 3;
-        width: 100%;
-        padding: 0 1;
-    }
-
-    #search-box {
-        width: 100%;
-        height: 3;
-        border: solid $primary-background-lighten-2;
-        background: $surface;
-        padding: 0 1;
-    }
-
-    #search-box:focus-within {
-        border: solid $accent;
-    }
-
-    #search-icon {
-        width: 3;
-        color: $text-muted;
-        content-align: center middle;
-    }
-
-    #search-input {
-        width: 1fr;
-        border: none;
-        background: transparent;
-    }
-
-    #search-input:focus {
-        border: none;
-    }
-
-    /* Agent filter tabs - pill style */
-    #filter-container {
-        height: 1;
-        width: 100%;
-        padding: 0 1;
-        margin-bottom: 1;
-    }
-
-    .filter-btn {
-        width: auto;
-        height: 1;
-        margin: 0 1 0 0;
-        padding: 0 1;
-        border: none;
-        background: transparent;
-        color: $text-muted;
-    }
-
-    .filter-btn:hover {
-        color: $text;
-    }
-
-    .filter-btn:focus {
-        text-style: none;
-    }
-
-    .filter-btn.-active {
-        background: $accent 20%;
-        color: $accent;
-    }
-
-    .filter-icon {
-        width: 2;
-        height: 1;
-        margin-right: 1;
-    }
-
-    .filter-label {
-        height: 1;
-    }
-
-    .filter-btn.-active .filter-label {
-        text-style: bold;
-    }
-
-    /* Agent-specific filter colors */
-    #filter-claude {
-        color: #E87B35;
-    }
-    #filter-claude.-active {
-        background: #E87B35 20%;
-        color: #E87B35;
-    }
-
-    #filter-codex {
-        color: #00A67E;
-    }
-    #filter-codex.-active {
-        background: #00A67E 20%;
-        color: #00A67E;
-    }
-
-    #filter-copilot-cli {
-        color: #9CA3AF;
-    }
-    #filter-copilot-cli.-active {
-        background: #9CA3AF 20%;
-        color: #9CA3AF;
-    }
-
-    #filter-copilot-vscode {
-        color: #007ACC;
-    }
-    #filter-copilot-vscode.-active {
-        background: #007ACC 20%;
-        color: #007ACC;
-    }
-
-    #filter-crush {
-        color: #FF5F87;
-    }
-    #filter-crush.-active {
-        background: #FF5F87 20%;
-        color: #FF5F87;
-    }
-
-    #filter-opencode {
-        color: #6366F1;
-    }
-    #filter-opencode.-active {
-        background: #6366F1 20%;
-        color: #6366F1;
-    }
-
-    #filter-vibe {
-        color: #FF6B35;
-    }
-    #filter-vibe.-active {
-        background: #FF6B35 20%;
-        color: #FF6B35;
-    }
-
-    /* Main content area */
-    #main-container {
-        height: 1fr;
-        width: 100%;
-    }
-
-    #results-container {
-        height: 1fr;
-        width: 100%;
-        overflow-x: hidden;
-    }
-
-    #results-table {
-        height: 100%;
-        width: 100%;
-        overflow-x: hidden;
-    }
-
-    DataTable {
-        background: transparent;
-        overflow-x: hidden;
-    }
-
-    DataTable > .datatable--header {
-        text-style: bold;
-        color: $text;
-    }
-
-    DataTable > .datatable--cursor {
-        background: $accent 30%;
-    }
-
-    DataTable > .datatable--hover {
-        background: $surface-lighten-1;
-    }
-
-    /* Preview pane - expanded */
-    #preview-container {
-        height: 12;
-        border-top: solid $accent 50%;
-        background: $surface;
-        padding: 0 1;
-    }
-
-    #preview-container.hidden {
-        display: none;
-    }
-
-    #preview {
-        height: 100%;
-        overflow-y: auto;
-    }
-
-    /* Agent colors */
-    .agent-claude {
-        color: #E87B35;
-    }
-
-    .agent-codex {
-        color: #00A67E;
-    }
-
-    .agent-copilot {
-        color: #9CA3AF;
-    }
-
-    .agent-opencode {
-        color: #6366F1;
-    }
-
-    .agent-vibe {
-        color: #FF6B35;
-    }
-
-    .agent-crush {
-        color: #FF5F87;
-    }
-
-    /* Footer styling */
-    Footer {
-        background: $primary-background;
-    }
-
-    Footer > .footer--key {
-        background: $surface;
-        color: $text;
-    }
-
-    Footer > .footer--description {
-        color: $text-muted;
-    }
-
-    #query-time {
-        width: auto;
-        padding: 0 1;
-        color: $text-muted;
-    }
-    """
+    CSS = APP_CSS
 
     FILTER_KEYS: list[str | None] = [
         None,
@@ -609,6 +56,18 @@ class FastResumeApp(App):
         "opencode",
         "vibe",
     ]
+
+    # Map button IDs to filter values
+    _FILTER_ID_MAP: dict[str, str | None] = {
+        "filter-all": None,
+        "filter-claude": "claude",
+        "filter-codex": "codex",
+        "filter-copilot-cli": "copilot-cli",
+        "filter-copilot-vscode": "copilot-vscode",
+        "filter-crush": "crush",
+        "filter-opencode": "opencode",
+        "filter-vibe": "vibe",
+    }
 
     BINDINGS = [
         Binding("escape", "quit", "Quit", priority=True),
@@ -810,56 +269,34 @@ class FastResumeApp(App):
             if self.sessions:
                 self._update_table()
 
+    # Column width breakpoints: (min_width, agent, dir, msgs, date)
+    _COL_WIDTHS = [
+        (120, 12, 30, 6, 18),  # Wide
+        (90, 12, 22, 5, 15),  # Medium
+        (60, 12, 16, 5, 12),  # Narrow
+        (0, 11, 0, 4, 10),  # Very narrow (hide directory)
+    ]
+
     def _update_column_widths(self) -> None:
         """Update column widths based on terminal size."""
         table = self.query_one("#results-table", DataTable)
         width = self.size.width
-        padding = 8  # column gaps + scrollbar
 
-        # Responsive column widths based on terminal width
-        # Agent column: icon (2) + space (1) + name (up to 8 for "opencode") = 11
-        if width >= 120:
-            # Wide: show everything
-            agent_w = 12
-            dir_w = 30
-            msgs_w = 6
-            date_w = 18
-        elif width >= 90:
-            # Medium: slightly smaller
-            agent_w = 12
-            dir_w = 22
-            msgs_w = 5
-            date_w = 15
-        elif width >= 60:
-            # Narrow: compact
-            agent_w = 12
-            dir_w = 16
-            msgs_w = 5
-            date_w = 12
-        else:
-            # Very narrow: minimal
-            agent_w = 11
-            dir_w = 0  # hide directory
-            msgs_w = 4
-            date_w = 10
+        # Find appropriate breakpoint
+        agent_w, dir_w, msgs_w, date_w = next(
+            (a, d, m, t) for min_w, a, d, m, t in self._COL_WIDTHS if width >= min_w
+        )
+        title_w = max(15, width - agent_w - dir_w - msgs_w - date_w - 8)
 
-        title_w = max(15, width - agent_w - dir_w - msgs_w - date_w - padding)
-
-        # Disable auto_width and set explicit widths
         for col in table.columns.values():
             col.auto_width = False
-
         table.columns[self._col_agent].width = agent_w
         table.columns[self._col_title].width = title_w
         table.columns[self._col_dir].width = dir_w
         table.columns[self._col_msgs].width = msgs_w
         table.columns[self._col_date].width = date_w
 
-        # Store for truncation
-        self._title_width = title_w
-        self._dir_width = dir_w
-
-        # Force refresh
+        self._title_width, self._dir_width = title_w, dir_w
         table.refresh()
 
     @work(exclusive=True, thread=True)
@@ -1046,38 +483,8 @@ class FastResumeApp(App):
             # Format time with age-based gradient coloring
             time_ago = format_time_ago(session.timestamp)
             time_text = Text(time_ago.rjust(8))
-            now = datetime.now()
-            age = now - session.timestamp
-            age_hours = age.total_seconds() / 3600
-
-            # Continuous gradient using exponential decay
-            # Green (0h) → Yellow (12h) → Orange (3d) → Dim (30d+)
-            decay_rate = 0.005  # Controls how fast colors fade
-            t = 1 - math.exp(
-                -decay_rate * age_hours
-            )  # 0 at 0h, approaches 1 asymptotically
-
-            # Interpolate through color stops: green → yellow → orange → gray
-            if t < 0.3:
-                # Muted green to yellow
-                s = t / 0.3
-                r = int(100 + s * 100)  # 100 → 200
-                g = int(200 - s * 20)  # 200 → 180
-                b = int(50 - s * 50)  # 50 → 0
-            elif t < 0.6:
-                # Yellow to muted orange
-                s = (t - 0.3) / 0.3
-                r = 200
-                g = int(180 - s * 80)  # 180 → 100
-                b = int(0 + s * 50)  # 0 → 50
-            else:
-                # Muted orange to dim gray
-                s = (t - 0.6) / 0.4
-                r = int(200 - s * 100)  # 200 → 100
-                g = int(100)  # 100 → 100
-                b = int(50 + s * 50)  # 50 → 100
-
-            time_text.stylize(f"#{r:02x}{g:02x}{b:02x}")
+            age_hours = (datetime.now() - session.timestamp).total_seconds() / 3600
+            time_text.stylize(get_age_color(age_hours))
 
             table.add_row(icon, title, dir_text, msgs_text, time_text)
 
@@ -1163,37 +570,44 @@ class FastResumeApp(App):
             table.action_cursor_up()
         self._update_selected_session()
 
-    def action_copy_path(self) -> None:
-        """Copy the full resume command (cd + agent resume) to clipboard."""
-        if not self.selected_session:
-            return
+    def _resolve_yolo_mode(
+        self,
+        action: Callable[[bool], None],
+        modal_callback: Callable[[bool | None], None],
+    ) -> None:
+        """Resolve yolo mode and call the action with the result.
 
+        Determines whether to use yolo mode based on CLI flag, session state,
+        or user selection via modal. Then calls `action(yolo_value)`.
+        """
         adapter = self.search_engine.get_adapter_for_session(self.selected_session)
 
         # If CLI --yolo flag is set, always use yolo
         if self.yolo:
-            self._do_copy_command(yolo=True)
+            action(True)
             return
 
         # If session has stored yolo mode, use it directly
         if self.selected_session.yolo:
-            self._do_copy_command(yolo=True)
+            action(True)
             return
 
         # If adapter supports yolo but session doesn't have stored value, show modal
         if adapter and adapter.supports_yolo:
-            self.push_screen(YoloModeModal(), self._on_copy_yolo_modal_result)
+            self.push_screen(YoloModeModal(), modal_callback)
             return
 
-        # Otherwise copy without yolo
-        self._do_copy_command(yolo=False)
+        # Otherwise proceed without yolo
+        action(False)
+
+    def action_copy_path(self) -> None:
+        """Copy the full resume command (cd + agent resume) to clipboard."""
+        if not self.selected_session:
+            return
+        self._resolve_yolo_mode(self._do_copy_command, self._on_copy_yolo_modal_result)
 
     def _do_copy_command(self, yolo: bool) -> None:
         """Execute the copy command with specified yolo mode."""
-        import shlex
-        import subprocess
-        import sys
-
         resume_cmd = self.search_engine.get_resume_command(
             self.selected_session, yolo=yolo
         )
@@ -1205,33 +619,10 @@ class FastResumeApp(App):
         cmd_str = shlex.join(resume_cmd)
         full_cmd = f"cd {shlex.quote(directory)} && {cmd_str}"
 
-        try:
-            if sys.platform == "darwin":
-                subprocess.run(["pbcopy"], input=full_cmd.encode(), check=True)
-            elif sys.platform == "win32":
-                subprocess.run(["clip"], input=full_cmd.encode(), check=True)
-            else:
-                # Linux - try xclip or xsel
-                try:
-                    subprocess.run(
-                        ["xclip", "-selection", "clipboard"],
-                        input=full_cmd.encode(),
-                        check=True,
-                    )
-                except FileNotFoundError:
-                    subprocess.run(
-                        ["xsel", "--clipboard", "--input"],
-                        input=full_cmd.encode(),
-                        check=True,
-                    )
+        if copy_to_clipboard(full_cmd):
             self.notify(f"Copied: {full_cmd}", timeout=3)
-        except Exception:
-            # Fallback: show command in notification if clipboard fails
-            self.notify(
-                f"{full_cmd}",
-                title="Clipboard unavailable",
-                timeout=5,
-            )
+        else:
+            self.notify(full_cmd, title="Clipboard unavailable", timeout=5)
 
     def _on_copy_yolo_modal_result(self, result: bool | None) -> None:
         """Handle result from yolo mode modal for copy action."""
@@ -1270,25 +661,7 @@ class FastResumeApp(App):
             )
             return
 
-        adapter = self.search_engine.get_adapter_for_session(self.selected_session)
-
-        # If CLI --yolo flag is set, always use yolo
-        if self.yolo:
-            self._do_resume(yolo=True)
-            return
-
-        # If session has stored yolo mode, use it directly
-        if self.selected_session.yolo:
-            self._do_resume(yolo=True)
-            return
-
-        # If adapter supports yolo but session doesn't have stored value, show modal
-        if adapter and adapter.supports_yolo:
-            self.push_screen(YoloModeModal(), self._on_yolo_modal_result)
-            return
-
-        # Otherwise resume normally
-        self._do_resume(yolo=False)
+        self._resolve_yolo_mode(self._do_resume, self._on_yolo_modal_result)
 
     def _do_resume(self, yolo: bool) -> None:
         """Execute the resume with specified yolo mode."""
@@ -1308,38 +681,6 @@ class FastResumeApp(App):
         self.active_filter = agent
         self._update_filter_buttons()
         self._do_search(self._current_query)
-
-    def action_filter_all(self) -> None:
-        """Show all sessions."""
-        self._set_filter(None)
-
-    def action_filter_claude(self) -> None:
-        """Filter to Claude sessions only."""
-        self._set_filter("claude")
-
-    def action_filter_codex(self) -> None:
-        """Filter to Codex sessions only."""
-        self._set_filter("codex")
-
-    def action_filter_copilot_cli(self) -> None:
-        """Filter to Copilot CLI sessions only."""
-        self._set_filter("copilot-cli")
-
-    def action_filter_copilot_vscode(self) -> None:
-        """Filter to VS Code Copilot sessions only."""
-        self._set_filter("copilot-vscode")
-
-    def action_filter_crush(self) -> None:
-        """Filter to Crush sessions only."""
-        self._set_filter("crush")
-
-    def action_filter_opencode(self) -> None:
-        """Filter to OpenCode sessions only."""
-        self._set_filter("opencode")
-
-    def action_filter_vibe(self) -> None:
-        """Filter to Vibe sessions only."""
-        self._set_filter("vibe")
 
     def action_cycle_filter(self) -> None:
         """Cycle to the next agent filter."""
@@ -1372,23 +713,8 @@ class FastResumeApp(App):
         widget = event.widget
         while widget and "filter-btn" not in widget.classes:
             widget = widget.parent
-        btn_id = widget.id if widget else None
-        if btn_id == "filter-all":
-            self._set_filter(None)
-        elif btn_id == "filter-claude":
-            self._set_filter("claude")
-        elif btn_id == "filter-codex":
-            self._set_filter("codex")
-        elif btn_id == "filter-copilot-cli":
-            self._set_filter("copilot-cli")
-        elif btn_id == "filter-copilot-vscode":
-            self._set_filter("copilot-vscode")
-        elif btn_id == "filter-crush":
-            self._set_filter("crush")
-        elif btn_id == "filter-opencode":
-            self._set_filter("opencode")
-        elif btn_id == "filter-vibe":
-            self._set_filter("vibe")
+        if widget and widget.id in self._FILTER_ID_MAP:
+            self._set_filter(self._FILTER_ID_MAP[widget.id])
 
     def get_resume_command(self) -> list[str] | None:
         """Get the resume command to execute after exit."""
@@ -1397,19 +723,3 @@ class FastResumeApp(App):
     def get_resume_directory(self) -> str | None:
         """Get the directory to change to before running the resume command."""
         return self._resume_directory
-
-
-def run_tui(
-    query: str = "", agent_filter: str | None = None, yolo: bool = False
-) -> tuple[list[str] | None, str | None]:
-    """Run the TUI and return the resume command and directory if selected."""
-    app = FastResumeApp(initial_query=query, agent_filter=agent_filter, yolo=yolo)
-    app.run()
-
-    if app._available_update:
-        print(
-            f"\nUpdate available: {__version__} → {app._available_update}\n"
-            f"Run: uv tool upgrade fast-resume"
-        )
-
-    return app.get_resume_command(), app.get_resume_directory()
