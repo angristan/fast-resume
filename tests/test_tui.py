@@ -563,6 +563,72 @@ class TestFastResumeAppFilters:
                 await pilot.pause()
                 assert app.active_filter == "codex"
 
+    @pytest.mark.asyncio
+    async def test_session_count_updates_with_filter(self, sample_sessions):
+        """Test that session count label shows filtered count when filter is active.
+
+        This is a regression test for the feature that shows x/total_for_agent
+        instead of x/total_all when an agent filter is active.
+        """
+        # sample_sessions has: 2 claude, 1 vibe = 3 total
+        mock = MagicMock()
+        mock._streaming_in_progress = False
+        mock._sessions = sample_sessions
+        mock._load_from_index.return_value = sample_sessions
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+        mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = False
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        # Mock get_session_count to return filtered counts
+        def mock_get_session_count(agent_filter=None):
+            if agent_filter is None:
+                return 3
+            elif agent_filter == "claude":
+                return 2
+            elif agent_filter == "vibe":
+                return 1
+            return 0
+
+        mock.get_session_count.side_effect = mock_get_session_count
+
+        # Mock search to return filtered results
+        def mock_search(query, agent_filter=None, limit=100):
+            if agent_filter == "claude":
+                return [s for s in sample_sessions if s.agent == "claude"]
+            elif agent_filter == "vibe":
+                return [s for s in sample_sessions if s.agent == "vibe"]
+            return sample_sessions
+
+        mock.search.side_effect = mock_search
+
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Initially no filter - should show total (3)
+                from textual.widgets import Label
+
+                count_label = app.query_one("#session-count", Label)
+                assert "3" in str(count_label.render())
+
+                # Filter by claude - should show 2
+                app._set_filter("claude")
+                await pilot.pause()
+                assert "2" in str(count_label.render())
+
+                # Filter by vibe - should show 1
+                app._set_filter("vibe")
+                await pilot.pause()
+                assert "1" in str(count_label.render())
+
+                # Back to all - should show 3
+                app._set_filter(None)
+                await pilot.pause()
+                assert "3" in str(count_label.render())
+
 
 class TestFastResumeAppPreview:
     """Tests for preview pane functionality."""
