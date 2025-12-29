@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/angristan/fast-resume/compare/v1.5.0...v1.6.0) (2025-12-29)
+
+
+### Features
+
+* **query:** add mixed include/exclude filter support ([1c67926](https://github.com/angristan/fast-resume/commit/1c67926c102986f3876b4ac1bad7943fb56e224a))
+
 # [1.5.0](https://github.com/angristan/fast-resume/compare/v1.4.2...v1.5.0) (2025-12-29)
 
 
