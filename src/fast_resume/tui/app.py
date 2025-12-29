@@ -43,6 +43,62 @@ logger = logging.getLogger(__name__)
 # Pattern to match keyword:value syntax in search queries (with optional - prefix)
 _KEYWORD_PATTERN = re.compile(r"(-?)(agent:|dir:|date:)(\S+)")
 
+# Pattern to match agent: keyword specifically (for extraction/replacement)
+_AGENT_KEYWORD_PATTERN = re.compile(r"-?agent:(\S+)")
+
+
+def _extract_agent_from_query(query: str) -> str | None:
+    """Extract agent value from query string if present.
+
+    Returns the first non-negated agent value, or None if no agent keyword.
+    For mixed filters like agent:claude,!codex, returns 'claude'.
+    """
+    match = _AGENT_KEYWORD_PATTERN.search(query)
+    if not match:
+        return None
+
+    # Check if the whole keyword is negated with - prefix
+    full_match = match.group(0)
+    if full_match.startswith("-"):
+        return None  # Negated filter, don't sync to buttons
+
+    value = match.group(1)
+    # Handle ! prefix on value
+    if value.startswith("!"):
+        return None  # Negated, don't sync
+
+    # Get first non-negated value from comma-separated list
+    for v in value.split(","):
+        v = v.strip()
+        if v and not v.startswith("!"):
+            return v
+
+    return None
+
+
+def _update_agent_in_query(query: str, agent: str | None) -> str:
+    """Update or remove agent keyword in query string.
+
+    Args:
+        query: Current query string
+        agent: Agent to set, or None to remove agent keyword
+
+    Returns:
+        Updated query string with agent keyword added/updated/removed.
+    """
+    # Remove existing agent keyword(s)
+    query_without_agent = _AGENT_KEYWORD_PATTERN.sub("", query).strip()
+    # Clean up extra whitespace
+    query_without_agent = " ".join(query_without_agent.split())
+
+    if agent is None:
+        return query_without_agent
+
+    # Append agent keyword at the end
+    if query_without_agent:
+        return f"{query_without_agent} agent:{agent}"
+    return f"agent:{agent}"
+
 
 class KeywordHighlighter(Highlighter):
     """Highlighter for search keyword syntax (agent:, dir:, date:).
@@ -153,6 +209,7 @@ class FastResumeApp(App):
         self._total_loaded: int = 0
         self._search_timer: Timer | None = None
         self._available_update: str | None = None
+        self._syncing_filter: bool = False  # Prevent infinite loops during sync
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
@@ -544,6 +601,19 @@ class FastResumeApp(App):
         if self._search_timer:
             self._search_timer.stop()
         self.is_loading = True
+
+        # Sync filter buttons with agent keyword in query (if not already syncing)
+        if not self._syncing_filter:
+            agent_in_query = _extract_agent_from_query(event.value)
+            # Only sync if the extracted agent is different from current filter
+            if agent_in_query != self.active_filter:
+                # Check if this is a valid agent
+                if agent_in_query is None or agent_in_query in self.FILTER_KEYS:
+                    self._syncing_filter = True
+                    self.active_filter = agent_in_query
+                    self._update_filter_buttons()
+                    self._syncing_filter = False
+
         # Debounce: wait 50ms before triggering search
         value = event.value
         self._search_timer = self.set_timer(
@@ -715,9 +785,20 @@ class FastResumeApp(App):
             self._do_resume(yolo=result)
 
     def _set_filter(self, agent: str | None) -> None:
-        """Set the agent filter and refresh results."""
+        """Set the agent filter and refresh results, syncing query string."""
         self.active_filter = agent
         self._update_filter_buttons()
+
+        # Update search input to reflect the new filter (if not already syncing)
+        if not self._syncing_filter:
+            self._syncing_filter = True
+            search_input = self.query_one("#search-input", Input)
+            new_query = _update_agent_in_query(search_input.value, agent)
+            if new_query != search_input.value:
+                search_input.value = new_query
+                self._current_query = new_query
+            self._syncing_filter = False
+
         self._do_search(self._current_query)
 
     def action_cycle_filter(self) -> None:

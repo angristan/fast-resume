@@ -564,6 +564,96 @@ class TestFastResumeAppFilters:
                 assert app.active_filter == "codex"
 
     @pytest.mark.asyncio
+    async def test_typing_agent_keyword_syncs_filter_button(self, mock_search_engine):
+        """Test that typing agent: keyword syncs the filter button."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                # Initially no filter
+                assert app.active_filter is None
+
+                # Type agent:claude in search input
+                search_input = app.query_one("#search-input")
+                search_input.value = "agent:claude"
+                await pilot.pause()
+
+                # Filter button should sync to claude
+                assert app.active_filter == "claude"
+
+    @pytest.mark.asyncio
+    async def test_filter_button_adds_agent_keyword(self, mock_search_engine):
+        """Test that clicking filter button adds agent: keyword to query."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                search_input = app.query_one("#search-input")
+
+                # Type some search text
+                search_input.value = "test query"
+                await pilot.pause()
+
+                # Set filter to claude
+                app._set_filter("claude")
+                await pilot.pause()
+
+                # Query should have agent:claude added
+                assert "agent:claude" in search_input.value
+                assert "test query" in search_input.value
+
+    @pytest.mark.asyncio
+    async def test_filter_all_removes_agent_keyword(self, mock_search_engine):
+        """Test that setting filter to All removes agent: keyword."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                search_input = app.query_one("#search-input")
+
+                # Start with agent keyword
+                search_input.value = "agent:claude test query"
+                await pilot.pause()
+                assert app.active_filter == "claude"
+
+                # Set filter to None (All)
+                app._set_filter(None)
+                await pilot.pause()
+
+                # agent: keyword should be removed
+                assert "agent:" not in search_input.value
+                assert "test query" in search_input.value
+
+    @pytest.mark.asyncio
+    async def test_tab_filter_updates_query(self, mock_search_engine):
+        """Test that tab cycling through filters updates query string."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                search_input = app.query_one("#search-input")
+
+                # Type some search text
+                search_input.value = "my search"
+                await pilot.pause()
+
+                # Tab to claude filter
+                await pilot.press("tab")
+                await pilot.pause()
+
+                # Query should have agent:claude
+                assert "agent:claude" in search_input.value
+                assert app.active_filter == "claude"
+
+    @pytest.mark.asyncio
     async def test_session_count_updates_with_filter(self, sample_sessions):
         """Test that session count label shows filtered count when filter is active.
 
