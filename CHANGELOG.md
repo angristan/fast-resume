@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/angristan/fast-resume/compare/v1.4.2...v1.5.0) (2025-12-29)
+
+
+### Features
+
+* add keyword search syntax (agent:, dir:, date:) ([7f8e2f3](https://github.com/angristan/fast-resume/commit/7f8e2f3428eb429ea72d0fc4e7195d2117a4faff))
+
 ## [1.4.2](https://github.com/angristan/fast-resume/compare/v1.4.1...v1.4.2) (2025-12-29)
 
 
