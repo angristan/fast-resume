@@ -16,6 +16,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Click
 from textual.reactive import reactive
+from textual.suggester import Suggester
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Input, Label
 from textual_image.widget import Image as ImageWidget
@@ -126,6 +127,83 @@ class KeywordHighlighter(Highlighter):
                 text.stylize("green", match.start(3), match.end(3))
 
 
+# Pattern to match partial keyword at end of input for autocomplete
+_PARTIAL_KEYWORD_PATTERN = re.compile(
+    r"(-?)(agent:|dir:|date:)([^\s]*)$"  # Keyword at end, possibly partial value
+)
+
+# Known values for each keyword type
+_KEYWORD_VALUES = {
+    "agent:": [
+        "claude",
+        "codex",
+        "copilot-cli",
+        "copilot-vscode",
+        "crush",
+        "opencode",
+        "vibe",
+    ],
+    "date:": ["today", "yesterday", "week", "month"],
+    # dir: has no predefined values (user-specific paths)
+}
+
+
+class KeywordSuggester(Suggester):
+    """Suggester for keyword value autocomplete.
+
+    Provides completions for:
+    - agent: values (claude, codex, etc.)
+    - date: values (today, yesterday, week, month)
+    """
+
+    def __init__(self) -> None:
+        super().__init__(use_cache=True, case_sensitive=False)
+
+    async def get_suggestion(self, value: str) -> str | None:
+        """Get completion suggestion for the current input.
+
+        Args:
+            value: Current input text (casefolded if case_sensitive=False)
+
+        Returns:
+            Complete input with suggested value, or None if no suggestion.
+        """
+        # Find partial keyword at end of input
+        match = _PARTIAL_KEYWORD_PATTERN.search(value)
+        if not match:
+            return None
+
+        keyword = match.group(2)  # agent:, dir:, date:
+        partial = match.group(3)  # Partial value typed so far
+
+        # Get known values for this keyword
+        known_values = _KEYWORD_VALUES.get(keyword)
+        if not known_values:
+            return None
+
+        # Don't suggest if value is empty (user just typed "agent:")
+        if not partial:
+            return None
+
+        # Handle ! prefix on partial value
+        negated_value = partial.startswith("!")
+        search_partial = partial[1:] if negated_value else partial
+
+        # Find first matching value (but not exact match - already complete)
+        for candidate in known_values:
+            if candidate.lower().startswith(search_partial.lower()):
+                # Skip if already complete (no suggestion needed)
+                if candidate.lower() == search_partial.lower():
+                    continue
+                # Build the suggestion
+                suggested_value = f"!{candidate}" if negated_value else candidate
+                # Replace partial with full value
+                suggestion = value[: match.start(3)] + suggested_value
+                return suggestion
+
+        return None
+
+
 class FastResumeApp(App):
     """Main TUI application for fast-resume."""
 
@@ -166,7 +244,7 @@ class FastResumeApp(App):
         Binding("enter", "resume_session", "Resume"),
         Binding("c", "copy_path", "Copy resume command", priority=True),
         Binding("ctrl+grave_accent", "toggle_preview", "Preview", priority=True),
-        Binding("tab", "cycle_filter", "Next Filter", priority=True),
+        Binding("tab", "accept_suggestion", "Accept", show=False, priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
@@ -228,6 +306,7 @@ class FastResumeApp(App):
                         id="search-input",
                         value=self.initial_query,
                         highlighter=KeywordHighlighter(),
+                        suggester=KeywordSuggester(),
                     )
                     yield Label("", id="query-time")
 
@@ -801,14 +880,14 @@ class FastResumeApp(App):
 
         self._do_search(self._current_query)
 
+    def action_accept_suggestion(self) -> None:
+        """Accept autocomplete suggestion in search input."""
+        search_input = self.query_one("#search-input", Input)
+        if search_input._suggestion:
+            search_input.action_cursor_right()
+
     def action_cycle_filter(self) -> None:
         """Cycle to the next agent filter."""
-        # If a modal is open, delegate tab to the modal
-        if len(self.screen_stack) > 1:
-            top_screen = self.screen_stack[-1]
-            if isinstance(top_screen, YoloModeModal):
-                top_screen.action_toggle_focus()
-            return
         try:
             current_index = self.FILTER_KEYS.index(self.active_filter)
             next_index = (current_index + 1) % len(self.FILTER_KEYS)

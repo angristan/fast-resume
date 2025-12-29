@@ -10,6 +10,7 @@ from rich.text import Text
 from fast_resume.adapters.base import Session
 from fast_resume.tui import (
     FastResumeApp,
+    KeywordSuggester,
     format_directory,
     format_time_ago,
     get_agent_icon,
@@ -542,28 +543,6 @@ class TestFastResumeAppFilters:
                 assert vibe_filter is not None
 
     @pytest.mark.asyncio
-    async def test_tab_cycles_through_filters(self, mock_search_engine):
-        """Test that Tab cycles through agent filters."""
-        with patch(
-            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
-        ):
-            app = FastResumeApp()
-            async with app.run_test(size=(120, 40)) as pilot:
-                await pilot.pause()
-                # Should start with no filter (All)
-                assert app.active_filter is None
-
-                # Tab should cycle to first agent filter (claude)
-                await pilot.press("tab")
-                await pilot.pause()
-                assert app.active_filter == "claude"
-
-                # Tab again should go to codex
-                await pilot.press("tab")
-                await pilot.pause()
-                assert app.active_filter == "codex"
-
-    @pytest.mark.asyncio
     async def test_typing_agent_keyword_syncs_filter_button(self, mock_search_engine):
         """Test that typing agent: keyword syncs the filter button."""
         with patch(
@@ -629,29 +608,6 @@ class TestFastResumeAppFilters:
                 # agent: keyword should be removed
                 assert "agent:" not in search_input.value
                 assert "test query" in search_input.value
-
-    @pytest.mark.asyncio
-    async def test_tab_filter_updates_query(self, mock_search_engine):
-        """Test that tab cycling through filters updates query string."""
-        with patch(
-            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
-        ):
-            app = FastResumeApp()
-            async with app.run_test(size=(120, 40)) as pilot:
-                await pilot.pause()
-                search_input = app.query_one("#search-input")
-
-                # Type some search text
-                search_input.value = "my search"
-                await pilot.pause()
-
-                # Tab to claude filter
-                await pilot.press("tab")
-                await pilot.pause()
-
-                # Query should have agent:claude
-                assert "agent:claude" in search_input.value
-                assert app.active_filter == "claude"
 
     @pytest.mark.asyncio
     async def test_session_count_updates_with_filter(self, sample_sessions):
@@ -1087,3 +1043,84 @@ class TestFastResumeAppRunTui:
                 assert app.selected_session is not None
                 assert app.selected_session.id == "session-1"
                 assert app.selected_session.agent == "claude"
+
+
+class TestKeywordSuggester:
+    """Tests for KeywordSuggester autocomplete."""
+
+    @pytest.fixture
+    def suggester(self):
+        """Create a KeywordSuggester instance."""
+        return KeywordSuggester()
+
+    @pytest.mark.asyncio
+    async def test_suggests_agent_completion(self, suggester):
+        """Test that agent:cl suggests claude."""
+        result = await suggester.get_suggestion("agent:cl")
+        assert result == "agent:claude"
+
+    @pytest.mark.asyncio
+    async def test_suggests_agent_codex(self, suggester):
+        """Test that agent:cod suggests codex."""
+        result = await suggester.get_suggestion("agent:cod")
+        assert result == "agent:codex"
+
+    @pytest.mark.asyncio
+    async def test_suggests_date_today(self, suggester):
+        """Test that date:to suggests today."""
+        result = await suggester.get_suggestion("date:to")
+        assert result == "date:today"
+
+    @pytest.mark.asyncio
+    async def test_suggests_date_yesterday(self, suggester):
+        """Test that date:ye suggests yesterday."""
+        result = await suggester.get_suggestion("date:ye")
+        assert result == "date:yesterday"
+
+    @pytest.mark.asyncio
+    async def test_no_suggestion_for_dir(self, suggester):
+        """Test that dir: has no suggestions (user-specific)."""
+        result = await suggester.get_suggestion("dir:pro")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_suggestion_for_empty_value(self, suggester):
+        """Test no suggestion when value is empty."""
+        result = await suggester.get_suggestion("agent:")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_suggestion_for_no_match(self, suggester):
+        """Test no suggestion when no values match."""
+        result = await suggester.get_suggestion("agent:xyz")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_suggests_with_prefix_text(self, suggester):
+        """Test suggestion works with text before keyword."""
+        result = await suggester.get_suggestion("my search agent:cl")
+        assert result == "my search agent:claude"
+
+    @pytest.mark.asyncio
+    async def test_suggests_negated_agent(self, suggester):
+        """Test that agent:!cl suggests !claude."""
+        result = await suggester.get_suggestion("agent:!cl")
+        assert result == "agent:!claude"
+
+    @pytest.mark.asyncio
+    async def test_suggests_with_dash_negation(self, suggester):
+        """Test that -agent:cl suggests claude."""
+        result = await suggester.get_suggestion("-agent:cl")
+        assert result == "-agent:claude"
+
+    @pytest.mark.asyncio
+    async def test_no_suggestion_for_plain_text(self, suggester):
+        """Test no suggestion for plain text without keywords."""
+        result = await suggester.get_suggestion("some search query")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_case_insensitive(self, suggester):
+        """Test that suggestions are case insensitive."""
+        result = await suggester.get_suggestion("agent:CL")
+        assert result == "agent:claude"

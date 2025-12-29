@@ -70,6 +70,37 @@ fr -d myproject
 fr -a claude -d backend "api error"
 ```
 
+### Keyword Search Syntax
+
+Filter directly in the search box using keywords:
+
+```bash
+agent:claude             # Filter by agent
+agent:claude,codex       # Multiple agents (OR)
+-agent:vibe              # Exclude agent
+agent:claude,!codex      # Include claude, exclude codex
+
+dir:myproject            # Filter by directory (substring)
+dir:backend,!test        # Include backend, exclude test
+
+date:today               # Sessions from today
+date:yesterday           # Sessions from yesterday
+date:<1h                 # Within the last hour
+date:<2d                 # Within the last 2 days
+date:>1w                 # Older than 1 week
+date:week                # Within the last week
+date:month               # Within the last month
+```
+
+Combine keywords with free-text search:
+
+```bash
+fr "agent:claude date:<1d api bug"
+fr "dir:backend -agent:vibe auth"
+```
+
+**Autocomplete**: Type `agent:cl` and press `Tab` to complete to `agent:claude`.
+
 ### Non-Interactive Mode
 
 ```bash
@@ -145,7 +176,7 @@ Options:
 | --------- | ------------------------------------- |
 | `Ctrl+\`` | Toggle preview pane                   |
 | `+` / `-` | Resize preview pane                   |
-| `Tab`     | Cycle through agent filters           |
+| `Tab`     | Accept autocomplete suggestion        |
 | `c`       | Copy full resume command to clipboard |
 | `Ctrl+P`  | Open command palette                  |
 | `q`/`Esc` | Quit                                  |
