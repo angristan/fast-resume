@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/angristan/fast-resume/compare/v1.6.0...v1.7.0) (2025-12-29)
+
+
+### Features
+
+* **tui:** sync filter buttons with agent: keyword in query ([d5f5afe](https://github.com/angristan/fast-resume/commit/d5f5afe9277ce14398af603ecec1d6326e561536))
+
 # [1.6.0](https://github.com/angristan/fast-resume/compare/v1.5.0...v1.6.0) (2025-12-29)
 
 
