@@ -302,7 +302,7 @@ class FastResumeApp(App):
                 with Horizontal(id="search-box"):
                     yield Label("🔍", id="search-icon")
                     yield Input(
-                        placeholder="Search... (agent: dir: date:)",
+                        placeholder="Search titles & messages. Try agent:claude or date:today",
                         id="search-input",
                         value=self.initial_query,
                         highlighter=KeywordHighlighter(),
