@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/angristan/fast-resume/compare/v1.8.0...v1.8.1) (2025-12-29)
+
+
+### Bug Fixes
+
+* **tui:** improve search placeholder with keyword examples ([19bdafd](https://github.com/angristan/fast-resume/commit/19bdafd8e10d4dc30c370b0032c7e27c21948e04))
+
 # [1.8.0](https://github.com/angristan/fast-resume/compare/v1.7.0...v1.8.0) (2025-12-29)
 
 
