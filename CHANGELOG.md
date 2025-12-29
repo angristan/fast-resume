@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/angristan/fast-resume/compare/v1.7.0...v1.8.0) (2025-12-29)
+
+
+### Features
+
+* **tui:** add keyword autocomplete with Tab to accept ([ade06bc](https://github.com/angristan/fast-resume/commit/ade06bcc70c6a80afee997b12b195dd7bec515e8))
+
 # [1.7.0](https://github.com/angristan/fast-resume/compare/v1.6.0...v1.7.0) (2025-12-29)
 
 
