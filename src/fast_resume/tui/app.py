@@ -44,6 +44,29 @@ logger = logging.getLogger(__name__)
 # Pattern to match keyword:value syntax in search queries (with optional - prefix)
 _KEYWORD_PATTERN = re.compile(r"(-?)(agent:|dir:|date:)(\S+)")
 
+# Valid date keywords and pattern
+_VALID_DATE_KEYWORDS = {"today", "yesterday", "week", "month"}
+_DATE_PATTERN = re.compile(r"^([<>])?(\d+)(m|h|d|w|mo|y)$")
+
+
+def _is_valid_filter_value(keyword: str, value: str) -> bool:
+    """Check if a filter value is valid for the given keyword."""
+    check_value = value.lstrip("!")
+    values = [v.strip().lstrip("!") for v in check_value.split(",") if v.strip()]
+
+    if keyword == "agent:":
+        return all(v.lower() in AGENTS for v in values)
+    elif keyword == "date:":
+        for v in values:
+            v_lower = v.lower()
+            if v_lower not in _VALID_DATE_KEYWORDS and not _DATE_PATTERN.match(v_lower):
+                return False
+        return True
+    elif keyword == "dir:":
+        return True  # Any value is valid for directory
+    return True
+
+
 # Pattern to match agent: keyword specifically (for extraction/replacement)
 _AGENT_KEYWORD_PATTERN = re.compile(r"-?agent:(\S+)")
 
@@ -106,6 +129,7 @@ class KeywordHighlighter(Highlighter):
 
     Applies Rich styles directly to keyword prefixes and their values.
     Supports negation with - prefix or ! in value.
+    Invalid values are shown in red with strikethrough.
     """
 
     def highlight(self, text: Text) -> None:
@@ -113,14 +137,25 @@ class KeywordHighlighter(Highlighter):
         plain = text.plain
         for match in _KEYWORD_PATTERN.finditer(plain):
             neg_prefix = match.group(1)
+            keyword = match.group(2)
+            value = match.group(3)
+
+            is_valid = _is_valid_filter_value(keyword, value)
+
             # Style the negation prefix in red
             if neg_prefix:
                 text.stylize("bold red", match.start(1), match.end(1))
-            # Style the keyword prefix (agent:, dir:) in cyan bold
-            text.stylize("bold cyan", match.start(2), match.end(2))
-            # Style the value in green (or red if starts with !)
-            value = match.group(3)
-            if value.startswith("!"):
+
+            # Style the keyword prefix
+            if is_valid:
+                text.stylize("bold cyan", match.start(2), match.end(2))
+            else:
+                text.stylize("bold red", match.start(2), match.end(2))
+
+            # Style the value
+            if not is_valid:
+                text.stylize("red strike", match.start(3), match.end(3))
+            elif value.startswith("!"):
                 text.stylize("bold red", match.start(3), match.start(3) + 1)
                 text.stylize("green", match.start(3) + 1, match.end(3))
             else:
