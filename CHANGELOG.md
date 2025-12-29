@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/angristan/fast-resume/compare/v1.8.1...v1.9.0) (2025-12-29)
+
+
+### Features
+
+* **tui:** warn on invalid filter values with red strikethrough ([af11531](https://github.com/angristan/fast-resume/commit/af115313e0ffe9a68f9ad7dd8fd1e5af9a94eb64))
+
 ## [1.8.1](https://github.com/angristan/fast-resume/compare/v1.8.0...v1.8.1) (2025-12-29)
 
 
