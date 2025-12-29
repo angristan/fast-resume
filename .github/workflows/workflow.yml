@@ -58,10 +58,21 @@ jobs:
       - name: Run ruff format check
         run: uvx ruff format --check src/ tests/
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run ty type check
+        run: uvx ty check src/
+
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [commitlint, test, lint]
+    needs: [commitlint, test, lint, typecheck]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
       contents: write

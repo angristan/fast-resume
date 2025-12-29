@@ -9,12 +9,13 @@ from datetime import datetime
 
 from rich.text import Text
 from textual import on, work
-from textual.events import Click
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.events import Click
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Input, Static, Label
+from textual.timer import Timer
+from textual.widgets import DataTable, Footer, Input, Label
 from textual_image.widget import Image as ImageWidget
 
 from .. import __version__
@@ -116,9 +117,9 @@ class FastResumeApp(App):
         self._resume_command: list[str] | None = None
         self._resume_directory: str | None = None
         self._current_query: str = ""
-        self._filter_buttons: dict[str | None, Static] = {}
+        self._filter_buttons: dict[str | None, Horizontal] = {}
         self._total_loaded: int = 0
-        self._search_timer: object | None = None
+        self._search_timer: Timer | None = None
         self._available_update: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -581,6 +582,7 @@ class FastResumeApp(App):
         Determines whether to use yolo mode based on CLI flag, session state,
         or user selection via modal. Then calls `action(yolo_value)`.
         """
+        assert self.selected_session is not None
         adapter = self.search_engine.get_adapter_for_session(self.selected_session)
 
         # If CLI --yolo flag is set, always use yolo
@@ -609,6 +611,7 @@ class FastResumeApp(App):
 
     def _do_copy_command(self, yolo: bool) -> None:
         """Execute the copy command with specified yolo mode."""
+        assert self.selected_session is not None
         resume_cmd = self.search_engine.get_resume_command(
             self.selected_session, yolo=yolo
         )
@@ -666,6 +669,7 @@ class FastResumeApp(App):
 
     def _do_resume(self, yolo: bool) -> None:
         """Execute the resume with specified yolo mode."""
+        assert self.selected_session is not None
         self._resume_command = self.search_engine.get_resume_command(
             self.selected_session, yolo=yolo
         )
@@ -698,7 +702,7 @@ class FastResumeApp(App):
             next_index = 0
         self._set_filter(self.FILTER_KEYS[next_index])
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Quit the app, or dismiss modal if one is open."""
         if len(self.screen_stack) > 1:
             top_screen = self.screen_stack[-1]

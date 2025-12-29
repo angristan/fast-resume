@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import humanize
 from datetime import datetime
@@ -18,8 +19,8 @@ from ..config import AGENTS
 # Asset paths for agent icons
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
-# Cache for agent icon renderables
-_icon_cache: dict[str, ImageRenderable | None] = {}
+# Cache for agent icon renderables (textual_image has incomplete type stubs)
+_icon_cache: dict[str, Any] = {}
 
 
 def get_agent_icon(agent: str) -> RenderableType:
