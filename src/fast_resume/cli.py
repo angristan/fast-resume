@@ -60,15 +60,35 @@ def main(
     Search across Claude Code, Codex CLI, Copilot CLI, Crush, OpenCode, and Vibe sessions.
     Select a session to resume it with the appropriate agent.
 
+    Supports keyword search syntax:
+
+        agent:NAME    Filter by agent (e.g., agent:claude)
+
+        dir:PATH      Filter by directory substring (e.g., dir:my-project)
+
+        date:VALUE    Filter by date/time:
+
+                      today, yesterday, week, month
+
+                      <1h (within last hour), <2d (within 2 days)
+
+                      >1w (older than 1 week), >1mo (older than 1 month)
+
     Examples:
 
-        fr                    # Open TUI with all sessions
+        fr                              # Open TUI with all sessions
 
-        fr auth middleware    # Search for "auth middleware"
+        fr auth middleware              # Search for "auth middleware"
 
-        fr -a claude          # Only show Claude Code sessions
+        fr agent:claude api auth        # Search Claude sessions for "api auth"
 
-        fr --no-tui           # List sessions in terminal
+        fr date:<1d                     # Sessions from the last 24 hours
+
+        fr date:today agent:claude      # Today's Claude sessions
+
+        fr -a claude                    # Only show Claude Code sessions
+
+        fr --no-tui                     # List sessions in terminal
     """
     # Initialize logging for parse errors
     setup_logging()

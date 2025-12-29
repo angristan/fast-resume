@@ -1,6 +1,7 @@
 """Search engine for aggregating and searching sessions."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import timedelta
 from typing import Callable
 
 from .adapters import (
@@ -15,6 +16,7 @@ from .adapters import (
     VibeAdapter,
 )
 from .index import TantivyIndex
+from .query import DateFilter, DateOp, parse_query
 
 
 class SessionSearch:
@@ -191,6 +193,25 @@ class SessionSearch:
 
         return self._sessions, total_new, total_updated, total_deleted
 
+    def _matches_date_filter(self, session: Session, date_filter: DateFilter) -> bool:
+        """Check if a session matches the date filter."""
+        session_ts = session.timestamp
+
+        if date_filter.op == DateOp.LESS_THAN:
+            # Session must be newer than cutoff (within the time range)
+            return session_ts >= date_filter.cutoff
+        elif date_filter.op == DateOp.GREATER_THAN:
+            # Session must be older than cutoff
+            return session_ts < date_filter.cutoff
+        elif date_filter.op == DateOp.EXACT:
+            # For "today" or "yesterday", session must be on that day
+            if date_filter.value.lower() == "today":
+                return session_ts >= date_filter.cutoff
+            elif date_filter.value.lower() == "yesterday":
+                next_day = date_filter.cutoff + timedelta(days=1)
+                return date_filter.cutoff <= session_ts < next_day
+        return True
+
     def search(
         self,
         query: str,
@@ -198,31 +219,54 @@ class SessionSearch:
         directory_filter: str | None = None,
         limit: int = 100,
     ) -> list[Session]:
-        """Search sessions using Tantivy full-text search with fuzzy matching."""
+        """Search sessions using Tantivy full-text search with fuzzy matching.
+
+        Supports keyword syntax in the query:
+        - agent:value - Filter by agent
+        - dir:value - Filter by directory (substring match)
+        - date:value - Filter by date (today, yesterday, <1h, >1d, etc.)
+
+        Explicit filter parameters take precedence over keywords in the query.
+        """
+        # Parse keyword syntax from query
+        parsed = parse_query(query)
+        search_text = parsed.text
+
+        # Merge filters: explicit params take precedence over parsed keywords
+        effective_agent = agent_filter if agent_filter is not None else parsed.agent
+        effective_dir = (
+            directory_filter if directory_filter is not None else parsed.directory
+        )
+        date_filter = parsed.date
+
         # During streaming, _sessions_by_id is updated incrementally
         # Only call get_all_sessions() if not streaming and no sessions loaded yet
         if not self._streaming_in_progress and self._sessions is None:
             self.get_all_sessions()
 
         # If no query, return filtered sessions by timestamp
-        if not query:
+        if not search_text:
             sessions = sorted(
                 self._sessions_by_id.values(),
                 key=lambda s: s.timestamp,
                 reverse=True,
             )
-            if agent_filter:
-                sessions = [s for s in sessions if s.agent == agent_filter]
-            if directory_filter:
+            if effective_agent:
+                sessions = [s for s in sessions if s.agent == effective_agent]
+            if effective_dir:
                 sessions = [
-                    s
-                    for s in sessions
-                    if directory_filter.lower() in s.directory.lower()
+                    s for s in sessions if effective_dir.lower() in s.directory.lower()
+                ]
+            if date_filter:
+                sessions = [
+                    s for s in sessions if self._matches_date_filter(s, date_filter)
                 ]
             return sessions[:limit]
 
         # Use Tantivy for fuzzy search
-        results = self._index.search(query, agent_filter=agent_filter, limit=limit)
+        results = self._index.search(
+            search_text, agent_filter=effective_agent, limit=limit
+        )
 
         # Lookup full session objects from results
         matched_sessions = []
@@ -230,8 +274,12 @@ class SessionSearch:
             session = self._sessions_by_id.get(session_id)
             if session:
                 # Apply directory filter (substring match not supported in FTS)
-                if directory_filter:
-                    if directory_filter.lower() not in session.directory.lower():
+                if effective_dir:
+                    if effective_dir.lower() not in session.directory.lower():
+                        continue
+                # Apply date filter
+                if date_filter:
+                    if not self._matches_date_filter(session, date_filter):
                         continue
                 matched_sessions.append(session)
 

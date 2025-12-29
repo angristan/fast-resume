@@ -2,11 +2,13 @@
 
 import logging
 import os
+import re
 import shlex
 import time
 from collections.abc import Callable
 from datetime import datetime
 
+from rich.highlighter import Highlighter
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -36,6 +38,26 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Pattern to match keyword:value syntax in search queries
+_KEYWORD_PATTERN = re.compile(r"(agent:|dir:|date:)(\S+)")
+
+
+class KeywordHighlighter(Highlighter):
+    """Highlighter for search keyword syntax (agent:, dir:, date:).
+
+    Applies Rich styles directly to keyword prefixes and their values.
+    """
+
+    def highlight(self, text: Text) -> None:
+        """Apply highlighting to keyword syntax in the text."""
+        plain = text.plain
+        for match in _KEYWORD_PATTERN.finditer(plain):
+            # Style the keyword prefix (agent:, dir:) in cyan bold
+            text.stylize("bold cyan", match.start(1), match.end(1))
+            # Style the value in green
+            text.stylize("green", match.start(2), match.end(2))
 
 
 class FastResumeApp(App):
@@ -135,9 +157,10 @@ class FastResumeApp(App):
                 with Horizontal(id="search-box"):
                     yield Label("🔍", id="search-icon")
                     yield Input(
-                        placeholder="Search by title or messages...",
+                        placeholder="Search... (agent: dir: date:)",
                         id="search-input",
                         value=self.initial_query,
+                        highlighter=KeywordHighlighter(),
                     )
                     yield Label("", id="query-time")
 
