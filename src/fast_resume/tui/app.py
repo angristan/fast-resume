@@ -132,17 +132,9 @@ _PARTIAL_KEYWORD_PATTERN = re.compile(
     r"(-?)(agent:|dir:|date:)([^\s]*)$"  # Keyword at end, possibly partial value
 )
 
-# Known values for each keyword type
+# Known values for each keyword type (agent values derived from AGENTS config)
 _KEYWORD_VALUES = {
-    "agent:": [
-        "claude",
-        "codex",
-        "copilot-cli",
-        "copilot-vscode",
-        "crush",
-        "opencode",
-        "vibe",
-    ],
+    "agent:": list(AGENTS.keys()),
     "date:": ["today", "yesterday", "week", "month"],
     # dir: has no predefined values (user-specific paths)
 }
