@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/angristan/fast-resume/compare/v1.4.1...v1.4.2) (2025-12-29)
+
+
+### Bug Fixes
+
+* **ci:** install deps before running ty type checker ([066d4a1](https://github.com/angristan/fast-resume/commit/066d4a1d9d1d77486630e1ad137d068cc187ff4c))
+
 ## [1.4.1](https://github.com/angristan/fast-resume/compare/v1.4.0...v1.4.1) (2025-12-24)
 
 
