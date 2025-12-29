@@ -16,7 +16,7 @@ from .adapters import (
     VibeAdapter,
 )
 from .index import TantivyIndex
-from .query import DateFilter, DateOp, parse_query
+from .query import DateFilter, DateOp, Filter, parse_query
 
 
 class SessionSearch:
@@ -196,21 +196,27 @@ class SessionSearch:
     def _matches_date_filter(self, session: Session, date_filter: DateFilter) -> bool:
         """Check if a session matches the date filter."""
         session_ts = session.timestamp
+        match = False
 
         if date_filter.op == DateOp.LESS_THAN:
             # Session must be newer than cutoff (within the time range)
-            return session_ts >= date_filter.cutoff
+            match = session_ts >= date_filter.cutoff
         elif date_filter.op == DateOp.GREATER_THAN:
             # Session must be older than cutoff
-            return session_ts < date_filter.cutoff
+            match = session_ts < date_filter.cutoff
         elif date_filter.op == DateOp.EXACT:
             # For "today" or "yesterday", session must be on that day
             if date_filter.value.lower() == "today":
-                return session_ts >= date_filter.cutoff
+                match = session_ts >= date_filter.cutoff
             elif date_filter.value.lower() == "yesterday":
                 next_day = date_filter.cutoff + timedelta(days=1)
-                return date_filter.cutoff <= session_ts < next_day
-        return True
+                match = date_filter.cutoff <= session_ts < next_day
+            else:
+                match = True
+        else:
+            match = True
+
+        return not match if date_filter.negated else match
 
     def search(
         self,
@@ -222,7 +228,7 @@ class SessionSearch:
         """Search sessions using Tantivy full-text search with fuzzy matching.
 
         Supports keyword syntax in the query:
-        - agent:value - Filter by agent
+        - agent:value,value2 - Filter by agent (comma for OR, ! or - for NOT)
         - dir:value - Filter by directory (substring match)
         - date:value - Filter by date (today, yesterday, <1h, >1d, etc.)
 
@@ -233,10 +239,17 @@ class SessionSearch:
         search_text = parsed.text
 
         # Merge filters: explicit params take precedence over parsed keywords
-        effective_agent = agent_filter if agent_filter is not None else parsed.agent
-        effective_dir = (
-            directory_filter if directory_filter is not None else parsed.directory
-        )
+        # Convert string params to Filter objects for consistency
+        if agent_filter is not None:
+            effective_agent: Filter | None = Filter(include=[agent_filter])
+        else:
+            effective_agent = parsed.agent
+
+        if directory_filter is not None:
+            effective_dir: Filter | None = Filter(include=[directory_filter])
+        else:
+            effective_dir = parsed.directory
+
         date_filter = parsed.date
 
         # During streaming, _sessions_by_id is updated incrementally
@@ -252,10 +265,12 @@ class SessionSearch:
                 reverse=True,
             )
             if effective_agent:
-                sessions = [s for s in sessions if s.agent == effective_agent]
+                sessions = [s for s in sessions if effective_agent.matches(s.agent)]
             if effective_dir:
                 sessions = [
-                    s for s in sessions if effective_dir.lower() in s.directory.lower()
+                    s
+                    for s in sessions
+                    if effective_dir.matches(s.directory, substring=True)
                 ]
             if date_filter:
                 sessions = [
@@ -263,9 +278,20 @@ class SessionSearch:
                 ]
             return sessions[:limit]
 
+        # For Tantivy search, extract first agent value for index query (if not negated)
+        tantivy_agent = None
+        if (
+            effective_agent
+            and not effective_agent.negated
+            and len(effective_agent.values) == 1
+        ):
+            tantivy_agent = effective_agent.values[0]
+
         # Use Tantivy for fuzzy search
         results = self._index.search(
-            search_text, agent_filter=effective_agent, limit=limit
+            search_text,
+            agent_filter=tantivy_agent,
+            limit=limit * 2,  # Fetch extra for post-filtering
         )
 
         # Lookup full session objects from results
@@ -273,15 +299,21 @@ class SessionSearch:
         for session_id, _score in results:
             session = self._sessions_by_id.get(session_id)
             if session:
+                # Apply agent filter (for multi-value or negated filters)
+                if effective_agent and tantivy_agent is None:
+                    if not effective_agent.matches(session.agent):
+                        continue
                 # Apply directory filter (substring match not supported in FTS)
                 if effective_dir:
-                    if effective_dir.lower() not in session.directory.lower():
+                    if not effective_dir.matches(session.directory, substring=True):
                         continue
                 # Apply date filter
                 if date_filter:
                     if not self._matches_date_filter(session, date_filter):
                         continue
                 matched_sessions.append(session)
+                if len(matched_sessions) >= limit:
+                    break
 
         return matched_sessions[:limit]
 

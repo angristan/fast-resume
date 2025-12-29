@@ -62,33 +62,25 @@ def main(
 
     Supports keyword search syntax:
 
-        agent:NAME    Filter by agent (e.g., agent:claude)
+        agent:NAME       Filter by agent (e.g., agent:claude)
 
-        dir:PATH      Filter by directory substring (e.g., dir:my-project)
+        agent:A,B        Multiple values with OR (e.g., agent:claude,codex)
 
-        date:VALUE    Filter by date/time:
+        -agent:NAME      Exclude agent (or agent:!NAME)
 
-                      today, yesterday, week, month
+        dir:PATH         Filter by directory substring
 
-                      <1h (within last hour), <2d (within 2 days)
-
-                      >1w (older than 1 week), >1mo (older than 1 month)
+        date:VALUE       Filter by date/time (today, <1h, >1d, etc.)
 
     Examples:
 
-        fr                              # Open TUI with all sessions
+        fr agent:claude,codex api       # Claude OR Codex sessions
 
-        fr auth middleware              # Search for "auth middleware"
+        fr -agent:vibe                  # Exclude Vibe sessions
 
-        fr agent:claude api auth        # Search Claude sessions for "api auth"
+        fr date:<1d -agent:claude       # Last 24h, not Claude
 
-        fr date:<1d                     # Sessions from the last 24 hours
-
-        fr date:today agent:claude      # Today's Claude sessions
-
-        fr -a claude                    # Only show Claude Code sessions
-
-        fr --no-tui                     # List sessions in terminal
+        fr dir:project date:today       # Today's sessions in project
     """
     # Initialize logging for parse errors
     setup_logging()

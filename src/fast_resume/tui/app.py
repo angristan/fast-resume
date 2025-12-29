@@ -40,24 +40,34 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-# Pattern to match keyword:value syntax in search queries
-_KEYWORD_PATTERN = re.compile(r"(agent:|dir:|date:)(\S+)")
+# Pattern to match keyword:value syntax in search queries (with optional - prefix)
+_KEYWORD_PATTERN = re.compile(r"(-?)(agent:|dir:|date:)(\S+)")
 
 
 class KeywordHighlighter(Highlighter):
     """Highlighter for search keyword syntax (agent:, dir:, date:).
 
     Applies Rich styles directly to keyword prefixes and their values.
+    Supports negation with - prefix or ! in value.
     """
 
     def highlight(self, text: Text) -> None:
         """Apply highlighting to keyword syntax in the text."""
         plain = text.plain
         for match in _KEYWORD_PATTERN.finditer(plain):
+            neg_prefix = match.group(1)
+            # Style the negation prefix in red
+            if neg_prefix:
+                text.stylize("bold red", match.start(1), match.end(1))
             # Style the keyword prefix (agent:, dir:) in cyan bold
-            text.stylize("bold cyan", match.start(1), match.end(1))
-            # Style the value in green
-            text.stylize("green", match.start(2), match.end(2))
+            text.stylize("bold cyan", match.start(2), match.end(2))
+            # Style the value in green (or red if starts with !)
+            value = match.group(3)
+            if value.startswith("!"):
+                text.stylize("bold red", match.start(3), match.start(3) + 1)
+                text.stylize("green", match.start(3) + 1, match.end(3))
+            else:
+                text.stylize("green", match.start(3), match.end(3))
 
 
 class FastResumeApp(App):
