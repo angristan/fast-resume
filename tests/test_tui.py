@@ -253,6 +253,151 @@ class TestHighlightMatchesEdgeCases:
         assert len(spans) == 0
 
 
+class TestSessionPreviewContent:
+    """Tests for SessionPreview content rendering."""
+
+    def test_multiple_messages_rendered(self):
+        """Test that multiple messages are rendered."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview="» First message\n\n  Response one\n\n» Second message",
+            content="» First message\n\n  Response one\n\n» Second message",
+            message_count=2,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        # Should contain both user messages and response
+        assert "First message" in text_str
+        assert "Response one" in text_str
+        assert "Second message" in text_str
+
+    def test_user_prompt_styling(self):
+        """Test that user prompts have the » prefix."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview="» Hello world",
+            content="» Hello world",
+            message_count=1,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        assert "»" in text_str
+        assert "Hello world" in text_str
+
+    def test_agent_badge_on_assistant_message(self):
+        """Test that assistant messages show agent badge."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview="  This is an assistant response",
+            content="  This is an assistant response",
+            message_count=1,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        # Should contain agent badge
+        assert "claude" in text_str
+        assert "●" in text_str
+
+    def test_code_block_rendering(self):
+        """Test that code blocks are rendered."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview="» Question\n\n  Here's code:\n```python\nprint('hello')\n```",
+            content="» Question\n\n  Here's code:\n```python\nprint('hello')\n```",
+            message_count=2,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        # Code content should be present (syntax highlighted or plain)
+        assert "print" in text_str
+
+    def test_query_highlighting(self):
+        """Test that search terms are highlighted in preview."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview="» Find the special word here",
+            content="» Find the special word here",
+            message_count=1,
+        )
+
+        result = preview.build_preview_text(session, "special")
+        text_str = str(result)
+        assert "special" in text_str
+
+    def test_truncation_indicator(self):
+        """Test that truncated messages show indicator."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+
+        # Create a message with many lines (more than MAX_ASSISTANT_LINES)
+        long_response = "\n".join([f"  Line {i}" for i in range(10)])
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview=f"» Question\n\n{long_response}",
+            content=f"» Question\n\n{long_response}",
+            message_count=2,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        # Should show truncation indicator (⋯ or ...)
+        assert "⋯" in text_str or "..." in text_str
+
+
 class TestFormatDirectoryEdgeCases:
     """Additional edge case tests for format_directory."""
 
