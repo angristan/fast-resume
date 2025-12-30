@@ -1,3 +1,10 @@
+## [1.12.1](https://github.com/angristan/fast-resume/compare/v1.12.0...v1.12.1) (2025-12-30)
+
+
+### Bug Fixes
+
+* **modal:** enable tab key to toggle focus in yolo mode modal ([51609fe](https://github.com/angristan/fast-resume/commit/51609fe5666176f393f93e4ce49121fa272c19b8))
+
 # [1.12.0](https://github.com/angristan/fast-resume/compare/v1.11.0...v1.12.0) (2025-12-30)
 
 
