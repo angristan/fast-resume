@@ -1197,6 +1197,48 @@ class TestFastResumeAppYoloModal:
                 assert cmd is not None
                 assert "--dangerously-skip-permissions" in cmd
 
+    @pytest.mark.asyncio
+    async def test_tab_toggles_focus_in_modal(self, sample_sessions):
+        """Test that tab key toggles focus between buttons in yolo modal."""
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+        mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Press Enter to resume - should show modal
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # Initial focus should be on normal-btn
+                modal = app.screen
+                assert modal.focused.id == "normal-btn"
+
+                # Press tab to toggle focus to yolo-btn
+                await pilot.press("tab")
+                await pilot.pause()
+                assert modal.focused.id == "yolo-btn"
+
+                # Press tab again to toggle back to normal-btn
+                await pilot.press("tab")
+                await pilot.pause()
+                assert modal.focused.id == "normal-btn"
+
+                # Dismiss modal
+                await pilot.press("escape")
+                await pilot.pause()
+
 
 class TestFastResumeAppRunTui:
     """Tests for run_tui function integration."""

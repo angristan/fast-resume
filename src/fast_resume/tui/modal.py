@@ -35,10 +35,6 @@ class YoloModeModal(ModalScreen[bool]):
         """Focus the first button when modal opens."""
         self.query_one("#normal-btn", Button).focus()
 
-    def key_tab(self) -> None:
-        """Handle tab key to toggle focus."""
-        self.action_toggle_focus()
-
     def action_toggle_focus(self) -> None:
         """Toggle focus between the two buttons."""
         if self.focused and self.focused.id == "yolo-btn":

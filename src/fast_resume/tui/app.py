@@ -581,6 +581,10 @@ class FastResumeApp(App):
 
     def action_accept_suggestion(self) -> None:
         """Accept autocomplete suggestion in search input."""
+        # If a modal is open, let it handle tab for focus switching
+        if isinstance(self.screen, YoloModeModal):
+            self.screen.action_toggle_focus()
+            return
         search_input = self.query_one("#search-input", Input)
         if search_input._suggestion:
             search_input.action_cursor_right()
