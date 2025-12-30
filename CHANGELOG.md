@@ -1,3 +1,11 @@
+# [1.12.0](https://github.com/angristan/fast-resume/compare/v1.11.0...v1.12.0) (2025-12-30)
+
+
+### Features
+
+* **filter-bar:** hide agents without sessions ([7d4309f](https://github.com/angristan/fast-resume/commit/7d4309f89808fea898dbe32d0af7c94b6ac61f38))
+* **preview:** make preview pane scrollable ([c119dbc](https://github.com/angristan/fast-resume/commit/c119dbc8b4aaa5216596f4878ce736d43aad4dfa))
+
 # [1.11.0](https://github.com/angristan/fast-resume/compare/v1.10.0...v1.11.0) (2025-12-30)
 
 
