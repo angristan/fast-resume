@@ -372,11 +372,38 @@ class TestSessionPreviewContent:
         text_str = str(result)
         assert "special" in text_str
 
-    def test_truncation_indicator(self):
-        """Test that truncated messages show indicator."""
+    def test_no_truncation_by_default(self):
+        """Test that messages are not truncated by default (scrollable preview)."""
         from fast_resume.tui.preview import SessionPreview
 
         preview = SessionPreview()
+
+        # Create a message with many lines
+        long_response = "\n".join([f"  Line {i}" for i in range(10)])
+        session = Session(
+            id="test-session",
+            agent="claude",
+            title="Test Session",
+            directory="/test",
+            timestamp=datetime.now(),
+            preview=f"» Question\n\n{long_response}",
+            content=f"» Question\n\n{long_response}",
+            message_count=2,
+        )
+
+        result = preview.build_preview_text(session, "")
+        text_str = str(result)
+
+        # All lines should be present (no truncation by default)
+        for i in range(10):
+            assert f"Line {i}" in text_str
+
+    def test_truncation_when_enabled(self):
+        """Test that truncation works when MAX_ASSISTANT_LINES is set."""
+        from fast_resume.tui.preview import SessionPreview
+
+        preview = SessionPreview()
+        preview.MAX_ASSISTANT_LINES = 4  # Enable truncation
 
         # Create a message with many lines (more than MAX_ASSISTANT_LINES)
         long_response = "\n".join([f"  Line {i}" for i in range(10)])

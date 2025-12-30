@@ -45,8 +45,8 @@ class SessionPreview(Static):
 
     # Highlight style for matches in preview
     MATCH_STYLE = "bold reverse"
-    # Max lines to show for a single assistant message
-    MAX_ASSISTANT_LINES = 4
+    # Max lines to show for a single assistant message (None = no limit)
+    MAX_ASSISTANT_LINES: int | None = None
 
     # Pattern to match code blocks with optional language
     CODE_BLOCK_PATTERN = re.compile(r"```(\w*)")
@@ -85,18 +85,20 @@ class SessionPreview(Static):
                         best_pos = pos
 
             if best_pos != -1:
-                # Show context around the match (start 100 chars before, up to 1500 chars)
-                start = max(0, best_pos - 100)
-                end = min(len(content), start + 1500)
+                # Show context around the match (start 200 chars before, up to 5000 chars)
+                start = max(0, best_pos - 200)
+                end = min(len(content), start + 5000)
                 preview_text = content[start:end]
                 if start > 0:
                     preview_text = "..." + preview_text
                 if end < len(content):
                     preview_text = preview_text + "..."
 
-        # Fall back to regular preview if no match found
+        # Fall back to full content (limited) if no match found
         if not preview_text:
-            preview_text = session.preview
+            preview_text = content[:5000]
+            if len(content) > 5000:
+                preview_text += "..."
 
         # Get agent config and icon
         agent_config = AGENTS.get(
@@ -158,18 +160,20 @@ class SessionPreview(Static):
                         best_pos = pos
 
             if best_pos != -1:
-                # Show context around the match (start 100 chars before, up to 1500 chars)
-                start = max(0, best_pos - 100)
-                end = min(len(content), start + 1500)
+                # Show context around the match (start 200 chars before, up to 5000 chars)
+                start = max(0, best_pos - 200)
+                end = min(len(content), start + 5000)
                 preview_text = content[start:end]
                 if start > 0:
                     preview_text = "..." + preview_text
                 if end < len(content):
                     preview_text = preview_text + "..."
 
-        # Fall back to regular preview if no match found
+        # Fall back to full content (limited) if no match found
         if not preview_text:
-            preview_text = session.preview
+            preview_text = content[:5000]
+            if len(content) > 5000:
+                preview_text += "..."
 
         # Build rich text with role-based styling
         result = Text()
@@ -208,8 +212,12 @@ class SessionPreview(Static):
         """Render a single message with code block syntax highlighting."""
         lines = msg.split("\n")
 
-        # Truncate assistant messages
-        if not is_user and len(lines) > self.MAX_ASSISTANT_LINES:
+        # Truncate assistant messages if limit is set
+        if (
+            not is_user
+            and self.MAX_ASSISTANT_LINES is not None
+            and len(lines) > self.MAX_ASSISTANT_LINES
+        ):
             lines = lines[: self.MAX_ASSISTANT_LINES]
             lines.append("...")
 
@@ -295,8 +303,11 @@ class SessionPreview(Static):
         """Render assistant message content without badge (icon shown separately)."""
         lines = msg.split("\n")
 
-        # Truncate assistant messages
-        if len(lines) > self.MAX_ASSISTANT_LINES:
+        # Truncate assistant messages if limit is set
+        if (
+            self.MAX_ASSISTANT_LINES is not None
+            and len(lines) > self.MAX_ASSISTANT_LINES
+        ):
             lines = lines[: self.MAX_ASSISTANT_LINES]
             lines.append("...")
 

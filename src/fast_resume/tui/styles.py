@@ -252,8 +252,7 @@ DataTable > .datatable--hover {
 }
 
 #preview {
-    height: 100%;
-    overflow-y: auto;
+    height: auto;
 }
 
 /* Agent colors */

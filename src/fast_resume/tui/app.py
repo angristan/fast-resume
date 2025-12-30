@@ -10,7 +10,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Label
@@ -121,7 +121,7 @@ class FastResumeApp(App):
             with Vertical(id="main-container"):
                 with Vertical(id="results-container"):
                     yield ResultsTable(id="results-table")
-                with Vertical(id="preview-container"):
+                with VerticalScroll(id="preview-container"):
                     yield SessionPreview()
         yield Footer()
 
