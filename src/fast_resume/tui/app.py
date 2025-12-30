@@ -2,233 +2,32 @@
 
 import logging
 import os
-import re
 import shlex
 import time
 from collections.abc import Callable
-from datetime import datetime
 
-from rich.highlighter import Highlighter
-from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.events import Click
 from textual.reactive import reactive
-from textual.suggester import Suggester
 from textual.timer import Timer
-from textual.widgets import DataTable, Footer, Input, Label
-from textual_image.widget import Image as ImageWidget
+from textual.widgets import Footer, Input, Label
 
 from .. import __version__
 from ..adapters.base import ParseError, Session
-from ..config import AGENTS, LOG_FILE
+from ..config import LOG_FILE
 from ..search import SessionSearch
+from .filter_bar import FILTER_KEYS, FilterBar
 from .modal import YoloModeModal
 from .preview import SessionPreview
+from .query import extract_agent_from_query, update_agent_in_query
+from .results_table import ResultsTable
+from .search_input import KeywordHighlighter, KeywordSuggester
 from .styles import APP_CSS
-from .utils import (
-    ASSETS_DIR,
-    copy_to_clipboard,
-    format_directory,
-    format_time_ago,
-    get_age_color,
-    get_agent_icon,
-    highlight_matches,
-)
+from .utils import copy_to_clipboard
 
 logger = logging.getLogger(__name__)
-
-
-# Pattern to match keyword:value syntax in search queries (with optional - prefix)
-_KEYWORD_PATTERN = re.compile(r"(-?)(agent:|dir:|date:)(\S+)")
-
-# Valid date keywords and pattern
-_VALID_DATE_KEYWORDS = {"today", "yesterday", "week", "month"}
-_DATE_PATTERN = re.compile(r"^([<>])?(\d+)(m|h|d|w|mo|y)$")
-
-
-def _is_valid_filter_value(keyword: str, value: str) -> bool:
-    """Check if a filter value is valid for the given keyword."""
-    check_value = value.lstrip("!")
-    values = [v.strip().lstrip("!") for v in check_value.split(",") if v.strip()]
-
-    if keyword == "agent:":
-        return all(v.lower() in AGENTS for v in values)
-    elif keyword == "date:":
-        for v in values:
-            v_lower = v.lower()
-            if v_lower not in _VALID_DATE_KEYWORDS and not _DATE_PATTERN.match(v_lower):
-                return False
-        return True
-    elif keyword == "dir:":
-        return True  # Any value is valid for directory
-    return True
-
-
-# Pattern to match agent: keyword specifically (for extraction/replacement)
-_AGENT_KEYWORD_PATTERN = re.compile(r"-?agent:(\S+)")
-
-
-def _extract_agent_from_query(query: str) -> str | None:
-    """Extract agent value from query string if present.
-
-    Returns the first non-negated agent value, or None if no agent keyword.
-    For mixed filters like agent:claude,!codex, returns 'claude'.
-    """
-    match = _AGENT_KEYWORD_PATTERN.search(query)
-    if not match:
-        return None
-
-    # Check if the whole keyword is negated with - prefix
-    full_match = match.group(0)
-    if full_match.startswith("-"):
-        return None  # Negated filter, don't sync to buttons
-
-    value = match.group(1)
-    # Handle ! prefix on value
-    if value.startswith("!"):
-        return None  # Negated, don't sync
-
-    # Get first non-negated value from comma-separated list
-    for v in value.split(","):
-        v = v.strip()
-        if v and not v.startswith("!"):
-            return v
-
-    return None
-
-
-def _update_agent_in_query(query: str, agent: str | None) -> str:
-    """Update or remove agent keyword in query string.
-
-    Args:
-        query: Current query string
-        agent: Agent to set, or None to remove agent keyword
-
-    Returns:
-        Updated query string with agent keyword added/updated/removed.
-    """
-    # Remove existing agent keyword(s)
-    query_without_agent = _AGENT_KEYWORD_PATTERN.sub("", query).strip()
-    # Clean up extra whitespace
-    query_without_agent = " ".join(query_without_agent.split())
-
-    if agent is None:
-        return query_without_agent
-
-    # Append agent keyword at the end
-    if query_without_agent:
-        return f"{query_without_agent} agent:{agent}"
-    return f"agent:{agent}"
-
-
-class KeywordHighlighter(Highlighter):
-    """Highlighter for search keyword syntax (agent:, dir:, date:).
-
-    Applies Rich styles directly to keyword prefixes and their values.
-    Supports negation with - prefix or ! in value.
-    Invalid values are shown in red with strikethrough.
-    """
-
-    def highlight(self, text: Text) -> None:
-        """Apply highlighting to keyword syntax in the text."""
-        plain = text.plain
-        for match in _KEYWORD_PATTERN.finditer(plain):
-            neg_prefix = match.group(1)
-            keyword = match.group(2)
-            value = match.group(3)
-
-            is_valid = _is_valid_filter_value(keyword, value)
-
-            # Style the negation prefix in red
-            if neg_prefix:
-                text.stylize("bold red", match.start(1), match.end(1))
-
-            # Style the keyword prefix
-            if is_valid:
-                text.stylize("bold cyan", match.start(2), match.end(2))
-            else:
-                text.stylize("bold red", match.start(2), match.end(2))
-
-            # Style the value
-            if not is_valid:
-                text.stylize("red strike", match.start(3), match.end(3))
-            elif value.startswith("!"):
-                text.stylize("bold red", match.start(3), match.start(3) + 1)
-                text.stylize("green", match.start(3) + 1, match.end(3))
-            else:
-                text.stylize("green", match.start(3), match.end(3))
-
-
-# Pattern to match partial keyword at end of input for autocomplete
-_PARTIAL_KEYWORD_PATTERN = re.compile(
-    r"(-?)(agent:|dir:|date:)([^\s]*)$"  # Keyword at end, possibly partial value
-)
-
-# Known values for each keyword type (agent values derived from AGENTS config)
-_KEYWORD_VALUES = {
-    "agent:": list(AGENTS.keys()),
-    "date:": ["today", "yesterday", "week", "month"],
-    # dir: has no predefined values (user-specific paths)
-}
-
-
-class KeywordSuggester(Suggester):
-    """Suggester for keyword value autocomplete.
-
-    Provides completions for:
-    - agent: values (claude, codex, etc.)
-    - date: values (today, yesterday, week, month)
-    """
-
-    def __init__(self) -> None:
-        super().__init__(use_cache=True, case_sensitive=False)
-
-    async def get_suggestion(self, value: str) -> str | None:
-        """Get completion suggestion for the current input.
-
-        Args:
-            value: Current input text (casefolded if case_sensitive=False)
-
-        Returns:
-            Complete input with suggested value, or None if no suggestion.
-        """
-        # Find partial keyword at end of input
-        match = _PARTIAL_KEYWORD_PATTERN.search(value)
-        if not match:
-            return None
-
-        keyword = match.group(2)  # agent:, dir:, date:
-        partial = match.group(3)  # Partial value typed so far
-
-        # Get known values for this keyword
-        known_values = _KEYWORD_VALUES.get(keyword)
-        if not known_values:
-            return None
-
-        # Don't suggest if value is empty (user just typed "agent:")
-        if not partial:
-            return None
-
-        # Handle ! prefix on partial value
-        negated_value = partial.startswith("!")
-        search_partial = partial[1:] if negated_value else partial
-
-        # Find first matching value (but not exact match - already complete)
-        for candidate in known_values:
-            if candidate.lower().startswith(search_partial.lower()):
-                # Skip if already complete (no suggestion needed)
-                if candidate.lower() == search_partial.lower():
-                    continue
-                # Build the suggestion
-                suggested_value = f"!{candidate}" if negated_value else candidate
-                # Replace partial with full value
-                suggestion = value[: match.start(3)] + suggested_value
-                return suggestion
-
-        return None
 
 
 class FastResumeApp(App):
@@ -239,29 +38,6 @@ class FastResumeApp(App):
     SUB_TITLE = "Session manager"
 
     CSS = APP_CSS
-
-    FILTER_KEYS: list[str | None] = [
-        None,
-        "claude",
-        "codex",
-        "copilot-cli",
-        "copilot-vscode",
-        "crush",
-        "opencode",
-        "vibe",
-    ]
-
-    # Map button IDs to filter values
-    _FILTER_ID_MAP: dict[str, str | None] = {
-        "filter-all": None,
-        "filter-claude": "claude",
-        "filter-codex": "codex",
-        "filter-copilot-cli": "copilot-cli",
-        "filter-copilot-vscode": "copilot-vscode",
-        "filter-crush": "crush",
-        "filter-opencode": "opencode",
-        "filter-vibe": "vibe",
-    }
 
     BINDINGS = [
         Binding("escape", "quit", "Quit", priority=True),
@@ -306,11 +82,9 @@ class FastResumeApp(App):
         self.agent_filter = agent_filter
         self.yolo = yolo
         self.sessions: list[Session] = []
-        self._displayed_sessions: list[Session] = []
         self._resume_command: list[str] | None = None
         self._resume_directory: str | None = None
         self._current_query: str = ""
-        self._filter_buttons: dict[str | None, Horizontal] = {}
         self._total_loaded: int = 0
         self._search_timer: Timer | None = None
         self._available_update: str | None = None
@@ -337,56 +111,21 @@ class FastResumeApp(App):
                     )
                     yield Label("", id="query-time")
 
-            # Agent filter buttons - pill style with icons
-            with Horizontal(id="filter-container"):
-                for filter_key in self.FILTER_KEYS:
-                    filter_label = AGENTS[filter_key]["badge"] if filter_key else "All"
-                    btn_id = f"filter-{filter_key or 'all'}"
-                    with Horizontal(id=btn_id, classes="filter-btn") as btn_container:
-                        if filter_key:
-                            icon_path = ASSETS_DIR / f"{filter_key}.png"
-                            if icon_path.exists():
-                                yield ImageWidget(icon_path, classes="filter-icon")
-                            yield Label(
-                                filter_label, classes=f"filter-label agent-{filter_key}"
-                            )
-                        else:
-                            yield Label(filter_label, classes="filter-label")
-                    self._filter_buttons[filter_key] = btn_container
+            # Agent filter buttons
+            yield FilterBar(initial_filter=self.agent_filter, id="filter-container")
 
             # Main content area
             with Vertical(id="main-container"):
                 with Vertical(id="results-container"):
-                    yield DataTable(
-                        id="results-table",
-                        cursor_type="row",
-                        cursor_background_priority="renderable",
-                        cursor_foreground_priority="renderable",
-                    )
+                    yield ResultsTable(id="results-table")
                 with Vertical(id="preview-container"):
                     yield SessionPreview()
         yield Footer()
 
     def on_mount(self) -> None:
         """Set up the app when mounted."""
-        table = self.query_one("#results-table", DataTable)
-        (
-            self._col_agent,
-            self._col_title,
-            self._col_dir,
-            self._col_msgs,
-            self._col_date,
-        ) = table.add_columns("Agent", "Title", "Directory", "Turns", "Date")
-
-        # Initialize column widths immediately based on current size
-        self._update_column_widths()
-
-        # Also update after layout is fully ready (in case size changes)
-        self.call_after_refresh(self._update_column_widths)
-
         # Set initial filter state from agent_filter parameter
         self.active_filter = self.agent_filter
-        self._update_filter_buttons()
 
         # Focus search input
         self.query_one("#search-input", Input).focus()
@@ -400,10 +139,15 @@ class FastResumeApp(App):
         # Check for updates asynchronously
         self._check_for_updates()
 
+    # -------------------------------------------------------------------------
+    # Loading logic
+    # -------------------------------------------------------------------------
+
     def _initial_load(self) -> None:
         """Load sessions - sync if index is current, async with streaming otherwise."""
         # Try to get sessions directly from index (fast path)
         sessions = self.search_engine._load_from_index()
+        table = self.query_one(ResultsTable)
         if sessions is not None:
             # Index is current - load synchronously, no flicker
             self.search_engine._sessions = sessions
@@ -414,20 +158,14 @@ class FastResumeApp(App):
             )
             self.query_time_ms = (time.perf_counter() - start_time) * 1000
             self._finish_loading()
-            self._update_table()
+            self.selected_session = table.update_sessions(
+                self.sessions, self._current_query
+            )
         else:
             # Index needs update - show loading and fetch with streaming
-            self._update_table()
+            table.update_sessions([], self._current_query)
             self._update_session_count()
             self._do_streaming_load()
-
-    def _update_filter_buttons(self) -> None:
-        """Update filter button active states."""
-        for filter_key, btn in self._filter_buttons.items():
-            if filter_key == self.active_filter:
-                btn.add_class("-active")
-            else:
-                btn.remove_class("-active")
 
     def _update_spinner(self) -> None:
         """Advance spinner animation in search icon."""
@@ -458,44 +196,6 @@ class FastResumeApp(App):
                 time_label.update(f"{self.query_time_ms:.1f}ms")
             else:
                 time_label.update("")
-
-    def on_resize(self) -> None:
-        """Handle terminal resize."""
-        if hasattr(self, "_col_agent"):
-            self._update_column_widths()
-            # Re-render rows with new truncation widths
-            if self.sessions:
-                self._update_table()
-
-    # Column width breakpoints: (min_width, agent, dir, msgs, date)
-    _COL_WIDTHS = [
-        (120, 12, 30, 6, 18),  # Wide
-        (90, 12, 22, 5, 15),  # Medium
-        (60, 12, 16, 5, 12),  # Narrow
-        (0, 11, 0, 4, 10),  # Very narrow (hide directory)
-    ]
-
-    def _update_column_widths(self) -> None:
-        """Update column widths based on terminal size."""
-        table = self.query_one("#results-table", DataTable)
-        width = self.size.width
-
-        # Find appropriate breakpoint
-        agent_w, dir_w, msgs_w, date_w = next(
-            (a, d, m, t) for min_w, a, d, m, t in self._COL_WIDTHS if width >= min_w
-        )
-        title_w = max(15, width - agent_w - dir_w - msgs_w - date_w - 8)
-
-        for col in table.columns.values():
-            col.auto_width = False
-        table.columns[self._col_agent].width = agent_w
-        table.columns[self._col_title].width = title_w
-        table.columns[self._col_dir].width = dir_w
-        table.columns[self._col_msgs].width = msgs_w
-        table.columns[self._col_date].width = date_w
-
-        self._title_width, self._dir_width = title_w, dir_w
-        table.refresh()
 
     @work(exclusive=True, thread=True)
     def _do_streaming_load(self) -> None:
@@ -528,14 +228,15 @@ class FastResumeApp(App):
         )
 
     def _update_results_streaming(
-        self, sessions: list[Session], total: int, elapsed_ms: float | None = None
+        self, sessions: list, total: int, elapsed_ms: float | None = None
     ) -> None:
         """Update UI with streaming results (keeps loading state)."""
         self.sessions = sessions
         self._total_loaded = total
         if elapsed_ms is not None:
             self.query_time_ms = elapsed_ms
-        self._update_table()
+        table = self.query_one(ResultsTable)
+        self.selected_session = table.update_sessions(sessions, self._current_query)
         self._update_session_count()
 
     def _finish_loading(
@@ -583,6 +284,35 @@ class FastResumeApp(App):
                 timeout=5,
             )
 
+    @work(thread=True)
+    def _check_for_updates(self) -> None:
+        """Check PyPI for newer version and notify if available."""
+        import json
+        import urllib.request
+
+        from .. import __version__
+
+        try:
+            url = "https://pypi.org/pypi/fast-resume/json"
+            with urllib.request.urlopen(url, timeout=3) as response:
+                data = json.load(response)
+                latest = data["info"]["version"]
+
+            if latest != __version__:
+                self._available_update = latest
+                self.call_from_thread(
+                    self.notify,
+                    f"{__version__} → {latest}\nRun [bold]uv tool upgrade fast-resume[/bold] to update",
+                    title="Update available",
+                    timeout=5,
+                )
+        except Exception:
+            pass  # Silently ignore update check failures
+
+    # -------------------------------------------------------------------------
+    # Search logic
+    # -------------------------------------------------------------------------
+
     @work(exclusive=True, thread=True)
     def _do_search(self, query: str) -> None:
         """Perform search and update results in background thread."""
@@ -605,100 +335,26 @@ class FastResumeApp(App):
         # Only stop loading spinner if streaming indexing is also done
         if not self.search_engine._streaming_in_progress:
             self.is_loading = False
-        self._update_table()
+        table = self.query_one(ResultsTable)
+        self.selected_session = table.update_sessions(sessions, self._current_query)
         self._update_session_count()
-
-    @work(thread=True)
-    def _check_for_updates(self) -> None:
-        """Check PyPI for newer version and notify if available."""
-        import json
-        import urllib.request
-
-        try:
-            url = "https://pypi.org/pypi/fast-resume/json"
-            with urllib.request.urlopen(url, timeout=3) as response:
-                data = json.load(response)
-                latest = data["info"]["version"]
-
-            logger.debug(f"Update check: current={__version__}, latest={latest}")
-
-            if latest != __version__:
-                logger.info(f"Update available: {__version__} → {latest}")
-                self._available_update = latest
-                self.call_from_thread(
-                    self.notify,
-                    f"{__version__} → {latest}\nRun [bold]uv tool upgrade fast-resume[/bold] to update",
-                    title="Update available",
-                    timeout=5,
-                )
-        except Exception as e:
-            logger.debug(f"Update check failed: {e}")
-
-    def _update_table(self) -> None:
-        """Update the results table with current sessions."""
-        table = self.query_one("#results-table", DataTable)
-        table.clear()
-
-        if not self.sessions:
-            # Show empty state message
-            table.add_row(
-                "",
-                Text("No sessions found", style="dim italic"),
-                "",
-                "",
-                "",
-            )
-            self._displayed_sessions = []
-            return
-
-        # Store for selection tracking
-        self._displayed_sessions = self.sessions
-
-        for session in self._displayed_sessions:
-            # Get agent icon (image or text fallback)
-            icon = get_agent_icon(session.agent)
-
-            # Title - truncate and highlight matches
-            max_title = getattr(self, "_title_width", 60)
-            title = highlight_matches(
-                session.title, self._current_query, max_len=max_title
-            )
-
-            # Format directory - truncate based on column width
-            dir_w = getattr(self, "_dir_width", 22)
-            directory = format_directory(session.directory)
-            if dir_w > 0 and len(directory) > dir_w:
-                directory = "..." + directory[-(dir_w - 3) :]
-            dir_text = (
-                highlight_matches(directory, self._current_query)
-                if dir_w > 0
-                else Text("")
-            )
-
-            # Format message count
-            msgs_text = str(session.message_count) if session.message_count > 0 else "-"
-
-            # Format time with age-based gradient coloring
-            time_ago = format_time_ago(session.timestamp)
-            time_text = Text(time_ago.rjust(8))
-            age_hours = (datetime.now() - session.timestamp).total_seconds() / 3600
-            time_text.stylize(get_age_color(age_hours))
-
-            table.add_row(icon, title, dir_text, msgs_text, time_text)
-
-        # Select first row if available
-        if self._displayed_sessions:
-            table.move_cursor(row=0)
-            self._update_selected_session()
 
     def _update_selected_session(self) -> None:
         """Update the selected session based on cursor position."""
-        table = self.query_one("#results-table", DataTable)
-        displayed = getattr(self, "_displayed_sessions", self.sessions)
-        if table.cursor_row is not None and table.cursor_row < len(displayed):
-            self.selected_session = displayed[table.cursor_row]
+        table = self.query_one(ResultsTable)
+        session = table.get_selected_session()
+        if session:
+            self.selected_session = session
             preview = self.query_one(SessionPreview)
-            preview.update_preview(self.selected_session, self._current_query)
+            preview.update_preview(session, self._current_query)
+
+    @on(ResultsTable.Selected)
+    def on_results_table_selected(self, event: ResultsTable.Selected) -> None:
+        """Handle session selection in results table."""
+        if event.session:
+            self.selected_session = event.session
+            preview = self.query_one(SessionPreview)
+            preview.update_preview(event.session, self._current_query)
 
     @on(Input.Changed, "#search-input")
     def on_search_changed(self, event: Input.Changed) -> None:
@@ -710,14 +366,14 @@ class FastResumeApp(App):
 
         # Sync filter buttons with agent keyword in query (if not already syncing)
         if not self._syncing_filter:
-            agent_in_query = _extract_agent_from_query(event.value)
+            agent_in_query = extract_agent_from_query(event.value)
             # Only sync if the extracted agent is different from current filter
             if agent_in_query != self.active_filter:
                 # Check if this is a valid agent
-                if agent_in_query is None or agent_in_query in self.FILTER_KEYS:
+                if agent_in_query is None or agent_in_query in FILTER_KEYS:
                     self._syncing_filter = True
                     self.active_filter = agent_in_query
-                    self._update_filter_buttons()
+                    self.query_one(FilterBar).set_active(agent_in_query)
                     self._syncing_filter = False
 
         # Debounce: wait 50ms before triggering search
@@ -735,51 +391,9 @@ class FastResumeApp(App):
         """Handle search submission - resume selected session."""
         self.action_resume_session()
 
-    @on(DataTable.RowHighlighted)
-    def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        """Handle cursor movement in results table."""
-        self._update_selected_session()
-
-    def action_focus_search(self) -> None:
-        """Focus the search input."""
-        self.query_one("#search-input", Input).focus()
-
-    def action_toggle_preview(self) -> None:
-        """Toggle the preview pane."""
-        self.show_preview = not self.show_preview
-        preview_container = self.query_one("#preview-container")
-        if self.show_preview:
-            preview_container.remove_class("hidden")
-        else:
-            preview_container.add_class("hidden")
-
-    def action_cursor_down(self) -> None:
-        """Move cursor down in results."""
-        table = self.query_one("#results-table", DataTable)
-        table.action_cursor_down()
-        self._update_selected_session()
-
-    def action_cursor_up(self) -> None:
-        """Move cursor up in results."""
-        table = self.query_one("#results-table", DataTable)
-        table.action_cursor_up()
-        self._update_selected_session()
-
-    def action_page_down(self) -> None:
-        """Move cursor down by a page."""
-        table = self.query_one("#results-table", DataTable)
-        # Move down by ~10 rows (approximate page)
-        for _ in range(10):
-            table.action_cursor_down()
-        self._update_selected_session()
-
-    def action_page_up(self) -> None:
-        """Move cursor up by a page."""
-        table = self.query_one("#results-table", DataTable)
-        # Move up by ~10 rows (approximate page)
-        for _ in range(10):
-            table.action_cursor_up()
-        self._update_selected_session()
+    # -------------------------------------------------------------------------
+    # Resume logic
+    # -------------------------------------------------------------------------
 
     def _resolve_yolo_mode(
         self,
@@ -842,23 +456,6 @@ class FastResumeApp(App):
         if result is not None:
             self._do_copy_command(yolo=result)
 
-    def action_increase_preview(self) -> None:
-        """Increase preview pane height."""
-        if self.preview_height < 30:
-            self.preview_height += 3
-            self._apply_preview_height()
-
-    def action_decrease_preview(self) -> None:
-        """Decrease preview pane height."""
-        if self.preview_height > 6:
-            self.preview_height -= 3
-            self._apply_preview_height()
-
-    def _apply_preview_height(self) -> None:
-        """Apply the current preview height to the container."""
-        preview_container = self.query_one("#preview-container")
-        preview_container.styles.height = self.preview_height
-
     def action_resume_session(self) -> None:
         """Resume the selected session."""
         if not self.selected_session:
@@ -890,16 +487,74 @@ class FastResumeApp(App):
         if result is not None:
             self._do_resume(yolo=result)
 
+    # -------------------------------------------------------------------------
+    # UI actions
+    # -------------------------------------------------------------------------
+
+    def action_focus_search(self) -> None:
+        """Focus the search input."""
+        self.query_one("#search-input", Input).focus()
+
+    def action_toggle_preview(self) -> None:
+        """Toggle the preview pane."""
+        self.show_preview = not self.show_preview
+        preview_container = self.query_one("#preview-container")
+        if self.show_preview:
+            preview_container.remove_class("hidden")
+        else:
+            preview_container.add_class("hidden")
+
+    def action_cursor_down(self) -> None:
+        """Move cursor down in results."""
+        table = self.query_one(ResultsTable)
+        table.action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        """Move cursor up in results."""
+        table = self.query_one(ResultsTable)
+        table.action_cursor_up()
+
+    def action_page_down(self) -> None:
+        """Move cursor down by a page."""
+        table = self.query_one(ResultsTable)
+        # Move down by ~10 rows (approximate page)
+        for _ in range(10):
+            table.action_cursor_down()
+
+    def action_page_up(self) -> None:
+        """Move cursor up by a page."""
+        table = self.query_one(ResultsTable)
+        # Move up by ~10 rows (approximate page)
+        for _ in range(10):
+            table.action_cursor_up()
+
+    def action_increase_preview(self) -> None:
+        """Increase preview pane height."""
+        if self.preview_height < 30:
+            self.preview_height += 3
+            self._apply_preview_height()
+
+    def action_decrease_preview(self) -> None:
+        """Decrease preview pane height."""
+        if self.preview_height > 6:
+            self.preview_height -= 3
+            self._apply_preview_height()
+
+    def _apply_preview_height(self) -> None:
+        """Apply the current preview height to the container."""
+        preview_container = self.query_one("#preview-container")
+        preview_container.styles.height = self.preview_height
+
     def _set_filter(self, agent: str | None) -> None:
         """Set the agent filter and refresh results, syncing query string."""
         self.active_filter = agent
-        self._update_filter_buttons()
+        self.query_one(FilterBar).set_active(agent)
 
         # Update search input to reflect the new filter (if not already syncing)
         if not self._syncing_filter:
             self._syncing_filter = True
             search_input = self.query_one("#search-input", Input)
-            new_query = _update_agent_in_query(search_input.value, agent)
+            new_query = update_agent_in_query(search_input.value, agent)
             if new_query != search_input.value:
                 search_input.value = new_query
                 self._current_query = new_query
@@ -916,11 +571,11 @@ class FastResumeApp(App):
     def action_cycle_filter(self) -> None:
         """Cycle to the next agent filter."""
         try:
-            current_index = self.FILTER_KEYS.index(self.active_filter)
-            next_index = (current_index + 1) % len(self.FILTER_KEYS)
+            current_index = FILTER_KEYS.index(self.active_filter)
+            next_index = (current_index + 1) % len(FILTER_KEYS)
         except ValueError:
             next_index = 0
-        self._set_filter(self.FILTER_KEYS[next_index])
+        self._set_filter(FILTER_KEYS[next_index])
 
     async def action_quit(self) -> None:
         """Quit the app, or dismiss modal if one is open."""
@@ -931,15 +586,10 @@ class FastResumeApp(App):
             return
         self.exit()
 
-    @on(Click, ".filter-btn")
-    def on_filter_click(self, event: Click) -> None:
-        """Handle click on filter buttons."""
-        # Walk up to find the filter-btn container (click might be on child widget)
-        widget = event.widget
-        while widget and "filter-btn" not in widget.classes:
-            widget = widget.parent
-        if widget and widget.id in self._FILTER_ID_MAP:
-            self._set_filter(self._FILTER_ID_MAP[widget.id])
+    @on(FilterBar.Changed)
+    def on_filter_bar_changed(self, event: FilterBar.Changed) -> None:
+        """Handle filter bar selection change."""
+        self._set_filter(event.filter_key)
 
     def get_resume_command(self) -> list[str] | None:
         """Get the resume command to execute after exit."""
@@ -948,3 +598,11 @@ class FastResumeApp(App):
     def get_resume_directory(self) -> str | None:
         """Get the directory to change to before running the resume command."""
         return self._resume_directory
+
+    @property
+    def _displayed_sessions(self) -> list[Session]:
+        """Get currently displayed sessions (for backward compatibility)."""
+        try:
+            return self.query_one(ResultsTable).displayed_sessions
+        except Exception:
+            return []

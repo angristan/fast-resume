@@ -1,7 +1,8 @@
 """TUI package for fast-resume."""
 
 from .. import __version__
-from .app import FastResumeApp, KeywordSuggester
+from .app import FastResumeApp
+from .search_input import KeywordSuggester
 from .modal import YoloModeModal
 from .preview import SessionPreview
 from .utils import (
