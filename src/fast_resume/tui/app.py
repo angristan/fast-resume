@@ -75,12 +75,14 @@ class FastResumeApp(App):
         initial_query: str = "",
         agent_filter: str | None = None,
         yolo: bool = False,
+        no_version_check: bool = False,
     ):
         super().__init__()
         self.search_engine = SessionSearch()
         self.initial_query = initial_query
         self.agent_filter = agent_filter
         self.yolo = yolo
+        self.no_version_check = no_version_check
         self.sessions: list[Session] = []
         self._resume_command: list[str] | None = None
         self._resume_directory: str | None = None
@@ -136,8 +138,9 @@ class FastResumeApp(App):
         # Try fast sync load first (index hit), fall back to async
         self._initial_load()
 
-        # Check for updates asynchronously
-        self._check_for_updates()
+        # Check for updates asynchronously (unless disabled)
+        if not self.no_version_check:
+            self._check_for_updates()
 
     # -------------------------------------------------------------------------
     # Loading logic

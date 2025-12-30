@@ -354,6 +354,32 @@ class TestFastResumeAppBasic:
                 assert app.is_running
 
     @pytest.mark.asyncio
+    async def test_no_version_check_skips_update_check(self, mock_search_engine):
+        """Test that no_version_check=True skips the version check."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp(no_version_check=True)
+            with patch.object(app, "_check_for_updates") as mock_check:
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+                    # Version check should not have been called
+                    mock_check.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_version_check_runs_by_default(self, mock_search_engine):
+        """Test that version check runs when no_version_check=False."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp(no_version_check=False)
+            with patch.object(app, "_check_for_updates") as mock_check:
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+                    # Version check should have been called
+                    mock_check.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_app_displays_title(self, mock_search_engine):
         """Test that app title is displayed."""
         with patch(

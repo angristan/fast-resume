@@ -44,6 +44,11 @@ from .tui import run_tui
     is_flag=True,
     help="Resume sessions with auto-approve/skip-permissions flags",
 )
+@click.option(
+    "--no-version-check",
+    is_flag=True,
+    help="Disable checking for new versions",
+)
 @click.version_option()
 def main(
     query: str,
@@ -54,6 +59,7 @@ def main(
     rebuild: bool,
     stats: bool,
     yolo: bool,
+    no_version_check: bool,
 ) -> None:
     """Fast fuzzy finder for coding agent session history.
 
@@ -100,7 +106,12 @@ def main(
     if no_tui or list_only:
         _list_sessions(query, agent, directory)
     else:
-        resume_cmd, resume_dir = run_tui(query=query, agent_filter=agent, yolo=yolo)
+        resume_cmd, resume_dir = run_tui(
+            query=query,
+            agent_filter=agent,
+            yolo=yolo,
+            no_version_check=no_version_check,
+        )
         if resume_cmd:
             # Change to session directory before running command
             if resume_dir:

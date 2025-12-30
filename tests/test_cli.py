@@ -262,6 +262,28 @@ class TestMainCommandIntegration:
         assert result.exit_code == 0
         mock_run_tui.assert_called_once()
 
+    def test_no_version_check_flag(self, cli_runner):
+        """Test that --no-version-check flag is passed to run_tui."""
+        with patch("fast_resume.cli.run_tui") as mock_run_tui:
+            mock_run_tui.return_value = (None, None)
+            result = cli_runner.invoke(main, ["--no-version-check"])
+
+        assert result.exit_code == 0
+        mock_run_tui.assert_called_once()
+        # Check that no_version_check=True was passed
+        call_kwargs = mock_run_tui.call_args.kwargs
+        assert call_kwargs.get("no_version_check") is True
+
+    def test_no_version_check_default_is_false(self, cli_runner):
+        """Test that --no-version-check defaults to False."""
+        with patch("fast_resume.cli.run_tui") as mock_run_tui:
+            mock_run_tui.return_value = (None, None)
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_run_tui.call_args.kwargs
+        assert call_kwargs.get("no_version_check") is False
+
 
 class TestTUIResumeIntegration:
     """Tests for TUI resume command execution."""

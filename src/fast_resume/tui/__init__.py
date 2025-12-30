@@ -18,13 +18,21 @@ from .utils import (
 
 
 def run_tui(
-    query: str = "", agent_filter: str | None = None, yolo: bool = False
+    query: str = "",
+    agent_filter: str | None = None,
+    yolo: bool = False,
+    no_version_check: bool = False,
 ) -> tuple[list[str] | None, str | None]:
     """Run the TUI and return the resume command and directory if selected."""
-    app = FastResumeApp(initial_query=query, agent_filter=agent_filter, yolo=yolo)
+    app = FastResumeApp(
+        initial_query=query,
+        agent_filter=agent_filter,
+        yolo=yolo,
+        no_version_check=no_version_check,
+    )
     app.run()
 
-    if app._available_update:
+    if not no_version_check and app._available_update:
         print(
             f"\nUpdate available: {__version__} → {app._available_update}\n"
             f"Run: uv tool upgrade fast-resume"
