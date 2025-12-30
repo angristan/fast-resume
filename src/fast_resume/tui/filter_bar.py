@@ -111,3 +111,18 @@ class FilterBar(Horizontal):
                         self.post_message(self.Changed(new_filter))
                 return
             widget = widget.parent
+
+    def update_agents_with_sessions(self, agents: set[str]) -> None:
+        """Show only agents that have sessions.
+
+        Args:
+            agents: Set of agent names that have at least one session.
+        """
+        for filter_key, btn in self._filter_buttons.items():
+            if filter_key is None:
+                # "All" button is always visible
+                btn.display = True
+            elif filter_key in agents:
+                btn.display = True
+            else:
+                btn.display = False

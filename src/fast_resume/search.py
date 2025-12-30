@@ -325,6 +325,14 @@ class SessionSearch:
         """
         return self._index.get_session_count(agent_filter)
 
+    def get_agents_with_sessions(self) -> set[str]:
+        """Get the set of agent names that have at least one session."""
+        agents = set()
+        for adapter in self.adapters:
+            if self._index.get_session_count(adapter.name) > 0:
+                agents.add(adapter.name)
+        return agents
+
     def get_adapter_for_session(self, session: Session):
         """Get the adapter for a session."""
         for adapter in self.adapters:

@@ -256,6 +256,10 @@ class FastResumeApp(App):
         self._update_spinner()
         self._update_session_count()
 
+        # Update filter bar to only show agents with sessions
+        agents_with_sessions = self.search_engine.get_agents_with_sessions()
+        self.query_one(FilterBar).update_agents_with_sessions(agents_with_sessions)
+
         # Show toast if there were changes
         if new or updated or deleted:
             parts = []
