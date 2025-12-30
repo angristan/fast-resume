@@ -1,3 +1,15 @@
+# [1.10.0](https://github.com/angristan/fast-resume/compare/v1.9.0...v1.10.0) (2025-12-30)
+
+
+### Bug Fixes
+
+* **tui:** guard query_one calls against race condition ([15541b3](https://github.com/angristan/fast-resume/commit/15541b3437e429ac1ce5ab6c5535aaf0d6e1c989))
+
+
+### Features
+
+* **cli:** add --no-version-check option to disable update checks ([b4fb81e](https://github.com/angristan/fast-resume/commit/b4fb81ebb6fcbe5fcda07af587359cbcb81014bd))
+
 # [1.9.0](https://github.com/angristan/fast-resume/compare/v1.8.1...v1.9.0) (2025-12-29)
 
 
