@@ -8,6 +8,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: ty
+        name: ty
+        entry: uvx ty check src/
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: pytest
         name: pytest
         entry: uv run pytest

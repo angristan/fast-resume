@@ -60,16 +60,16 @@ class ResultsTable(DataTable):
             self._col_msgs,
             self._col_date,
         ) = self.add_columns("Agent", "Title", "Directory", "Turns", "Date")
-        self._update_column_widths()
+        self._update_responsive_widths()
 
     def on_resize(self) -> None:
         """Handle resize events."""
         if hasattr(self, "_col_agent"):
-            self._update_column_widths()
+            self._update_responsive_widths()
             if self._displayed_sessions:
                 self._render_sessions()
 
-    def _update_column_widths(self) -> None:
+    def _update_responsive_widths(self) -> None:
         """Update column widths based on container size."""
         width = self.size.width
         if width == 0:

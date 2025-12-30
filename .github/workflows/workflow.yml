@@ -70,7 +70,7 @@ jobs:
         run: uv sync
 
       - name: Run ty type check
-        run: uv run uvx ty check src/
+        run: uvx ty check src/
 
   release:
     name: Release
