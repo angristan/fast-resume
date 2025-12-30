@@ -431,7 +431,6 @@ class TantivyIndex:
                 )
             )
         writer.commit()
-        self._write_version()
 
     def update_sessions(self, sessions: list[Session]) -> None:
         """Update sessions in the index (delete then add in a single transaction)."""
@@ -459,7 +458,6 @@ class TantivyIndex:
                 )
             )
         writer.commit()
-        self._write_version()
 
     def search(
         self,

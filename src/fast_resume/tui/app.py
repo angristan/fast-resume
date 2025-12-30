@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.css.query import NoMatches
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
@@ -238,7 +239,10 @@ class FastResumeApp(App):
         self._total_loaded = total
         if elapsed_ms is not None:
             self.query_time_ms = elapsed_ms
-        table = self.query_one(ResultsTable)
+        try:
+            table = self.query_one(ResultsTable)
+        except NoMatches:
+            return  # Widget not mounted yet
         self.selected_session = table.update_sessions(sessions, self._current_query)
         self._update_session_count()
 
@@ -338,13 +342,19 @@ class FastResumeApp(App):
         # Only stop loading spinner if streaming indexing is also done
         if not self.search_engine._streaming_in_progress:
             self.is_loading = False
-        table = self.query_one(ResultsTable)
+        try:
+            table = self.query_one(ResultsTable)
+        except NoMatches:
+            return  # Widget not mounted yet
         self.selected_session = table.update_sessions(sessions, self._current_query)
         self._update_session_count()
 
     def _update_selected_session(self) -> None:
         """Update the selected session based on cursor position."""
-        table = self.query_one(ResultsTable)
+        try:
+            table = self.query_one(ResultsTable)
+        except NoMatches:
+            return  # Widget not mounted yet
         session = table.get_selected_session()
         if session:
             self.selected_session = session
