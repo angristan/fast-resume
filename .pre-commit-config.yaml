@@ -10,7 +10,7 @@ repos:
     hooks:
       - id: ty
         name: ty
-        entry: uvx ty check src/
+        entry: uv run ty check src/
         language: system
         pass_filenames: false
         always_run: true
