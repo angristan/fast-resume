@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/angristan/fast-resume/compare/v1.10.0...v1.11.0) (2025-12-30)
+
+
+### Features
+
+* **preview:** improve content display with agent icons ([dc884bf](https://github.com/angristan/fast-resume/commit/dc884bfa7fdf4324d8a218621f1de8c64429dd92))
+
 # [1.10.0](https://github.com/angristan/fast-resume/compare/v1.9.0...v1.10.0) (2025-12-30)
 
 
