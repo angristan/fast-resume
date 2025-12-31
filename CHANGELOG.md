@@ -1,3 +1,10 @@
+## [1.12.2](https://github.com/angristan/fast-resume/compare/v1.12.1...v1.12.2) (2025-12-31)
+
+
+### Bug Fixes
+
+* **claude:** use first user message as title instead of summary ([3098d76](https://github.com/angristan/fast-resume/commit/3098d767a35bdacef68350af6139751e8ec1a68b))
+
 ## [1.12.1](https://github.com/angristan/fast-resume/compare/v1.12.0...v1.12.1) (2025-12-30)
 
 
