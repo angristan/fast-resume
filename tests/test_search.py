@@ -114,7 +114,8 @@ class TestSessionDiscovery:
         sessions = configured_search.get_all_sessions()
 
         claude_session = next(s for s in sessions if s.agent == "claude")
-        assert claude_session.title == "Fix authentication bug in login"
+        # Title uses first user message (matches Claude Code's Resume Session UI)
+        assert claude_session.title == "Help me fix the authentication bug"
         assert claude_session.directory == "/home/user/web-app"
         assert "authentication bug" in claude_session.content
 

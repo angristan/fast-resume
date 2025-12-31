@@ -46,7 +46,6 @@ class ClaudeAdapter(BaseSessionAdapter):
     ) -> Session | None:
         """Parse a Claude Code session file."""
         try:
-            title = ""
             first_user_message = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
@@ -65,10 +64,6 @@ class ClaudeAdapter(BaseSessionAdapter):
                         continue
 
                     msg_type = data.get("type", "")
-
-                    # Get summary/title
-                    if msg_type == "summary":
-                        title = data.get("summary", "")
 
                     # Get directory from user message
                     if msg_type == "user" and not directory:
@@ -141,9 +136,9 @@ class ClaudeAdapter(BaseSessionAdapter):
             if not first_user_message:
                 return None
 
-            # Use first user message as title if no summary
-            if not title:
-                title = truncate_title(first_user_message)
+            # Always use first user message as title (matches Claude Code's Resume Session UI)
+            # The summary field is not a good title - it's often stale after session resume
+            title = truncate_title(first_user_message)
 
             # Skip sessions with no actual conversation content
             if not messages:

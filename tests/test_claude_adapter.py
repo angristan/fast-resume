@@ -69,7 +69,8 @@ class TestClaudeAdapter:
 
         assert session is not None
         assert session.agent == "claude"
-        assert session.title == "Fix login bug in auth.py"
+        # Title uses first user message (matches Claude Code's Resume Session UI)
+        assert session.title == "Help me fix this bug in the login system"
         assert session.directory == "/home/user/project"
         assert "Help me fix this bug" in session.content
         assert "I'll help you fix the bug" in session.content
