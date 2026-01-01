@@ -1,3 +1,10 @@
+## [1.12.3](https://github.com/angristan/fast-resume/compare/v1.12.2...v1.12.3) (2026-01-01)
+
+
+### Bug Fixes
+
+* **stats:** use timedelta for week_start calculation ([010e257](https://github.com/angristan/fast-resume/commit/010e257b1fa80b0d659a274ccd94a02573ba7c68))
+
 ## [1.12.2](https://github.com/angristan/fast-resume/compare/v1.12.1...v1.12.2) (2025-12-31)
 
 
