@@ -318,3 +318,81 @@ class TestTantivyIndex:
         assert index.get_session_count(agent_filter="claude") == 2
         assert index.get_session_count(agent_filter="copilot-vscode") == 1
         assert index.get_session_count(agent_filter="nonexistent") == 0
+
+    def test_search_exact_match_found_among_many_fuzzy_matches(self, index):
+        """Test that exact matches are found even with many fuzzy matches.
+
+        This is a regression test for a bug where fuzzy-only search would
+        return hundreds of low-scoring matches, pushing exact matches outside
+        the result limit. For example, searching "110" would match "10", "100",
+        "1100", etc. with similar scores, and the actual "110" session would
+        rank #533 out of 556 matches.
+
+        The fix uses hybrid search: exact matches (boosted 5x) + fuzzy matches,
+        ensuring exact matches rank first.
+        """
+        # Create many sessions with fuzzy-matching content (10, 100, 1100, etc.)
+        fuzzy_sessions = [
+            Session(
+                id=f"session-fuzzy-{i}",
+                agent="claude",
+                title=f"Session {i}",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 0, 0),
+                preview=f"Content {i}",
+                # These all fuzzy-match "110": 10, 100, 1100, 1101, etc.
+                content=f"Working with value {10 + i} and code {1100 + i}",
+                message_count=2,
+                mtime=1705312200.0 + i,
+            )
+            for i in range(150)
+        ]
+
+        # Add one session with exact "110" match
+        exact_session = Session(
+            id="session-exact-110",
+            agent="claude",
+            title="110 limit????????",
+            directory="/project",
+            timestamp=datetime(2024, 1, 15, 12, 0, 0),
+            preview="Asking about 110",
+            content="Why is there a 110 limit on this?",
+            message_count=2,
+            mtime=1705320000.0,
+        )
+
+        index.add_sessions(fuzzy_sessions + [exact_session])
+
+        # Search for "110" with default limit - exact match must be in results
+        results = index.search("110", limit=100)
+        result_ids = [sid for sid, _ in results]
+
+        assert "session-exact-110" in result_ids, (
+            "Exact match for '110' not found in top 100 results. "
+            f"Got {len(results)} results: {result_ids[:5]}..."
+        )
+        # Should rank in top 10 (not buried at position 100+)
+        position = result_ids.index("session-exact-110")
+        assert position < 10, f"Exact match ranked #{position + 1}, expected top 10"
+
+    def test_search_typo_tolerance(self, index):
+        """Test that search has typo tolerance via fuzzy matching."""
+        sessions = [
+            Session(
+                id="session-1",
+                agent="claude",
+                title="Authentication system",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 30, 0),
+                preview="Building auth",
+                content="Implementing authentication for the app",
+                message_count=2,
+                mtime=1705312200.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Search with typo "authentcation" (missing 'i') should still find it
+        results = index.search("authentcation")
+        assert len(results) == 1
+        assert results[0][0] == "session-1"

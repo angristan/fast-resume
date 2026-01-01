@@ -467,7 +467,9 @@ class TantivyIndex:
     ) -> list[tuple[str, float]]:
         """Search the index and return (session_id, score) pairs.
 
-        Uses fuzzy matching with edit distance 1 for typo tolerance.
+        Uses a hybrid approach:
+        - Exact matches (via parsed query) are boosted 5x for better ranking
+        - Fuzzy matches (edit distance 1) provide typo tolerance
         """
         index = self._ensure_index()
         index.reload()
@@ -475,8 +477,12 @@ class TantivyIndex:
         schema = index.schema
 
         try:
-            # Build fuzzy query for each term
-            query_parts = self._build_fuzzy_query(query, schema)
+            query_parts: list[tuple[tantivy.Occur, tantivy.Query]] = []
+
+            if query.strip():
+                # Build hybrid query: exact (boosted) + fuzzy (for typo tolerance)
+                text_query = self._build_hybrid_query(query, index, schema)
+                query_parts.append((tantivy.Occur.Must, text_query))
 
             # Add agent filter if specified
             if agent_filter:
@@ -503,42 +509,50 @@ class TantivyIndex:
             # If query fails, return empty results
             return []
 
-    def _build_fuzzy_query(
-        self, query: str, schema: tantivy.Schema
-    ) -> list[tuple[tantivy.Occur, tantivy.Query]]:
-        """Build fuzzy query parts for all terms in the query.
+    def _build_hybrid_query(
+        self,
+        query: str,
+        index: tantivy.Index,
+        schema: tantivy.Schema,
+    ) -> tantivy.Query:
+        """Build a hybrid query combining exact and fuzzy matching.
 
-        Each term is searched with edit distance 1 in both title and content fields.
-        All terms must match (AND logic).
+        Exact matches are boosted 5x to rank higher than fuzzy matches.
+        This provides typo tolerance while favoring exact matches.
         """
-        if not query.strip():
-            return []
+        # Exact match query (boosted) - uses BM25 scoring
+        exact_query = index.parse_query(query, ["title", "content"])
+        boosted_exact = tantivy.Query.boost_query(exact_query, 5.0)
 
-        terms = query.split()
-        query_parts = []
-
-        for term in terms:
+        # Fuzzy match queries for typo tolerance
+        fuzzy_parts: list[tuple[tantivy.Occur, tantivy.Query]] = []
+        for term in query.split():
             if not term:
                 continue
-
-            # Create fuzzy queries for title and content fields
-            # Using prefix=True allows matching longer words that start with the term
+            # Fuzzy query for title and content
             fuzzy_title = tantivy.Query.fuzzy_term_query(
                 schema, "title", term, distance=1, prefix=True
             )
             fuzzy_content = tantivy.Query.fuzzy_term_query(
                 schema, "content", term, distance=1, prefix=True
             )
-
-            # Combine with OR - term can match in either field
+            # Either field can match
             term_query = tantivy.Query.boolean_query(
                 [
                     (tantivy.Occur.Should, fuzzy_title),
                     (tantivy.Occur.Should, fuzzy_content),
                 ]
             )
+            fuzzy_parts.append((tantivy.Occur.Must, term_query))
 
-            # Each term must match (AND logic between terms)
-            query_parts.append((tantivy.Occur.Must, term_query))
-
-        return query_parts
+        # Combine: exact OR fuzzy (either can match, but exact scores higher)
+        if fuzzy_parts:
+            fuzzy_query = tantivy.Query.boolean_query(fuzzy_parts)
+            return tantivy.Query.boolean_query(
+                [
+                    (tantivy.Occur.Should, boosted_exact),
+                    (tantivy.Occur.Should, fuzzy_query),
+                ]
+            )
+        else:
+            return boosted_exact
