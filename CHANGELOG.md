@@ -1,3 +1,10 @@
+## [1.12.4](https://github.com/angristan/fast-resume/compare/v1.12.3...v1.12.4) (2026-01-01)
+
+
+### Bug Fixes
+
+* **search:** use hybrid exact+fuzzy search for better ranking ([60d53aa](https://github.com/angristan/fast-resume/commit/60d53aa9413d65a1945ab32c1d6d50632106c0e1)), closes [#533](https://github.com/angristan/fast-resume/issues/533)
+
 ## [1.12.3](https://github.com/angristan/fast-resume/compare/v1.12.2...v1.12.3) (2026-01-01)
 
 
