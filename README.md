@@ -344,22 +344,27 @@ with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
 
 [Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene). We use it via [tantivy-py](https://github.com/quickwit-oss/tantivy-py).
 
-**Fuzzy matching** handles typos with edit distance 1 and prefix matching:
+**Hybrid search** combines exact and fuzzy matching for best results:
 
 ```python
+# Exact match (boosted 5x) - uses BM25 scoring
+exact_query = index.parse_query(query, ["title", "content"])
+boosted_exact = tantivy.Query.boost_query(exact_query, 5.0)
+
+# Fuzzy match (edit distance 1) - for typo tolerance
 for term in query.split():
     fuzzy_title = tantivy.Query.fuzzy_term_query(schema, "title", term, distance=1, prefix=True)
     fuzzy_content = tantivy.Query.fuzzy_term_query(schema, "content", term, distance=1, prefix=True)
+    ...
 
-    # Term can match in either field (OR), all terms must match (AND)
-    term_query = tantivy.Query.boolean_query([
-        (tantivy.Occur.Should, fuzzy_title),
-        (tantivy.Occur.Should, fuzzy_content),
-    ])
-    query_parts.append((tantivy.Occur.Must, term_query))
+# Combine: exact OR fuzzy (exact scores higher due to boost)
+tantivy.Query.boolean_query([
+    (tantivy.Occur.Should, boosted_exact),
+    (tantivy.Occur.Should, fuzzy_query),
+])
 ```
 
-So `auth midleware` (typo) matches "authentication middleware".
+This ensures exact matches rank first while still finding typos like `auth midleware` → "authentication middleware".
 
 **Query lifecycle:**
 
