@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="fast-resume" width="120" height="120">
+</p>
+
 # fast-resume
 
 [![PyPI version](https://img.shields.io/pypi/v/fast-resume)](https://pypi.org/project/fast-resume/)
