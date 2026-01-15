@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
+from threading import RLock
 from typing import Callable
 
 from .adapters import (
@@ -39,6 +40,9 @@ class SessionSearch:
         self._sessions_by_id: dict[str, Session] = {}
         self._streaming_in_progress: bool = False
         self._index = TantivyIndex()
+        # Lock for thread-safe access to _sessions, _sessions_by_id, and _streaming_in_progress
+        # Uses RLock (reentrant) since methods may call each other
+        self._lock = RLock()
 
     def _load_from_index(self) -> list[Session] | None:
         """Try to load sessions from index if no changes detected (fast path for TUI)."""
@@ -59,20 +63,22 @@ class SessionSearch:
         if not sessions:
             return None
 
-        # Populate sessions_by_id
-        for session in sessions:
-            self._sessions_by_id[session.id] = session
+        # Populate sessions_by_id (thread-safe)
+        with self._lock:
+            for session in sessions:
+                self._sessions_by_id[session.id] = session
 
         return sessions
 
     def get_all_sessions(self, force_refresh: bool = False) -> list[Session]:
         """Get all sessions from all adapters with incremental updates."""
-        if self._sessions is not None and not force_refresh:
-            return self._sessions
+        with self._lock:
+            if self._sessions is not None and not force_refresh:
+                return self._sessions
 
-        # If streaming is in progress, return current partial results
-        if self._streaming_in_progress:
-            return self._sessions if self._sessions is not None else []
+            # If streaming is in progress, return current partial results
+            if self._streaming_in_progress:
+                return self._sessions if self._sessions is not None else []
 
         # Get known sessions from Tantivy for incremental comparison
         known = self._index.get_known_sessions() if not force_refresh else {}
@@ -92,9 +98,11 @@ class SessionSearch:
 
         # If no changes and we have data in index, load from index
         if not all_new_or_modified and not all_deleted_ids and known:
-            self._sessions = self._index.get_all_sessions()
-            for session in self._sessions:
-                self._sessions_by_id[session.id] = session
+            sessions = self._index.get_all_sessions()
+            with self._lock:
+                self._sessions = sessions
+                for session in self._sessions:
+                    self._sessions_by_id[session.id] = session
             self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
             return self._sessions
 
@@ -105,9 +113,11 @@ class SessionSearch:
         self._index.update_sessions(all_new_or_modified)
 
         # Load all sessions from index
-        self._sessions = self._index.get_all_sessions()
-        for session in self._sessions:
-            self._sessions_by_id[session.id] = session
+        sessions = self._index.get_all_sessions()
+        with self._lock:
+            self._sessions = sessions
+            for session in self._sessions:
+                self._sessions_by_id[session.id] = session
 
         # Sort by timestamp, newest first
         self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
@@ -137,11 +147,11 @@ class SessionSearch:
         # Pre-populate _sessions_by_id with existing sessions from index
         # so search() can find them during streaming
         existing_sessions = self._index.get_all_sessions()
-        for session in existing_sessions:
-            self._sessions_by_id[session.id] = session
-
-        # Mark streaming as in progress
-        self._streaming_in_progress = True
+        with self._lock:
+            for session in existing_sessions:
+                self._sessions_by_id[session.id] = session
+            # Mark streaming as in progress
+            self._streaming_in_progress = True
         total_new = 0
         total_updated = 0
         total_deleted = 0
@@ -164,17 +174,20 @@ class SessionSearch:
                     # Handle deletions first
                     if deleted_ids:
                         self._index.delete_sessions(deleted_ids)
-                        for sid in deleted_ids:
-                            self._sessions_by_id.pop(sid, None)
+                        with self._lock:
+                            for sid in deleted_ids:
+                                self._sessions_by_id.pop(sid, None)
                         total_deleted += len(deleted_ids)
 
                     # Index incrementally + update _sessions_by_id for search lookup
                     if new_or_modified:
                         # Update atomically (delete + add in single transaction)
                         self._index.update_sessions(new_or_modified)
+                        with self._lock:
+                            for session in new_or_modified:
+                                self._sessions_by_id[session.id] = session
+                        # Count new vs updated
                         for session in new_or_modified:
-                            self._sessions_by_id[session.id] = session
-                            # Count new vs updated
                             if session.id in known:
                                 total_updated += 1
                             else:
@@ -183,12 +196,15 @@ class SessionSearch:
                     # Notify progress - TUI will query the index
                     on_progress()
         finally:
-            self._streaming_in_progress = False
+            with self._lock:
+                self._streaming_in_progress = False
 
         # Load final state from index
-        self._sessions = self._index.get_all_sessions()
-        for session in self._sessions:
-            self._sessions_by_id[session.id] = session
+        sessions = self._index.get_all_sessions()
+        with self._lock:
+            self._sessions = sessions
+            for session in self._sessions:
+                self._sessions_by_id[session.id] = session
         self._sessions.sort(key=lambda s: s.timestamp, reverse=True)
 
         return self._sessions, total_new, total_updated, total_deleted
@@ -254,13 +270,19 @@ class SessionSearch:
 
         # During streaming, _sessions_by_id is updated incrementally
         # Only call get_all_sessions() if not streaming and no sessions loaded yet
-        if not self._streaming_in_progress and self._sessions is None:
+        with self._lock:
+            streaming = self._streaming_in_progress
+            sessions_loaded = self._sessions is not None
+        if not streaming and not sessions_loaded:
             self.get_all_sessions()
 
         # If no query, return filtered sessions by timestamp
         if not search_text:
+            # Copy values under lock to iterate safely
+            with self._lock:
+                all_sessions = list(self._sessions_by_id.values())
             sessions = sorted(
-                self._sessions_by_id.values(),
+                all_sessions,
                 key=lambda s: s.timestamp,
                 reverse=True,
             )
@@ -297,7 +319,8 @@ class SessionSearch:
         # Lookup full session objects from results
         matched_sessions = []
         for session_id, _score in results:
-            session = self._sessions_by_id.get(session_id)
+            with self._lock:
+                session = self._sessions_by_id.get(session_id)
             if session:
                 # Apply agent filter (for multi-value or negated filters)
                 if effective_agent and tantivy_agent is None:

@@ -253,7 +253,6 @@ class TestOpenCodeAdapter:
             title="Test",
             directory="/home/user/project",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from ..config import AGENTS, MAX_PREVIEW_LENGTH
+from ..config import AGENTS
 from ..logging_config import log_parse_error
 from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
 
@@ -196,7 +196,6 @@ class CopilotVSCodeAdapter:
                 timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
 
             full_content = "\n\n".join(messages)
-            preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
                 id=session_id,
@@ -204,7 +203,6 @@ class CopilotVSCodeAdapter:
                 title=title,
                 directory=directory,
                 timestamp=timestamp,
-                preview=preview,
                 content=full_content,
                 message_count=turn_count,
                 mtime=session_file.stat().st_mtime,

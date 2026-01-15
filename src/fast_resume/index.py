@@ -9,7 +9,7 @@ from pathlib import Path
 import tantivy
 
 from .adapters.base import Session
-from .config import INDEX_DIR, MAX_PREVIEW_LENGTH, SCHEMA_VERSION
+from .config import INDEX_DIR, SCHEMA_VERSION
 
 # Version file to detect schema changes
 _VERSION_FILE = ".schema_version"
@@ -389,7 +389,6 @@ class TantivyIndex:
                 title=doc.get_first("title") or "",
                 directory=doc.get_first("directory") or "",
                 timestamp=datetime.fromtimestamp(timestamp_float),
-                preview=content[:MAX_PREVIEW_LENGTH],
                 content=content,
                 message_count=doc.get_first("message_count") or 0,
                 mtime=doc.get_first("mtime") or 0.0,

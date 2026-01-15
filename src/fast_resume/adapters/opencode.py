@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, MAX_PREVIEW_LENGTH, OPENCODE_DIR
+from ..config import AGENTS, OPENCODE_DIR
 from ..logging_config import log_parse_error
 from .base import ErrorCallback, ParseError, RawAdapterStats, Session
 
@@ -114,7 +114,6 @@ class OpenCodeAdapter:
             turn_count = len(messages_by_session.get(session_id, []))
 
             full_content = "\n\n".join(messages)
-            preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
                 id=session_id,
@@ -122,7 +121,6 @@ class OpenCodeAdapter:
                 title=title,
                 directory=directory,
                 timestamp=timestamp,
-                preview=preview,
                 content=full_content,
                 message_count=turn_count,
             )

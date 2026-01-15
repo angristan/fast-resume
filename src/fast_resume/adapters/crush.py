@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, CRUSH_PROJECTS_FILE, MAX_PREVIEW_LENGTH
+from ..config import AGENTS, CRUSH_PROJECTS_FILE
 from ..logging_config import log_parse_error
 from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
 
@@ -170,7 +170,6 @@ class CrushAdapter:
                 title = truncate_title(first_user_message)
 
             full_content = "\n\n".join(messages)
-            preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
                 id=session_id,
@@ -178,7 +177,6 @@ class CrushAdapter:
                 title=title,
                 directory=project_path,
                 timestamp=timestamp,
-                preview=preview,
                 content=full_content,
                 message_count=len(messages),
             )

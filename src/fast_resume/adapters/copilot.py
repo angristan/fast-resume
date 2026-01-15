@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, COPILOT_DIR, MAX_PREVIEW_LENGTH
+from ..config import AGENTS, COPILOT_DIR
 from ..logging_config import log_parse_error
 from .base import BaseSessionAdapter, ErrorCallback, ParseError, Session, truncate_title
 
@@ -100,7 +100,6 @@ class CopilotAdapter(BaseSessionAdapter):
                 return None
 
             full_content = "\n\n".join(messages)
-            preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
                 id=session_id,
@@ -108,7 +107,6 @@ class CopilotAdapter(BaseSessionAdapter):
                 title=title,
                 directory=directory,
                 timestamp=timestamp,
-                preview=preview,
                 content=full_content,
                 message_count=turn_count,
             )
