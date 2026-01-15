@@ -268,7 +268,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview="» First message\n\n  Response one\n\n» Second message",
             content="» First message\n\n  Response one\n\n» Second message",
             message_count=2,
         )
@@ -293,7 +292,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview="» Hello world",
             content="» Hello world",
             message_count=1,
         )
@@ -316,7 +314,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview="  This is an assistant response",
             content="  This is an assistant response",
             message_count=1,
         )
@@ -340,7 +337,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview="» Question\n\n  Here's code:\n```python\nprint('hello')\n```",
             content="» Question\n\n  Here's code:\n```python\nprint('hello')\n```",
             message_count=2,
         )
@@ -363,7 +359,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview="» Find the special word here",
             content="» Find the special word here",
             message_count=1,
         )
@@ -386,7 +381,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview=f"» Question\n\n{long_response}",
             content=f"» Question\n\n{long_response}",
             message_count=2,
         )
@@ -413,7 +407,6 @@ class TestSessionPreviewContent:
             title="Test Session",
             directory="/test",
             timestamp=datetime.now(),
-            preview=f"» Question\n\n{long_response}",
             content=f"» Question\n\n{long_response}",
             message_count=2,
         )
@@ -458,7 +451,6 @@ def sample_sessions():
             title="Fix authentication bug",
             directory="/home/user/web-app",
             timestamp=datetime.now() - timedelta(hours=1),
-            preview="Help me fix the auth bug",
             content="Help me fix the authentication bug in login.py",
             message_count=4,
             mtime=1705312200.0,
@@ -469,7 +461,6 @@ def sample_sessions():
             title="Create REST API",
             directory="/home/user/api-project",
             timestamp=datetime.now() - timedelta(hours=2),
-            preview="Build a REST endpoint",
             content="Create a REST API endpoint for users",
             message_count=6,
             mtime=1705312100.0,
@@ -480,7 +471,6 @@ def sample_sessions():
             title="Refactor database queries",
             directory="/home/user/backend",
             timestamp=datetime.now() - timedelta(days=1),
-            preview="Optimize SQL queries",
             content="Refactor the database queries for better performance",
             message_count=8,
             mtime=1705225200.0,
@@ -1107,7 +1097,6 @@ class TestFastResumeAppYoloModal:
             title="Yolo session",
             directory="/home/user/yolo-project",
             timestamp=sample_sessions[0].timestamp,
-            preview="Test preview",
             content="Test content",
             message_count=5,
             mtime=1705225200.0,

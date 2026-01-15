@@ -4,7 +4,7 @@ import orjson
 from datetime import datetime
 from pathlib import Path
 
-from ..config import AGENTS, MAX_PREVIEW_LENGTH, VIBE_DIR
+from ..config import AGENTS, VIBE_DIR
 from ..logging_config import log_parse_error
 from .base import BaseSessionAdapter, ErrorCallback, ParseError, Session, truncate_title
 
@@ -98,7 +98,6 @@ class VibeAdapter(BaseSessionAdapter):
                 title = "Vibe session"
 
             full_content = "\n\n".join(messages)
-            preview = full_content[:MAX_PREVIEW_LENGTH]
 
             return Session(
                 id=session_id,
@@ -106,7 +105,6 @@ class VibeAdapter(BaseSessionAdapter):
                 title=title,
                 directory=directory,
                 timestamp=timestamp,
-                preview=preview,
                 content=full_content,
                 message_count=len(messages),
                 yolo=yolo,

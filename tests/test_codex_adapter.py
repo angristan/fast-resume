@@ -251,7 +251,6 @@ class TestCodexAdapter:
             title="Test",
             directory="/test",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 

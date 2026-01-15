@@ -337,7 +337,6 @@ class TestEdgeCases:
             title="Test",
             directory="/tmp",
             timestamp=datetime.now(),
-            preview="",
             content="",
             message_count=0,
             mtime=0,

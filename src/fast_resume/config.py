@@ -26,6 +26,3 @@ CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
 SCHEMA_VERSION = 18  # Bump when schema changes (18: use first user message as title)
-
-# Search settings
-MAX_PREVIEW_LENGTH = 500
