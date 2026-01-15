@@ -46,7 +46,7 @@ class CopilotAdapter(BaseSessionAdapter):
             messages: list[str] = []
             turn_count = 0
 
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "rb") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -140,7 +140,7 @@ class CopilotAdapter(BaseSessionAdapter):
     def _get_session_id_from_file(self, session_file: Path) -> str:
         """Extract session ID from file content or filename."""
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "rb") as f:
                 for line in f:
                     if not line.strip():
                         continue

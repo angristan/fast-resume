@@ -47,7 +47,7 @@ class CodexAdapter(BaseSessionAdapter):
             turn_count = 0  # Count user + assistant turns
             yolo = False  # Track if session was started in yolo mode
 
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "rb") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -173,7 +173,7 @@ class CodexAdapter(BaseSessionAdapter):
         """Extract session ID from file content or filename."""
         # Try to get ID from session_meta in file content first
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "rb") as f:
                 for line in f:
                     if not line.strip():
                         continue

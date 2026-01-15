@@ -53,7 +53,7 @@ class ClaudeAdapter(BaseSessionAdapter):
             # Count conversation turns (user + assistant, not tool results)
             turn_count = 0
 
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, "rb") as f:
                 for line in f:
                     if not line.strip():
                         continue
