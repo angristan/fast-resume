@@ -1,3 +1,10 @@
+## [1.12.5](https://github.com/angristan/fast-resume/compare/v1.12.4...v1.12.5) (2026-01-15)
+
+
+### Performance Improvements
+
+* use binary mode for orjson.loads in JSONL adapters ([70e1d94](https://github.com/angristan/fast-resume/commit/70e1d94706699ed3b5cd7ee09cbf2e6b621b6c8e))
+
 ## [1.12.4](https://github.com/angristan/fast-resume/compare/v1.12.3...v1.12.4) (2026-01-01)
 
 
