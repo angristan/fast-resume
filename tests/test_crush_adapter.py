@@ -286,7 +286,6 @@ class TestCrushAdapter:
             title="Test",
             directory="/test/project",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 

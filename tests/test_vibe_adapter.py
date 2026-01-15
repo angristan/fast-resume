@@ -270,7 +270,6 @@ class TestVibeAdapter:
             title="Test",
             directory="/test",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 

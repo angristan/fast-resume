@@ -24,7 +24,6 @@ def make_session(id: str, agent: str = "claude", title: str = "Test") -> Session
         title=title,
         directory="/tmp/test",
         timestamp=datetime.now(),
-        preview="test preview",
         content="test content for searching",
         message_count=1,
         mtime=time.time(),

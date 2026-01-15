@@ -393,7 +393,6 @@ class TestCopilotVSCodeAdapter:
             title="Test",
             directory="/test/project",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 
@@ -412,7 +411,6 @@ class TestCopilotVSCodeAdapter:
             title="Test",
             directory="",
             timestamp=datetime.now(),
-            preview="",
             content="",
         )
 
