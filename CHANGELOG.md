@@ -1,3 +1,10 @@
+## [1.12.6](https://github.com/angristan/fast-resume/compare/v1.12.5...v1.12.6) (2026-01-16)
+
+
+### Performance Improvements
+
+* use Tantivy queries for all filtering instead of post-filtering ([7b3497d](https://github.com/angristan/fast-resume/commit/7b3497d5dce4dbafac00f27b94a79e278e4b45d1))
+
 ## [1.12.5](https://github.com/angristan/fast-resume/compare/v1.12.4...v1.12.5) (2026-01-15)
 
 
