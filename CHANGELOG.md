@@ -1,3 +1,10 @@
+## [1.12.7](https://github.com/angristan/fast-resume/compare/v1.12.6...v1.12.7) (2026-01-16)
+
+
+### Bug Fixes
+
+* sync index before showing stats to ensure accurate data ([f1cf86e](https://github.com/angristan/fast-resume/commit/f1cf86e7eb58d989d647c8642550ef4035676f00))
+
 ## [1.12.6](https://github.com/angristan/fast-resume/compare/v1.12.5...v1.12.6) (2026-01-16)
 
 
