@@ -5,7 +5,7 @@ actual data flow through the search system.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -347,3 +347,336 @@ class TestEdgeCases:
 
         cmd = configured_search.get_resume_command(fake_session)
         assert cmd == []
+
+
+class TestTantivyFiltering:
+    """Tests for Tantivy-based filtering (multi-value, negation, date ranges).
+
+    These tests verify that all filtering is correctly pushed to Tantivy
+    instead of being done via Python post-filtering.
+    """
+
+    @pytest.fixture
+    def multi_session_index(self, temp_dir):
+        """Create an index with multiple sessions for comprehensive filter testing."""
+        index = TantivyIndex(index_path=temp_dir / "filter_test_index")
+        now = datetime.now()
+
+        sessions = [
+            # Claude sessions
+            Session(
+                id="claude-1",
+                agent="claude",
+                title="Fix auth bug",
+                directory="/home/user/web-app",
+                timestamp=now - timedelta(hours=1),  # 1 hour ago
+                content="authentication token validation",
+                message_count=5,
+                mtime=1000.0,
+            ),
+            Session(
+                id="claude-2",
+                agent="claude",
+                title="Add tests",
+                directory="/home/user/api-server",
+                timestamp=now - timedelta(days=2),  # 2 days ago
+                content="unit tests for api endpoints",
+                message_count=3,
+                mtime=1001.0,
+            ),
+            # Codex sessions
+            Session(
+                id="codex-1",
+                agent="codex",
+                title="Refactor code",
+                directory="/home/user/web-app",
+                timestamp=now - timedelta(hours=2),  # 2 hours ago
+                content="refactoring the database layer",
+                message_count=4,
+                mtime=1002.0,
+            ),
+            Session(
+                id="codex-2",
+                agent="codex",
+                title="Deploy script",
+                directory="/home/user/devops",
+                timestamp=now - timedelta(days=5),  # 5 days ago
+                content="deployment automation script",
+                message_count=2,
+                mtime=1003.0,
+            ),
+            # Vibe session
+            Session(
+                id="vibe-1",
+                agent="vibe",
+                title="Create API",
+                directory="/home/user/api-server",
+                timestamp=now - timedelta(minutes=30),  # 30 min ago
+                content="REST API endpoint creation",
+                message_count=6,
+                mtime=1004.0,
+            ),
+            # Copilot-vscode session (hyphenated agent name)
+            Session(
+                id="copilot-1",
+                agent="copilot-vscode",
+                title="Code completion",
+                directory="/home/user/frontend",
+                timestamp=now - timedelta(days=1),  # 1 day ago (yesterday)
+                content="autocomplete suggestions",
+                message_count=10,
+                mtime=1005.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+        return index
+
+    # --- Multi-value Agent Filter Tests ---
+
+    def test_multi_value_agent_filter_or(self, multi_session_index):
+        """Test that agent:claude,codex matches both agents (OR logic)."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", agent_filter=Filter(include=["claude", "codex"])
+        )
+        assert len(results) == 4
+        ids = {r[0] for r in results}
+        assert ids == {"claude-1", "claude-2", "codex-1", "codex-2"}
+
+    def test_single_agent_filter(self, multi_session_index):
+        """Test single agent filter works correctly."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search("", agent_filter=Filter(include=["vibe"]))
+        assert len(results) == 1
+        assert results[0][0] == "vibe-1"
+
+    def test_hyphenated_agent_filter(self, multi_session_index):
+        """Test filtering by hyphenated agent name like copilot-vscode."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", agent_filter=Filter(include=["copilot-vscode"])
+        )
+        assert len(results) == 1
+        assert results[0][0] == "copilot-1"
+
+    # --- Negated Agent Filter Tests ---
+
+    def test_negated_agent_filter(self, multi_session_index):
+        """Test that -agent:claude excludes claude sessions."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", agent_filter=Filter(exclude=["claude"])
+        )
+        assert len(results) == 4
+        ids = {r[0] for r in results}
+        assert "claude-1" not in ids
+        assert "claude-2" not in ids
+
+    def test_negated_multi_agent_filter(self, multi_session_index):
+        """Test that -agent:claude,codex excludes both agents."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", agent_filter=Filter(exclude=["claude", "codex"])
+        )
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"vibe-1", "copilot-1"}
+
+    # --- Mixed Include/Exclude Agent Filter Tests ---
+
+    def test_mixed_agent_filter(self, multi_session_index):
+        """Test mixed include/exclude: agent:claude,codex,!codex -> only claude."""
+        from fast_resume.query import Filter
+
+        # Include claude and codex, but exclude codex -> only claude
+        results = multi_session_index.search(
+            "", agent_filter=Filter(include=["claude", "codex"], exclude=["codex"])
+        )
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"claude-1", "claude-2"}
+
+    # --- Directory Filter Tests ---
+
+    def test_directory_substring_filter(self, multi_session_index):
+        """Test directory substring matching."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", directory_filter=Filter(include=["web-app"])
+        )
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"claude-1", "codex-1"}
+
+    def test_directory_partial_match(self, multi_session_index):
+        """Test that partial directory names match (substring)."""
+        from fast_resume.query import Filter
+
+        # "api" should match "api-server"
+        results = multi_session_index.search(
+            "", directory_filter=Filter(include=["api"])
+        )
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"claude-2", "vibe-1"}
+
+    def test_directory_case_insensitive(self, multi_session_index):
+        """Test that directory filter is case-insensitive."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", directory_filter=Filter(include=["WEB-APP"])
+        )
+        assert len(results) == 2
+
+    def test_negated_directory_filter(self, multi_session_index):
+        """Test that negated directory filter excludes matching directories."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "", directory_filter=Filter(exclude=["web-app"])
+        )
+        assert len(results) == 4
+        ids = {r[0] for r in results}
+        assert "claude-1" not in ids
+        assert "codex-1" not in ids
+
+    # --- Date Filter Tests ---
+
+    def test_date_less_than_filter(self, multi_session_index):
+        """Test date:<3h returns sessions within last 3 hours."""
+        from fast_resume.query import DateFilter, DateOp
+
+        now = datetime.now()
+        cutoff = now - timedelta(hours=3)
+
+        results = multi_session_index.search(
+            "",
+            date_filter=DateFilter(
+                op=DateOp.LESS_THAN, value="<3h", cutoff=cutoff, negated=False
+            ),
+        )
+        # Should match: claude-1 (1h), codex-1 (2h), vibe-1 (30m)
+        assert len(results) == 3
+        ids = {r[0] for r in results}
+        assert ids == {"claude-1", "codex-1", "vibe-1"}
+
+    def test_date_greater_than_filter(self, multi_session_index):
+        """Test date:>3d returns sessions older than 3 days."""
+        from fast_resume.query import DateFilter, DateOp
+
+        now = datetime.now()
+        cutoff = now - timedelta(days=3)
+
+        results = multi_session_index.search(
+            "",
+            date_filter=DateFilter(
+                op=DateOp.GREATER_THAN, value=">3d", cutoff=cutoff, negated=False
+            ),
+        )
+        # Should match: codex-2 (5 days ago)
+        assert len(results) == 1
+        assert results[0][0] == "codex-2"
+
+    def test_date_today_filter(self, multi_session_index):
+        """Test date:today returns sessions from today."""
+        from fast_resume.query import DateFilter, DateOp
+
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        results = multi_session_index.search(
+            "",
+            date_filter=DateFilter(
+                op=DateOp.EXACT, value="today", cutoff=today_start, negated=False
+            ),
+        )
+        # Should match sessions from today: claude-1, codex-1, vibe-1
+        assert len(results) >= 1  # At least the recent ones
+
+    def test_negated_date_filter(self, multi_session_index):
+        """Test date:!today excludes today's sessions."""
+        from fast_resume.query import DateFilter, DateOp
+
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        results = multi_session_index.search(
+            "",
+            date_filter=DateFilter(
+                op=DateOp.EXACT, value="today", cutoff=today_start, negated=True
+            ),
+        )
+        # Should exclude today's sessions
+        ids = {r[0] for r in results}
+        # Sessions from before today: claude-2 (2d), codex-2 (5d), copilot-1 (1d)
+        assert "claude-2" in ids
+        assert "codex-2" in ids
+
+    # --- Combined Filter Tests ---
+
+    def test_combined_agent_and_directory(self, multi_session_index):
+        """Test combining agent and directory filters."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "",
+            agent_filter=Filter(include=["claude"]),
+            directory_filter=Filter(include=["web-app"]),
+        )
+        assert len(results) == 1
+        assert results[0][0] == "claude-1"
+
+    def test_combined_agent_directory_date(self, multi_session_index):
+        """Test combining agent, directory, and date filters."""
+        from fast_resume.query import DateFilter, DateOp, Filter
+
+        now = datetime.now()
+        cutoff = now - timedelta(hours=5)
+
+        results = multi_session_index.search(
+            "",
+            agent_filter=Filter(include=["claude", "codex"]),
+            directory_filter=Filter(include=["web"]),
+            date_filter=DateFilter(
+                op=DateOp.LESS_THAN, value="<5h", cutoff=cutoff, negated=False
+            ),
+        )
+        # claude-1 and codex-1 both match web-app and are within 5h
+        assert len(results) == 2
+        ids = {r[0] for r in results}
+        assert ids == {"claude-1", "codex-1"}
+
+    def test_text_search_with_filters(self, multi_session_index):
+        """Test combining text search with filters."""
+        from fast_resume.query import Filter
+
+        results = multi_session_index.search(
+            "authentication",
+            agent_filter=Filter(include=["claude"]),
+        )
+        assert len(results) == 1
+        assert results[0][0] == "claude-1"
+
+    def test_no_results_with_conflicting_filters(self, multi_session_index):
+        """Test that conflicting filters return no results."""
+        from fast_resume.query import Filter
+
+        # vibe agent but web-app directory (no vibe session in web-app)
+        results = multi_session_index.search(
+            "",
+            agent_filter=Filter(include=["vibe"]),
+            directory_filter=Filter(include=["web-app"]),
+        )
+        assert len(results) == 0
+
+    # --- Edge Cases ---
+
+    def test_empty_query_returns_all(self, multi_session_index):
+        """Test that empty query with no filters returns all sessions."""
+        results = multi_session_index.search("")
+        assert len(results) == 6

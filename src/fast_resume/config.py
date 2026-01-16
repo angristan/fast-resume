@@ -25,4 +25,6 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
-SCHEMA_VERSION = 18  # Bump when schema changes (18: use first user message as title)
+SCHEMA_VERSION = (
+    19  # Bump when schema changes (19: indexed timestamp for range queries)
+)

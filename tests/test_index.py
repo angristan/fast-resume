@@ -6,6 +6,7 @@ import pytest
 
 from fast_resume.adapters.base import Session
 from fast_resume.index import TantivyIndex
+from fast_resume.query import Filter
 
 
 @pytest.fixture
@@ -230,12 +231,14 @@ class TestTantivyIndex:
         index.add_sessions(sessions)
 
         # Search with query + hyphenated agent filter should work
-        results = index.search("review", agent_filter="copilot-vscode")
+        results = index.search(
+            "review", agent_filter=Filter(include=["copilot-vscode"])
+        )
         assert len(results) == 1
         assert results[0][0] == "session-vscode-1"
 
         # Verify other agent still works too
-        results = index.search("review", agent_filter="claude")
+        results = index.search("review", agent_filter=Filter(include=["claude"]))
         assert len(results) == 1
         assert results[0][0] == "session-claude-1"
 

@@ -1,5 +1,6 @@
 """Tantivy full-text search index for sessions."""
 
+import re
 import shutil
 from collections import Counter
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ import tantivy
 
 from .adapters.base import Session
 from .config import INDEX_DIR, SCHEMA_VERSION
+from .query import DateFilter, DateOp, Filter
 
 # Version file to detect schema changes
 _VERSION_FILE = ".schema_version"
@@ -66,14 +68,14 @@ class TantivyIndex:
         schema_builder.add_text_field("id", stored=True, tokenizer_name="raw")
         # Title - stored and indexed for search
         schema_builder.add_text_field("title", stored=True)
-        # Directory - stored and indexed
-        schema_builder.add_text_field("directory", stored=True)
+        # Directory - stored with raw tokenizer for regex substring matching
+        schema_builder.add_text_field("directory", stored=True, tokenizer_name="raw")
         # Agent - stored for filtering (raw tokenizer to preserve hyphens)
         schema_builder.add_text_field("agent", stored=True, tokenizer_name="raw")
         # Content - stored and indexed for full-text search
         schema_builder.add_text_field("content", stored=True)
-        # Timestamp - stored as float (Unix timestamp)
-        schema_builder.add_float_field("timestamp", stored=True)
+        # Timestamp - stored and indexed for range queries
+        schema_builder.add_float_field("timestamp", stored=True, indexed=True)
         # Message count - stored as integer
         schema_builder.add_integer_field("message_count", stored=True)
         # File modification time - for incremental updates
@@ -461,7 +463,9 @@ class TantivyIndex:
     def search(
         self,
         query: str,
-        agent_filter: str | None = None,
+        agent_filter: Filter | None = None,
+        directory_filter: Filter | None = None,
+        date_filter: DateFilter | None = None,
         limit: int = 100,
     ) -> list[tuple[str, float]]:
         """Search the index and return (session_id, score) pairs.
@@ -469,6 +473,11 @@ class TantivyIndex:
         Uses a hybrid approach:
         - Exact matches (via parsed query) are boosted 5x for better ranking
         - Fuzzy matches (edit distance 1) provide typo tolerance
+
+        All filters are applied at the Tantivy level for efficiency:
+        - agent_filter: term_set_query for includes, MustNot for excludes
+        - directory_filter: regex_query for substring matching
+        - date_filter: range_query on timestamp field
         """
         index = self._ensure_index()
         index.reload()
@@ -484,15 +493,26 @@ class TantivyIndex:
                 query_parts.append((tantivy.Occur.Must, text_query))
 
             # Add agent filter if specified
-            if agent_filter:
-                agent_query = tantivy.Query.term_query(schema, "agent", agent_filter)
+            agent_query = self._build_agent_filter_query(agent_filter, schema)
+            if agent_query:
                 query_parts.append((tantivy.Occur.Must, agent_query))
+
+            # Add directory filter if specified
+            dir_query = self._build_directory_filter_query(directory_filter, schema)
+            if dir_query:
+                query_parts.append((tantivy.Occur.Must, dir_query))
+
+            # Add date filter if specified
+            date_query = self._build_date_filter_query(date_filter, schema)
+            if date_query:
+                query_parts.append((tantivy.Occur.Must, date_query))
 
             # Combine all query parts
             if not query_parts:
-                return []
-
-            combined_query = tantivy.Query.boolean_query(query_parts)
+                # No text query and no filters - match all documents
+                combined_query = tantivy.Query.all_query()
+            else:
+                combined_query = tantivy.Query.boolean_query(query_parts)
             results = searcher.search(combined_query, limit).hits
 
             # Extract session IDs and scores
@@ -507,6 +527,187 @@ class TantivyIndex:
         except Exception:
             # If query fails, return empty results
             return []
+
+    def _build_agent_filter_query(
+        self,
+        agent_filter: Filter | None,
+        schema: tantivy.Schema,
+    ) -> tantivy.Query | None:
+        """Build a Tantivy query for agent filtering.
+
+        Supports:
+        - Multiple include values (OR logic via term_set_query)
+        - Multiple exclude values (AND logic via MustNot)
+        - Mixed include/exclude
+        """
+        if not agent_filter:
+            return None
+
+        parts: list[tuple[tantivy.Occur, tantivy.Query]] = []
+
+        # Include filter: match any of the included agents
+        if agent_filter.include:
+            if len(agent_filter.include) == 1:
+                # Single value: use term_query
+                include_query = tantivy.Query.term_query(
+                    schema, "agent", agent_filter.include[0]
+                )
+            else:
+                # Multiple values: use term_set_query (OR)
+                include_query = tantivy.Query.term_set_query(
+                    schema, "agent", agent_filter.include
+                )
+            parts.append((tantivy.Occur.Must, include_query))
+
+        # Exclude filter: reject any of the excluded agents
+        for excluded in agent_filter.exclude:
+            exclude_query = tantivy.Query.term_query(schema, "agent", excluded)
+            parts.append((tantivy.Occur.MustNot, exclude_query))
+
+        if not parts:
+            return None
+
+        # If only excludes, we need a base query to exclude from
+        if not agent_filter.include and agent_filter.exclude:
+            # Match all, then exclude
+            parts.insert(0, (tantivy.Occur.Must, tantivy.Query.all_query()))
+
+        return tantivy.Query.boolean_query(parts)
+
+    def _build_directory_filter_query(
+        self,
+        directory_filter: Filter | None,
+        schema: tantivy.Schema,
+    ) -> tantivy.Query | None:
+        """Build a Tantivy query for directory filtering using regex.
+
+        Uses regex_query for substring matching (case-insensitive).
+        """
+        if not directory_filter:
+            return None
+
+        parts: list[tuple[tantivy.Occur, tantivy.Query]] = []
+
+        # Include filter: match any directory containing the substring
+        if directory_filter.include:
+            include_parts: list[tuple[tantivy.Occur, tantivy.Query]] = []
+            for dir_pattern in directory_filter.include:
+                # Escape regex special characters and build case-insensitive pattern
+                escaped = re.escape(dir_pattern)
+                regex_pattern = f"(?i).*{escaped}.*"
+                include_query = tantivy.Query.regex_query(
+                    schema, "directory", regex_pattern
+                )
+                include_parts.append((tantivy.Occur.Should, include_query))
+
+            if len(include_parts) == 1:
+                parts.append((tantivy.Occur.Must, include_parts[0][1]))
+            else:
+                parts.append(
+                    (tantivy.Occur.Must, tantivy.Query.boolean_query(include_parts))
+                )
+
+        # Exclude filter: reject directories containing the substring
+        for dir_pattern in directory_filter.exclude:
+            escaped = re.escape(dir_pattern)
+            regex_pattern = f"(?i).*{escaped}.*"
+            exclude_query = tantivy.Query.regex_query(
+                schema, "directory", regex_pattern
+            )
+            parts.append((tantivy.Occur.MustNot, exclude_query))
+
+        if not parts:
+            return None
+
+        # If only excludes, we need a base query to exclude from
+        if not directory_filter.include and directory_filter.exclude:
+            parts.insert(0, (tantivy.Occur.Must, tantivy.Query.all_query()))
+
+        return tantivy.Query.boolean_query(parts)
+
+    def _build_date_filter_query(
+        self,
+        date_filter: DateFilter | None,
+        schema: tantivy.Schema,
+    ) -> tantivy.Query | None:
+        """Build a Tantivy query for date filtering using range queries.
+
+        Supports:
+        - date:<1h (sessions newer than 1 hour)
+        - date:>1d (sessions older than 1 day)
+        - date:today (sessions from today)
+        - date:yesterday (sessions from yesterday only)
+        - Negation via date:!today or -date:today
+        """
+        if not date_filter:
+            return None
+
+        cutoff_ts = date_filter.cutoff.timestamp()
+
+        # Build the range query based on operator
+        # Use float('inf') and float('-inf') for unbounded ranges
+        if date_filter.op == DateOp.LESS_THAN:
+            # Sessions newer than cutoff (timestamp >= cutoff)
+            range_query = tantivy.Query.range_query(
+                schema,
+                "timestamp",
+                tantivy.FieldType.Float,
+                lower_bound=cutoff_ts,
+                upper_bound=float("inf"),
+                include_lower=True,
+                include_upper=True,
+            )
+        elif date_filter.op == DateOp.GREATER_THAN:
+            # Sessions older than cutoff (timestamp < cutoff)
+            range_query = tantivy.Query.range_query(
+                schema,
+                "timestamp",
+                tantivy.FieldType.Float,
+                lower_bound=float("-inf"),
+                upper_bound=cutoff_ts,
+                include_lower=True,
+                include_upper=False,
+            )
+        elif date_filter.op == DateOp.EXACT:
+            if date_filter.value.lower() == "today":
+                # Sessions from today (timestamp >= today_start)
+                range_query = tantivy.Query.range_query(
+                    schema,
+                    "timestamp",
+                    tantivy.FieldType.Float,
+                    lower_bound=cutoff_ts,
+                    upper_bound=float("inf"),
+                    include_lower=True,
+                    include_upper=True,
+                )
+            elif date_filter.value.lower() == "yesterday":
+                # Sessions from yesterday only (cutoff <= timestamp < cutoff + 1 day)
+                next_day_ts = (date_filter.cutoff + timedelta(days=1)).timestamp()
+                range_query = tantivy.Query.range_query(
+                    schema,
+                    "timestamp",
+                    tantivy.FieldType.Float,
+                    lower_bound=cutoff_ts,
+                    upper_bound=next_day_ts,
+                    include_lower=True,
+                    include_upper=False,
+                )
+            else:
+                # Unknown exact date, match all
+                return None
+        else:
+            return None
+
+        # Handle negation
+        if date_filter.negated:
+            return tantivy.Query.boolean_query(
+                [
+                    (tantivy.Occur.Must, tantivy.Query.all_query()),
+                    (tantivy.Occur.MustNot, range_query),
+                ]
+            )
+
+        return range_query
 
     def _build_hybrid_query(
         self,
