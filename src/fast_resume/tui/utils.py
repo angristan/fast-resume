@@ -102,9 +102,10 @@ def highlight_matches(
 def get_age_color(age_hours: float) -> str:
     """Return a hex color based on session age using exponential decay gradient.
 
-    Colors transition: Green (0h) → Yellow (12h) → Orange (3d) → Dim gray (30d+)
+    Colors transition: Green (0h) → Yellow (24h) → Orange (~2.5d) → Dim gray (7d+)
     """
-    decay_rate = 0.005  # Controls how fast colors fade
+    # Anchor: 24 hours should hit the green→yellow transition (t=0.3)
+    decay_rate = -math.log(1 - 0.3) / 24  # ≈ 0.0149
     t = 1 - math.exp(-decay_rate * age_hours)  # 0 at 0h, approaches 1 asymptotically
 
     # Interpolate through color stops: green → yellow → orange → gray
