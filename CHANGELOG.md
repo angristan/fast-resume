@@ -1,3 +1,10 @@
+## [1.12.8](https://github.com/angristan/fast-resume/compare/v1.12.7...v1.12.8) (2026-01-17)
+
+
+### Bug Fixes
+
+* anchor age gradient to 24h for green→yellow transition ([3e5029e](https://github.com/angristan/fast-resume/commit/3e5029e9d707899fee271816cf5a898895461135))
+
 ## [1.12.7](https://github.com/angristan/fast-resume/compare/v1.12.6...v1.12.7) (2026-01-16)
 
 
