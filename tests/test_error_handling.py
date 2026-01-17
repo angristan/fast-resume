@@ -232,7 +232,7 @@ class TestSearchEngineErrorPropagation:
         def on_progress():
             pass
 
-        search.get_sessions_streaming(on_progress, on_error=on_error)
+        search.index_sessions_parallel(on_progress, on_error=on_error)
 
         os.chmod(session_file, 0o644)
 

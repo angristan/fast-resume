@@ -223,7 +223,7 @@ class FastResumeApp(App):
         def on_error(error: ParseError):
             parse_errors.append(error)
 
-        _, new, updated, deleted = self.search_engine.get_sessions_streaming(
+        _, new, updated, deleted = self.search_engine.index_sessions_parallel(
             on_progress, on_error=on_error
         )
         # Mark loading complete and show toast if there were changes

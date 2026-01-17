@@ -113,7 +113,7 @@ class SessionSearch:
 
         return self._sessions
 
-    def get_sessions_streaming(
+    def index_sessions_parallel(
         self,
         on_progress: Callable[[], None],
         on_error: ErrorCallback = None,
