@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/angristan/fast-resume/compare/v1.12.8...v1.13.0) (2026-01-19)
+
+
+### Features
+
+* sort sessions by date by default when no search query ([b0309c9](https://github.com/angristan/fast-resume/commit/b0309c9916cfc907e3964fedbacc32a1474c4046))
+
 ## [1.12.8](https://github.com/angristan/fast-resume/compare/v1.12.7...v1.12.8) (2026-01-17)
 
 
