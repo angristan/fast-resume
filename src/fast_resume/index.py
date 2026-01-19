@@ -74,8 +74,10 @@ class TantivyIndex:
         schema_builder.add_text_field("agent", stored=True, tokenizer_name="raw")
         # Content - stored and indexed for full-text search
         schema_builder.add_text_field("content", stored=True)
-        # Timestamp - stored and indexed for range queries
-        schema_builder.add_float_field("timestamp", stored=True, indexed=True)
+        # Timestamp - stored, indexed for range queries, fast for sorting
+        schema_builder.add_float_field(
+            "timestamp", stored=True, indexed=True, fast=True
+        )
         # Message count - stored as integer
         schema_builder.add_integer_field("message_count", stored=True)
         # File modification time - for incremental updates
@@ -513,7 +515,18 @@ class TantivyIndex:
                 combined_query = tantivy.Query.all_query()
             else:
                 combined_query = tantivy.Query.boolean_query(query_parts)
-            results = searcher.search(combined_query, limit).hits
+
+            # When no text search query, sort by timestamp (newest first)
+            # When there's a text query, sort by relevance score (default)
+            if not query.strip():
+                results = searcher.search(
+                    combined_query,
+                    limit,
+                    order_by_field="timestamp",
+                    order=tantivy.Order.Desc,
+                ).hits
+            else:
+                results = searcher.search(combined_query, limit).hits
 
             # Extract session IDs and scores
             output = []

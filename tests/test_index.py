@@ -385,3 +385,121 @@ class TestTantivyIndex:
         results = index.search("authentcation")
         assert len(results) == 1
         assert results[0][0] == "session-1"
+
+    def test_empty_query_returns_results_sorted_by_date(self, index):
+        """Test that empty query returns sessions sorted by timestamp (newest first)."""
+        sessions = [
+            Session(
+                id="oldest",
+                agent="claude",
+                title="Oldest session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 10, 10, 0, 0),
+                content="This is the oldest session",
+                message_count=2,
+                mtime=1704880800.0,
+            ),
+            Session(
+                id="newest",
+                agent="claude",
+                title="Newest session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 20, 10, 0, 0),
+                content="This is the newest session",
+                message_count=2,
+                mtime=1705744800.0,
+            ),
+            Session(
+                id="middle",
+                agent="vibe",
+                title="Middle session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 0, 0),
+                content="This is the middle session",
+                message_count=2,
+                mtime=1705312800.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Empty query should return all sessions sorted by timestamp desc
+        results = index.search("")
+        assert len(results) == 3
+        assert results[0][0] == "newest"
+        assert results[1][0] == "middle"
+        assert results[2][0] == "oldest"
+
+    def test_text_query_returns_results_sorted_by_relevance(self, index):
+        """Test that text query returns sessions sorted by relevance, not date."""
+        sessions = [
+            Session(
+                id="older-relevant",
+                agent="claude",
+                title="Python authentication implementation",
+                directory="/project",
+                timestamp=datetime(2024, 1, 10, 10, 0, 0),
+                content="Python Python Python authentication",
+                message_count=2,
+                mtime=1704880800.0,
+            ),
+            Session(
+                id="newer-less-relevant",
+                agent="claude",
+                title="General coding session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 20, 10, 0, 0),
+                content="Some Python code here",
+                message_count=2,
+                mtime=1705744800.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Text query should return results by relevance (more matches = higher score)
+        results = index.search("Python")
+        assert len(results) == 2
+        # The older session has more "Python" mentions, so should rank higher
+        assert results[0][0] == "older-relevant"
+        assert results[1][0] == "newer-less-relevant"
+
+    def test_filtered_query_without_text_sorted_by_date(self, index):
+        """Test that filtered query without text returns sessions sorted by date."""
+        sessions = [
+            Session(
+                id="claude-old",
+                agent="claude",
+                title="Old Claude session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 10, 10, 0, 0),
+                content="Claude session content",
+                message_count=2,
+                mtime=1704880800.0,
+            ),
+            Session(
+                id="claude-new",
+                agent="claude",
+                title="New Claude session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 20, 10, 0, 0),
+                content="Claude session content",
+                message_count=2,
+                mtime=1705744800.0,
+            ),
+            Session(
+                id="vibe-session",
+                agent="vibe",
+                title="Vibe session",
+                directory="/project",
+                timestamp=datetime(2024, 1, 15, 10, 0, 0),
+                content="Vibe session content",
+                message_count=2,
+                mtime=1705312800.0,
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        # Filter by agent with empty text should return sorted by date
+        results = index.search("", agent_filter=Filter(include=["claude"]))
+        assert len(results) == 2
+        assert results[0][0] == "claude-new"
+        assert results[1][0] == "claude-old"
