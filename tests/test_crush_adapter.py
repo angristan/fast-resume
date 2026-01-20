@@ -79,6 +79,7 @@ class TestCrushAdapter:
         assert adapter.name == "crush"
         assert adapter.color is not None
         assert adapter.badge == "crush"
+        assert adapter.supports_yolo is False
 
     def test_parse_session_basic(self, adapter, temp_dir):
         """Test parsing a basic Crush session from database."""

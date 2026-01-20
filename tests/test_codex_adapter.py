@@ -68,6 +68,7 @@ class TestCodexAdapter:
         assert adapter.name == "codex"
         assert adapter.color is not None
         assert adapter.badge == "codex"
+        assert adapter.supports_yolo is True
 
     def test_parse_session_basic(self, adapter, codex_session_file):
         """Test parsing a basic Codex session file."""

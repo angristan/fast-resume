@@ -30,6 +30,7 @@ class CopilotVSCodeAdapter:
     name = "copilot-vscode"
     color = AGENTS["copilot-vscode"]["color"]
     badge = AGENTS["copilot-vscode"]["badge"]
+    supports_yolo = False
 
     def __init__(
         self,

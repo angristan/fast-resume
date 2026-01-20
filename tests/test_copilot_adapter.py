@@ -85,6 +85,7 @@ class TestCopilotAdapter:
         assert adapter.name == "copilot-cli"
         assert adapter.color is not None
         assert adapter.badge == "copilot"
+        assert adapter.supports_yolo is True
 
     def test_parse_session_basic(self, adapter, copilot_session_file):
         """Test parsing a basic Copilot session file."""

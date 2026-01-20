@@ -56,6 +56,7 @@ class TestCopilotVSCodeAdapter:
         assert adapter.name == "copilot-vscode"
         assert adapter.color is not None
         assert adapter.badge == "vscode"
+        assert adapter.supports_yolo is False
 
     def test_parse_session_basic(self, temp_dir, copilot_vscode_session_data):
         """Test parsing a basic VS Code Copilot session file."""

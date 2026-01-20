@@ -16,6 +16,7 @@ class OpenCodeAdapter:
     name = "opencode"
     color = AGENTS["opencode"]["color"]
     badge = AGENTS["opencode"]["badge"]
+    supports_yolo = False
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else OPENCODE_DIR

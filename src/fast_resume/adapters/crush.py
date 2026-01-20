@@ -17,6 +17,7 @@ class CrushAdapter:
     name = "crush"
     color = AGENTS["crush"]["color"]
     badge = AGENTS["crush"]["badge"]
+    supports_yolo = False
 
     def __init__(self, projects_file: Path | None = None) -> None:
         self._projects_file = (

@@ -62,6 +62,7 @@ class TestClaudeAdapter:
         assert adapter.name == "claude"
         assert adapter.color is not None
         assert adapter.badge == "claude"
+        assert adapter.supports_yolo is True
 
     def test_parse_session_basic(self, adapter, claude_session_file):
         """Test parsing a basic Claude session file."""

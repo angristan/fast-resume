@@ -106,6 +106,7 @@ class TestOpenCodeAdapter:
         assert adapter.name == "opencode"
         assert adapter.color is not None
         assert adapter.badge == "opencode"
+        assert adapter.supports_yolo is False
 
     def test_parse_session_basic(self, adapter, temp_dir):
         """Test parsing a basic OpenCode session."""
