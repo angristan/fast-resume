@@ -1,5 +1,6 @@
 """Search engine for aggregating and searching sessions."""
 
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
@@ -117,15 +118,18 @@ class SessionSearch:
         self,
         on_progress: Callable[[], None],
         on_error: ErrorCallback = None,
+        batch_size: int = 100,
     ) -> tuple[list[Session], int, int, int]:
         """Load sessions with progress callback for each adapter that completes.
 
-        Sessions are indexed incrementally as each adapter completes, allowing
-        Tantivy search to work during streaming.
+        Sessions are indexed progressively in batches as they are parsed,
+        allowing Tantivy search to work during streaming while avoiding
+        the overhead of committing each session individually.
 
         Args:
             on_progress: Callback for progress updates
             on_error: Optional callback for parse errors
+            batch_size: Number of sessions to batch before committing and updating UI
 
         Returns:
             Tuple of (sessions, new_count, updated_count, deleted_count)
@@ -145,8 +149,42 @@ class SessionSearch:
         total_updated = 0
         total_deleted = 0
 
+        # Thread-safe batch buffer for progressive indexing
+        lock = threading.Lock()
+        pending_sessions: list[Session] = []
+        all_deleted_ids: list[str] = []
+        sessions_since_progress = 0
+
+        def flush_pending() -> None:
+            """Flush pending sessions to index (must be called with lock held)."""
+            nonlocal pending_sessions
+            if pending_sessions:
+                self._index.update_sessions(pending_sessions)
+                pending_sessions = []
+
+        def handle_session(session: Session) -> None:
+            """Buffer session for batched indexing (thread-safe)."""
+            nonlocal total_new, total_updated, sessions_since_progress
+            with lock:
+                # Add to lookup immediately for search during streaming
+                self._sessions_by_id[session.id] = session
+                pending_sessions.append(session)
+                # Count new vs updated
+                if session.id in known:
+                    total_updated += 1
+                else:
+                    total_new += 1
+                # Update UI periodically with committed sessions
+                sessions_since_progress += 1
+                if sessions_since_progress >= batch_size:
+                    sessions_since_progress = 0
+                    flush_pending()  # Commit before UI update so search sees new sessions
+                    on_progress()
+
         def get_incremental(adapter):
-            return adapter.find_sessions_incremental(known, on_error=on_error)
+            return adapter.find_sessions_incremental(
+                known, on_error=on_error, on_session=handle_session
+            )
 
         try:
             with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
@@ -154,34 +192,25 @@ class SessionSearch:
                     executor.submit(get_incremental, a): a for a in self.adapters
                 }
                 for future in as_completed(futures):
-                    new_or_modified, deleted_ids = future.result()
+                    _new_or_modified, deleted_ids = future.result()
 
-                    # Skip if no changes from this adapter
-                    if not new_or_modified and not deleted_ids:
-                        continue
+                    with lock:
+                        # Flush pending sessions when adapter completes
+                        flush_pending()
 
-                    # Handle deletions first
-                    if deleted_ids:
-                        self._index.delete_sessions(deleted_ids)
-                        for sid in deleted_ids:
-                            self._sessions_by_id.pop(sid, None)
-                        total_deleted += len(deleted_ids)
-
-                    # Index incrementally + update _sessions_by_id for search lookup
-                    if new_or_modified:
-                        # Update atomically (delete + add in single transaction)
-                        self._index.update_sessions(new_or_modified)
-                        for session in new_or_modified:
-                            self._sessions_by_id[session.id] = session
-                            # Count new vs updated
-                            if session.id in known:
-                                total_updated += 1
-                            else:
-                                total_new += 1
-
-                    # Notify progress - TUI will query the index
-                    on_progress()
+                        # Accumulate deletions (will be processed at the end)
+                        if deleted_ids:
+                            all_deleted_ids.extend(deleted_ids)
+                            for sid in deleted_ids:
+                                self._sessions_by_id.pop(sid, None)
+                            total_deleted += len(deleted_ids)
         finally:
+            # Final flush of any remaining sessions
+            with lock:
+                flush_pending()
+            # Process all deletions in a single operation
+            if all_deleted_ids:
+                self._index.delete_sessions(all_deleted_ids)
             self._streaming_in_progress = False
 
         # Load final state from index

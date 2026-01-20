@@ -364,3 +364,79 @@ class TestCrushAdapter:
         sessions = adapter.find_sessions()
 
         assert len(sessions) == 0
+
+    def test_find_sessions_incremental_with_on_session_callback(self, temp_dir):
+        """Test that on_session callback is called for each new session."""
+        # Create project data directory with database
+        data_dir = temp_dir / "project1_data"
+        data_dir.mkdir()
+        db_path = data_dir / "crush.db"
+
+        now_ms = int(datetime.now().timestamp() * 1000)
+        sessions_data = [
+            {
+                "id": "session-001",
+                "title": "Test session 1",
+                "message_count": 1,
+                "updated_at": now_ms,
+                "created_at": now_ms,
+                "messages": [
+                    {
+                        "id": "msg-001",
+                        "role": "user",
+                        "parts": json.dumps(
+                            [{"type": "text", "data": {"text": "Hello from session 1"}}]
+                        ),
+                        "created_at": now_ms,
+                    },
+                ],
+            },
+            {
+                "id": "session-002",
+                "title": "Test session 2",
+                "message_count": 1,
+                "updated_at": now_ms + 1000,
+                "created_at": now_ms + 1000,
+                "messages": [
+                    {
+                        "id": "msg-002",
+                        "role": "user",
+                        "parts": json.dumps(
+                            [{"type": "text", "data": {"text": "Hello from session 2"}}]
+                        ),
+                        "created_at": now_ms + 1000,
+                    },
+                ],
+            },
+        ]
+        create_crush_db(db_path, sessions_data)
+
+        # Create projects.json
+        projects_file = temp_dir / "projects.json"
+        projects = {
+            "projects": [{"path": "/home/user/project1", "data_dir": str(data_dir)}]
+        }
+        with open(projects_file, "w") as f:
+            json.dump(projects, f)
+
+        adapter = CrushAdapter(projects_file=projects_file)
+
+        # Track callbacks
+        callback_sessions = []
+
+        def on_session(session):
+            callback_sessions.append(session)
+
+        # Call incremental with empty known (all sessions are new)
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            known={}, on_session=on_session
+        )
+
+        # Callback should be called for each session
+        assert len(callback_sessions) == 2
+        callback_ids = {s.id for s in callback_sessions}
+        assert "session-001" in callback_ids
+        assert "session-002" in callback_ids
+
+        # Return value should match callbacks
+        assert len(new_or_modified) == 2

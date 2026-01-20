@@ -288,7 +288,7 @@ Each agent stores sessions differently. Adapters normalize them into a common `S
 | Copilot CLI    | JSONL in `~/.copilot/session-state/*.jsonl`          | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
 | Copilot VSCode | JSON in VS Code's `workspaceStorage/*/chatSessions/` | Parse `requests` array with message text and response values                                |
 | Crush          | SQLite DB at `<project>/crush.db`                    | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
-| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`     | Join `session/<hash>/ses_*.json` + `message/<id>/msg_*.json` + `part/<id>/*.json`           |
+| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`     | Lazy-load `message/` and `part/` per session for progressive indexing                       |
 | Vibe           | JSON in `~/.vibe/logs/session/session_*.json`        | Parse `messages` array with role-based content                                              |
 
 **The normalized Session structure:**
@@ -331,16 +331,22 @@ This keeps the index focused on the actual conversation and avoids bloating it w
 4. Detect deleted sessions (in index but not on disk)
 5. Apply changes atomically: delete removed, upsert modified
 
-**Parallel loading** via `ThreadPoolExecutor`:
+**Progressive indexing** with batched commits:
 
 ```python
-with ThreadPoolExecutor(max_workers=len(self.adapters)) as executor:
-    futures = {executor.submit(get_incremental, a): a for a in self.adapters}
-    for future in as_completed(futures):
-        new_or_modified, deleted_ids = future.result()
-        self._index.update_sessions(new_or_modified)
-        on_progress()  # TUI updates as each adapter completes
+def handle_session(session):
+    # Buffer session for batched indexing
+    pending_sessions.append(session)
+    if len(pending_sessions) >= BATCH_SIZE:
+        self._index.update_sessions(pending_sessions)  # Batch commit
+        pending_sessions.clear()
+        on_progress()  # TUI updates
+
+# Adapters call on_session as each session is parsed
+adapter.find_sessions_incremental(known, on_session=handle_session)
 ```
+
+Sessions appear in the TUI progressively as they're parsed and batched. OpenCode uses parallel file I/O and processes smaller sessions first for faster initial results.
 
 **Schema versioning**: A `.schema_version` file tracks the index schema. If it doesn't match the code's `SCHEMA_VERSION` constant, the entire index is deleted and rebuilt. This prevents deserialization errors after upgrades.
 

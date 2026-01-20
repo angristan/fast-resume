@@ -2,12 +2,13 @@
 
 import orjson
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from ..config import AGENTS, OPENCODE_DIR
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, RawAdapterStats, Session
+from .base import ErrorCallback, ParseError, RawAdapterStats, Session, SessionCallback
 
 
 class OpenCodeAdapter:
@@ -190,8 +191,13 @@ class OpenCodeAdapter:
         self,
         known: dict[str, tuple[float, str]],
         on_error: ErrorCallback = None,
+        on_session: SessionCallback = None,
     ) -> tuple[list[Session], list[str]]:
-        """Find sessions incrementally, comparing against known sessions."""
+        """Find sessions incrementally, comparing against known sessions.
+
+        Uses bulk loading of messages/parts for efficiency, then calls
+        on_session progressively as each session is parsed.
+        """
         if not self.is_available():
             deleted_ids = [
                 sid for sid, (_, agent) in known.items() if agent == self.name
@@ -205,9 +211,7 @@ class OpenCodeAdapter:
             ]
             return [], deleted_ids
 
-        # Scan session files and get timestamps
-        # For OpenCode, we use the 'created' timestamp from the file content
-        # (not file mtime) because that's what we store in the index
+        # Scan session files and get timestamps (fast - just file listing + metadata)
         current_sessions: dict[str, tuple[Path, float]] = {}
 
         for project_dir in session_dir.iterdir():
@@ -234,10 +238,12 @@ class OpenCodeAdapter:
         # Check which sessions need parsing
         # Use 1ms tolerance for mtime comparison due to datetime precision loss
         sessions_to_parse: list[tuple[str, Path, float]] = []
+        session_ids_to_parse: set[str] = set()
         for session_id, (path, mtime) in current_sessions.items():
             known_entry = known.get(session_id)
             if known_entry is None or mtime > known_entry[0] + 0.001:
                 sessions_to_parse.append((session_id, path, mtime))
+                session_ids_to_parse.add(session_id)
 
         # Find deleted sessions
         current_ids = set(current_sessions.keys())
@@ -250,49 +256,86 @@ class OpenCodeAdapter:
         if not sessions_to_parse:
             return [], deleted_ids
 
-        # Build indexes only for sessions we need to parse
+        # Parallel file I/O with ThreadPoolExecutor
         message_dir = self._sessions_dir / "message"
         part_dir = self._sessions_dir / "part"
 
+        def read_message_file(msg_file: Path) -> tuple[str, Path, str, str] | None:
+            """Read a message file and return (session_id, path, msg_id, role)."""
+            try:
+                with open(msg_file, "rb") as f:
+                    data = orjson.loads(f.read())
+                msg_id = data.get("id", "")
+                role = data.get("role", "")
+                if msg_id:
+                    return (msg_file.parent.name, msg_file, msg_id, role)
+            except (OSError, orjson.JSONDecodeError):
+                pass
+            return None
+
+        def read_part_file(part_file: Path) -> tuple[str, str] | None:
+            """Read a part file and return (msg_id, text) if it's a text part."""
+            try:
+                with open(part_file, "rb") as f:
+                    data = orjson.loads(f.read())
+                if data.get("type") == "text":
+                    text = data.get("text", "")
+                    if text:
+                        return (part_file.parent.name, text)
+            except (OSError, orjson.JSONDecodeError):
+                pass
+            return None
+
+        # Step 1: Bulk read all message files in parallel
+        all_msg_files = []
+        for session_id in session_ids_to_parse:
+            session_msg_dir = message_dir / session_id
+            if session_msg_dir.exists():
+                all_msg_files.extend(session_msg_dir.glob("msg_*.json"))
+
         messages_by_session: dict[str, list[tuple[Path, str, str]]] = defaultdict(list)
-        if message_dir.exists():
-            for msg_file in message_dir.glob("*/msg_*.json"):
-                try:
-                    with open(msg_file, "rb") as f:
-                        msg_data = orjson.loads(f.read())
-                    session_id = msg_file.parent.name
-                    msg_id = msg_data.get("id", "")
-                    role = msg_data.get("role", "")
-                    if msg_id:
-                        messages_by_session[session_id].append((msg_file, msg_id, role))
-                except (OSError, orjson.JSONDecodeError):
-                    # Skip files that can't be read during indexing
-                    continue
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            for result in executor.map(read_message_file, all_msg_files):
+                if result:
+                    session_id, path, msg_id, role = result
+                    messages_by_session[session_id].append((path, msg_id, role))
 
-        parts_by_message: dict[str, list[str]] = defaultdict(list)
-        if part_dir.exists():
-            for part_file in sorted(part_dir.glob("*/*.json")):
-                try:
-                    with open(part_file, "rb") as f:
-                        part_data = orjson.loads(f.read())
-                    msg_id = part_file.parent.name
-                    if part_data.get("type") == "text":
-                        text = part_data.get("text", "")
-                        if text:
-                            parts_by_message[msg_id].append(text)
-                except (OSError, orjson.JSONDecodeError):
-                    # Skip files that can't be read during indexing
-                    continue
-
-        # Parse the changed sessions
-        new_or_modified = []
-        for session_id, path, mtime in sessions_to_parse:
-            session = self._parse_session(
-                path, messages_by_session, parts_by_message, on_error=on_error
+            # Sort sessions by message count (smallest first for faster initial results)
+            sorted_sessions = sorted(
+                sessions_to_parse, key=lambda x: len(messages_by_session.get(x[0], []))
             )
-            if session:
-                session.mtime = mtime
-                new_or_modified.append(session)
+
+            # Step 2: Process sessions in batches (reuse executor)
+            BATCH_SIZE = 5
+            new_or_modified = []
+            for i in range(0, len(sorted_sessions), BATCH_SIZE):
+                batch = sorted_sessions[i : i + BATCH_SIZE]
+
+                # Collect part files for this batch
+                batch_part_files = []
+                for session_id, _, _ in batch:
+                    for _, msg_id, _ in messages_by_session.get(session_id, []):
+                        msg_part_dir = part_dir / msg_id
+                        if msg_part_dir.exists():
+                            batch_part_files.extend(msg_part_dir.glob("*.json"))
+
+                # Read parts in parallel
+                parts_by_message: dict[str, list[str]] = defaultdict(list)
+                for result in executor.map(read_part_file, batch_part_files):
+                    if result:
+                        msg_id, text = result
+                        parts_by_message[msg_id].append(text)
+
+                # Parse and callback
+                for session_id, path, mtime in batch:
+                    session = self._parse_session(
+                        path, messages_by_session, parts_by_message, on_error=on_error
+                    )
+                    if session:
+                        session.mtime = mtime
+                        new_or_modified.append(session)
+                        if on_session:
+                            on_session(session)
 
         return new_or_modified, deleted_ids
 

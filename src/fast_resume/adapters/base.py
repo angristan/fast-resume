@@ -72,8 +72,9 @@ class ParseError:
     message: str  # Human-readable error message
 
 
-# Type alias for error callback
+# Type aliases for callbacks
 ErrorCallback = Callable[["ParseError"], None] | None
+SessionCallback = Callable[["Session"], None] | None
 
 
 class AgentAdapter(Protocol):
@@ -91,12 +92,15 @@ class AgentAdapter(Protocol):
         self,
         known: dict[str, tuple[float, str]],
         on_error: ErrorCallback = None,
+        on_session: "SessionCallback" = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions.
 
         Args:
             known: Dict mapping session_id to (mtime, agent_name) tuple
             on_error: Optional callback for parse errors
+            on_session: Optional callback called immediately when a session is parsed,
+                enabling progressive indexing before the full scan completes
 
         Returns:
             Tuple of (new_or_modified sessions, deleted session IDs)
@@ -194,12 +198,15 @@ class BaseSessionAdapter(ABC):
         self,
         known: dict[str, tuple[float, str]],
         on_error: ErrorCallback = None,
+        on_session: SessionCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally using template method pattern.
 
         Args:
             known: Dict mapping session_id to (mtime, agent_name) tuple
             on_error: Optional callback for parse errors
+            on_session: Optional callback called immediately when a session is parsed,
+                enabling progressive indexing before the full scan completes
 
         Returns:
             Tuple of (new_or_modified sessions, deleted session IDs)
@@ -223,6 +230,9 @@ class BaseSessionAdapter(ABC):
                 if session:
                     session.mtime = mtime
                     new_or_modified.append(session)
+                    # Call on_session callback for progressive indexing
+                    if on_session:
+                        on_session(session)
 
         # Find deleted sessions (in known but not in current, for this agent only)
         current_ids = set(current_files.keys())

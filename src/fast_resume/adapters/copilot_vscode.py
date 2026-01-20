@@ -8,7 +8,14 @@ from urllib.parse import unquote, urlparse
 
 from ..config import AGENTS
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
+from .base import (
+    ErrorCallback,
+    ParseError,
+    RawAdapterStats,
+    Session,
+    SessionCallback,
+    truncate_title,
+)
 
 # VS Code storage paths vary by platform
 if sys.platform == "darwin":
@@ -252,6 +259,7 @@ class CopilotVSCodeAdapter:
         self,
         known: dict[str, tuple[float, str]],
         on_error: ErrorCallback = None,
+        on_session: SessionCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions."""
         if not self.is_available():
@@ -278,6 +286,9 @@ class CopilotVSCodeAdapter:
                 session = self._parse_session(path, ws_directory, on_error=on_error)
                 if session:
                     new_or_modified.append(session)
+                    # Call on_session callback for progressive indexing
+                    if on_session:
+                        on_session(session)
 
         # Find deleted sessions
         current_ids = set(current_files.keys())

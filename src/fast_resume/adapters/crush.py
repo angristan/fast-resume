@@ -8,7 +8,14 @@ from pathlib import Path
 
 from ..config import AGENTS, CRUSH_PROJECTS_FILE
 from ..logging_config import log_parse_error
-from .base import ErrorCallback, ParseError, RawAdapterStats, Session, truncate_title
+from .base import (
+    ErrorCallback,
+    ParseError,
+    RawAdapterStats,
+    Session,
+    SessionCallback,
+    truncate_title,
+)
 
 
 class CrushAdapter:
@@ -231,6 +238,7 @@ class CrushAdapter:
         self,
         known: dict[str, tuple[float, str]],
         on_error: ErrorCallback = None,
+        on_session: SessionCallback = None,
     ) -> tuple[list[Session], list[str]]:
         """Find sessions incrementally, comparing against known sessions."""
         if not self.is_available():
@@ -278,6 +286,9 @@ class CrushAdapter:
                 if known_entry is None or session_mtime > known_entry[0] + 0.001:
                     session.mtime = session_mtime
                     new_or_modified.append(session)
+                    # Call on_session callback for progressive indexing
+                    if on_session:
+                        on_session(session)
 
         # Find deleted sessions
         deleted_ids = [

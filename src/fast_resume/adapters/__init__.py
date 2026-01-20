@@ -1,6 +1,13 @@
 """Agent adapters for different coding tools."""
 
-from .base import AgentAdapter, ErrorCallback, ParseError, RawAdapterStats, Session
+from .base import (
+    AgentAdapter,
+    ErrorCallback,
+    ParseError,
+    RawAdapterStats,
+    Session,
+    SessionCallback,
+)
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 from .copilot import CopilotAdapter
@@ -15,6 +22,7 @@ __all__ = [
     "ParseError",
     "RawAdapterStats",
     "Session",
+    "SessionCallback",
     "ClaudeAdapter",
     "CodexAdapter",
     "CopilotAdapter",

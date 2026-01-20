@@ -680,3 +680,86 @@ class TestTantivyFiltering:
         """Test that empty query with no filters returns all sessions."""
         results = multi_session_index.search("")
         assert len(results) == 6
+
+
+class TestProgressiveIndexing:
+    """Tests for progressive indexing with on_session callback."""
+
+    def test_index_sessions_parallel_calls_progress(
+        self, search_env, configured_search
+    ):
+        """Test that index_sessions_parallel calls on_progress during indexing."""
+        progress_calls = []
+
+        def on_progress():
+            progress_calls.append(True)
+
+        # Use batch_size=1 to ensure progress is called with small test data
+        configured_search.index_sessions_parallel(on_progress, batch_size=1)
+
+        # Should have been called at least once (when adapters complete)
+        assert len(progress_calls) >= 1
+
+    def test_index_sessions_parallel_indexes_progressively(
+        self, search_env, configured_search
+    ):
+        """Test that sessions are indexed progressively via on_session callback."""
+        # Track that progress is called during indexing
+        progress_call_count = [0]
+
+        def on_progress():
+            progress_call_count[0] += 1
+
+        # Use batch_size=1 to ensure progress is called with small test data
+        configured_search.index_sessions_parallel(on_progress, batch_size=1)
+
+        # Should end up with all sessions indexed
+        final_count = configured_search.get_session_count()
+        assert final_count == 2
+
+        # Progress should have been called (2 sessions with interval=1 = 2 calls)
+        assert progress_call_count[0] >= 2
+
+    def test_index_sessions_parallel_returns_correct_counts(
+        self, search_env, configured_search
+    ):
+        """Test that index_sessions_parallel returns correct new/updated/deleted counts."""
+        sessions, new_count, updated_count, deleted_count = (
+            configured_search.index_sessions_parallel(lambda: None)
+        )
+
+        # All sessions are new (first indexing)
+        assert new_count == 2
+        assert updated_count == 0
+        assert deleted_count == 0
+        assert len(sessions) == 2
+
+    def test_index_sessions_parallel_handles_updates(
+        self, search_env, configured_search
+    ):
+        """Test that updated sessions are counted correctly."""
+        # First indexing
+        configured_search.index_sessions_parallel(lambda: None)
+
+        # Modify a session file
+        import time
+
+        time.sleep(0.1)  # Ensure mtime changes
+        claude_session = search_env["claude_session"]
+        with open(claude_session, "a") as f:
+            f.write(
+                json.dumps(
+                    {"type": "user", "message": {"content": "Follow-up question"}}
+                )
+                + "\n"
+            )
+
+        # Second indexing - force refresh
+        configured_search._sessions = None
+        sessions, new_count, updated_count, deleted_count = (
+            configured_search.index_sessions_parallel(lambda: None)
+        )
+
+        # One session should be updated
+        assert updated_count == 1
+        assert new_count == 0

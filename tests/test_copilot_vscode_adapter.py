@@ -417,3 +417,48 @@ class TestCopilotVSCodeAdapter:
 
         cmd = adapter.get_resume_command(session)
         assert cmd == ["code"]
+
+    def test_find_sessions_incremental_with_on_session_callback(self, temp_dir):
+        """Test that on_session callback is called for each new session."""
+        session_dir = temp_dir / "emptyWindowChatSessions"
+        session_dir.mkdir(parents=True)
+
+        # Create two session files
+        for i in range(2):
+            session_file = session_dir / f"session-{i}.json"
+            data = {
+                "sessionId": f"session-id-{i}",
+                "requests": [
+                    {
+                        "message": {"text": f"Session {i} message"},
+                        "response": [{"value": f"Session {i} response"}],
+                    },
+                ],
+            }
+            with open(session_file, "w") as f:
+                json.dump(data, f)
+
+        adapter = CopilotVSCodeAdapter(
+            chat_sessions_dir=session_dir,
+            workspace_storage_dir=temp_dir / "nonexistent",
+        )
+
+        # Track callbacks
+        callback_sessions = []
+
+        def on_session(session):
+            callback_sessions.append(session)
+
+        # Call incremental with empty known (all sessions are new)
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            known={}, on_session=on_session
+        )
+
+        # Callback should be called for each session
+        assert len(callback_sessions) == 2
+        callback_ids = {s.id for s in callback_sessions}
+        assert "session-id-0" in callback_ids
+        assert "session-id-1" in callback_ids
+
+        # Return value should match callbacks
+        assert len(new_or_modified) == 2

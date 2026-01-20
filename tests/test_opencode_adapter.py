@@ -306,3 +306,96 @@ class TestOpenCodeAdapter:
         with patch.object(adapter, "is_available", return_value=False):
             sessions = adapter.find_sessions()
             assert sessions == []
+
+    def test_find_sessions_incremental_with_on_session_callback(self, temp_dir):
+        """Test that on_session callback is called for each new session."""
+        sessions = [
+            {
+                "id": "ses_001",
+                "title": "Session 1",
+                "directory": "/project1",
+                "project_hash": "proj_aaa",
+                "messages": [
+                    {
+                        "id": "msg_001",
+                        "role": "user",
+                        "parts": [{"id": "p1", "type": "text", "text": "Hello"}],
+                    }
+                ],
+            },
+            {
+                "id": "ses_002",
+                "title": "Session 2",
+                "directory": "/project2",
+                "project_hash": "proj_bbb",
+                "messages": [
+                    {
+                        "id": "msg_002",
+                        "role": "user",
+                        "parts": [{"id": "p2", "type": "text", "text": "World"}],
+                    }
+                ],
+            },
+        ]
+        create_opencode_structure(temp_dir, sessions)
+
+        adapter = OpenCodeAdapter(sessions_dir=temp_dir)
+
+        # Track callbacks
+        callback_sessions = []
+
+        def on_session(session):
+            callback_sessions.append(session)
+
+        # Call incremental with empty known (all sessions are new)
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            known={}, on_session=on_session
+        )
+
+        # Callback should be called for each session
+        assert len(callback_sessions) == 2
+        callback_ids = {s.id for s in callback_sessions}
+        assert "ses_001" in callback_ids
+        assert "ses_002" in callback_ids
+
+        # Return value should match callbacks
+        assert len(new_or_modified) == 2
+
+    def test_find_sessions_incremental_no_callback_when_no_changes(self, temp_dir):
+        """Test that on_session callback is not called when sessions are unchanged."""
+        sessions = [
+            {
+                "id": "ses_001",
+                "title": "Session 1",
+                "directory": "/project1",
+                "project_hash": "proj_aaa",
+                "created_ms": 1704067200000,  # Fixed timestamp
+                "messages": [
+                    {
+                        "id": "msg_001",
+                        "role": "user",
+                        "parts": [{"id": "p1", "type": "text", "text": "Hello"}],
+                    }
+                ],
+            },
+        ]
+        create_opencode_structure(temp_dir, sessions)
+
+        adapter = OpenCodeAdapter(sessions_dir=temp_dir)
+
+        # Known sessions with same mtime
+        mtime = datetime.fromtimestamp(1704067200000 / 1000).timestamp()
+        known = {"ses_001": (mtime, "opencode")}
+
+        callback_sessions = []
+
+        def on_session(session):
+            callback_sessions.append(session)
+
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            known=known, on_session=on_session
+        )
+
+        # No callback should be called (session unchanged)
+        assert len(callback_sessions) == 0
+        assert len(new_or_modified) == 0
