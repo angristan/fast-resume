@@ -1,6 +1,6 @@
 [project]
 name = "fast-resume"
-version = "1.13.0"
+version = "1.13.1"
 description = "Fuzzy finder for coding agent session history"
 readme = "README.md"
 requires-python = ">=3.14"

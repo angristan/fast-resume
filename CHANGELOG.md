@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/angristan/fast-resume/compare/v1.13.0...v1.13.1) (2026-01-20)
+
+
+### Bug Fixes
+
+* add missing supports_yolo attribute to adapters ([c8d4e82](https://github.com/angristan/fast-resume/commit/c8d4e824fc88fda9f1641aa46ec9ff5b62029553))
+
 # [1.13.0](https://github.com/angristan/fast-resume/compare/v1.12.8...v1.13.0) (2026-01-19)
 
 
