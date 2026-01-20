@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/angristan/fast-resume/compare/v1.13.1...v1.14.0) (2026-01-20)
+
+
+### Features
+
+* progressive indexing with on_session callback ([a5af4ff](https://github.com/angristan/fast-resume/commit/a5af4ff8af3dc52554a5fcbe03eaf5c266942ad4))
+
 ## [1.13.1](https://github.com/angristan/fast-resume/compare/v1.13.0...v1.13.1) (2026-01-20)
 
 
