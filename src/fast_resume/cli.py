@@ -314,7 +314,7 @@ def _list_sessions(query: str, agent: str | None, directory: str | None) -> None
             f"[{agent_style}]{session.agent}[/{agent_style}]",
             title,
             directory_display,
-            session.id[:20] + "..." if len(session.id) > 20 else session.id,
+            session.id,
         )
 
     console.print(table)
