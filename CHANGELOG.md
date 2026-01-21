@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/angristan/fast-resume/compare/v1.14.0...v1.14.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* display full session IDs without truncation ([8fd3e8b](https://github.com/angristan/fast-resume/commit/8fd3e8b0b5298f0fb038c98e8825eca3f0f0b785))
+
 # [1.14.0](https://github.com/angristan/fast-resume/compare/v1.13.1...v1.14.0) (2026-01-20)
 
 
