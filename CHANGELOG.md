@@ -1,3 +1,10 @@
+## [1.15.2](https://github.com/angristan/fast-resume/compare/v1.15.1...v1.15.2) (2026-02-04)
+
+
+### Bug Fixes
+
+* **tui:** update selected_session before resume on click ([684259a](https://github.com/angristan/fast-resume/commit/684259a3945a236dd60628976845f5322f56d640))
+
 ## [1.15.1](https://github.com/angristan/fast-resume/compare/v1.15.0...v1.15.1) (2026-02-04)
 
 
