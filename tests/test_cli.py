@@ -68,21 +68,25 @@ def cli_env(temp_dir):
         for entry in claude_data2:
             f.write(json.dumps(entry) + "\n")
 
-    # Create Vibe session
-    vibe_session = vibe_dir / "session_vibe-001.json"
-    vibe_data = {
-        "metadata": {
-            "session_id": "vibe-001",
-            "start_time": "2025-01-10T14:00:00",
-            "environment": {"working_directory": "/home/user/frontend"},
-        },
-        "messages": [
-            {"role": "user", "content": "Create a React component"},
-            {"role": "assistant", "content": "Here's the React component."},
-        ],
+    # Create Vibe session (folder-based format)
+    vibe_session = vibe_dir / "session_20250110_140000_vibe001"
+    vibe_session.mkdir()
+
+    vibe_meta = {
+        "session_id": "vibe-001",
+        "start_time": "2025-01-10T14:00:00",
+        "environment": {"working_directory": "/home/user/frontend"},
     }
-    with open(vibe_session, "w") as f:
-        json.dump(vibe_data, f)
+    with open(vibe_session / "meta.json", "w") as f:
+        json.dump(vibe_meta, f)
+
+    vibe_messages = [
+        {"role": "user", "content": "Create a React component"},
+        {"role": "assistant", "content": "Here's the React component."},
+    ]
+    with open(vibe_session / "messages.jsonl", "w") as f:
+        for msg in vibe_messages:
+            f.write(json.dumps(msg) + "\n")
 
     index_dir = temp_dir / "index"
 

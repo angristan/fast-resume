@@ -53,23 +53,27 @@ def search_env(temp_dir):
         for entry in claude_data:
             f.write(json.dumps(entry) + "\n")
 
-    # Create a Vibe session file (JSON format)
-    vibe_session = vibe_dir / "session_vibe-001.json"
-    vibe_data = {
-        "metadata": {
-            "session_id": "vibe-001",
-            "start_time": "2025-01-10T14:00:00",
-            "environment": {"working_directory": "/home/user/api-project"},
-        },
-        "messages": [
-            {"role": "user", "content": "Create a REST API endpoint"},
-            {"role": "assistant", "content": "I'll create the REST endpoint for you."},
-            {"role": "user", "content": "Add rate limiting"},
-            {"role": "assistant", "content": "Here's the rate limiting middleware."},
-        ],
+    # Create a Vibe session folder (new format with meta.json + messages.jsonl)
+    vibe_session = vibe_dir / "session_20250110_140000_vibe001"
+    vibe_session.mkdir()
+
+    vibe_meta = {
+        "session_id": "vibe-001",
+        "start_time": "2025-01-10T14:00:00",
+        "environment": {"working_directory": "/home/user/api-project"},
     }
-    with open(vibe_session, "w") as f:
-        json.dump(vibe_data, f)
+    with open(vibe_session / "meta.json", "w") as f:
+        json.dump(vibe_meta, f)
+
+    vibe_messages = [
+        {"role": "user", "content": "Create a REST API endpoint"},
+        {"role": "assistant", "content": "I'll create the REST endpoint for you."},
+        {"role": "user", "content": "Add rate limiting"},
+        {"role": "assistant", "content": "Here's the rate limiting middleware."},
+    ]
+    with open(vibe_session / "messages.jsonl", "w") as f:
+        for msg in vibe_messages:
+            f.write(json.dumps(msg) + "\n")
 
     # Create index in temp dir
     index_dir = temp_dir / "index"
@@ -283,21 +287,25 @@ class TestIncrementalUpdates:
         sessions1 = configured_search.get_all_sessions()
         assert len(sessions1) == 2
 
-        # Add a new Vibe session
-        new_session = search_env["vibe_dir"] / "session_vibe-002.json"
-        new_data = {
-            "metadata": {
-                "session_id": "vibe-002",
-                "start_time": "2025-01-15T10:00:00",
-                "environment": {"working_directory": "/home/user/new-project"},
-            },
-            "messages": [
-                {"role": "user", "content": "New session content"},
-                {"role": "assistant", "content": "Response here"},
-            ],
+        # Add a new Vibe session (folder-based format)
+        new_session = search_env["vibe_dir"] / "session_20250115_100000_vibe002"
+        new_session.mkdir()
+
+        new_meta = {
+            "session_id": "vibe-002",
+            "start_time": "2025-01-15T10:00:00",
+            "environment": {"working_directory": "/home/user/new-project"},
         }
-        with open(new_session, "w") as f:
-            json.dump(new_data, f)
+        with open(new_session / "meta.json", "w") as f:
+            json.dump(new_meta, f)
+
+        new_messages = [
+            {"role": "user", "content": "New session content"},
+            {"role": "assistant", "content": "Response here"},
+        ]
+        with open(new_session / "messages.jsonl", "w") as f:
+            for msg in new_messages:
+                f.write(json.dumps(msg) + "\n")
 
         # Force refresh should find new session
         sessions2 = configured_search.get_all_sessions(force_refresh=True)
