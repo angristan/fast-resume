@@ -65,15 +65,16 @@ def create_opencode_structure(base_dir, sessions):
         sess_dir.mkdir(parents=True, exist_ok=True)
 
         session_file = sess_dir / f"ses_{session['id']}.json"
+        time_data = {
+            "created": session.get("created_ms", int(datetime.now().timestamp() * 1000))
+        }
+        if "updated_ms" in session:
+            time_data["updated"] = session["updated_ms"]
         session_data = {
             "id": session["id"],
             "title": session.get("title", "Untitled session"),
             "directory": session.get("directory", "/test"),
-            "time": {
-                "created": session.get(
-                    "created_ms", int(datetime.now().timestamp() * 1000)
-                )
-            },
+            "time": time_data,
         }
         with open(session_file, "w") as f:
             json.dump(session_data, f)
@@ -181,6 +182,38 @@ class TestOpenCodeAdapter:
         assert session is not None
         # Should use file mtime, which will be recent
         assert session.timestamp.year >= 2024
+
+    def test_parse_session_uses_updated_time_over_created(self, adapter, temp_dir):
+        """Test that time.updated is used over time.created when available."""
+        session_dir = temp_dir / "session" / "proj_abc"
+        session_dir.mkdir(parents=True)
+
+        session_file = session_dir / "ses_test.json"
+        # Session with both created and updated times - updated is later
+        created_ms = 1704067200000  # 2024-01-01 00:00:00 UTC
+        updated_ms = 1704153600000  # 2024-01-02 00:00:00 UTC (1 day later)
+        with open(session_file, "w") as f:
+            json.dump(
+                {
+                    "id": "test",
+                    "title": "Test",
+                    "directory": "/test",
+                    "time": {"created": created_ms, "updated": updated_ms},
+                },
+                f,
+            )
+
+        messages_by_session, parts_by_message = build_indexes(
+            temp_dir / "message", temp_dir / "part"
+        )
+        session = adapter._parse_session(
+            session_file, messages_by_session, parts_by_message
+        )
+
+        assert session is not None
+        # Should use updated time (later), not created
+        expected_timestamp = datetime.fromtimestamp(updated_ms / 1000)
+        assert session.timestamp == expected_timestamp
 
     def test_get_session_messages(self, adapter, temp_dir):
         """Test message retrieval from parts."""

@@ -99,11 +99,13 @@ class OpenCodeAdapter:
             title = data.get("title", "Untitled session")
             directory = data.get("directory", "")
 
-            # Parse timestamp from milliseconds
+            # Parse timestamp from milliseconds - use updated time if available, else created
             time_data = data.get("time", {})
             created = time_data.get("created", 0)
-            if created:
-                timestamp = datetime.fromtimestamp(created / 1000)
+            updated = time_data.get("updated", 0)
+            time_ms = max(created, updated) if (created or updated) else 0
+            if time_ms:
+                timestamp = datetime.fromtimestamp(time_ms / 1000)
             else:
                 timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
 
@@ -224,10 +226,13 @@ class OpenCodeAdapter:
                         data = orjson.loads(f.read())
                     session_id = data.get("id", "")
                     if session_id:
-                        # Use created timestamp to match what _parse_session stores
-                        created = data.get("time", {}).get("created", 0)
-                        if created:
-                            mtime = datetime.fromtimestamp(created / 1000).timestamp()
+                        # Use max(created, updated) to match what _parse_session stores
+                        time_data = data.get("time", {})
+                        created = time_data.get("created", 0)
+                        updated = time_data.get("updated", 0)
+                        time_ms = max(created, updated) if (created or updated) else 0
+                        if time_ms:
+                            mtime = datetime.fromtimestamp(time_ms / 1000).timestamp()
                         else:
                             mtime = session_file.stat().st_mtime
                         current_sessions[session_id] = (session_file, mtime)
