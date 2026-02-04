@@ -143,6 +143,10 @@ class SessionSearch:
         for session in existing_sessions:
             self._sessions_by_id[session.id] = session
 
+        # Show existing sessions immediately before indexing changes
+        if existing_sessions:
+            on_progress()
+
         # Mark streaming as in progress
         self._streaming_in_progress = True
         total_new = 0

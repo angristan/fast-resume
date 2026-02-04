@@ -226,6 +226,10 @@ class FastResumeApp(App):
         _, new, updated, deleted = self.search_engine.index_sessions_parallel(
             on_progress, on_error=on_error
         )
+        # Final search to ensure UI shows all indexed sessions
+        # (on_progress is only called during streaming when batch_size is reached,
+        # so if fewer sessions changed, the UI would never be updated)
+        on_progress()
         # Mark loading complete and show toast if there were changes
         self.call_from_thread(
             self._finish_loading, new, updated, deleted, len(parse_errors)
