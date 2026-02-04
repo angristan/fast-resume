@@ -172,6 +172,10 @@ class ResultsTable(DataTable):
         session = self.get_selected_session()
         self.post_message(self.Selected(session))
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle Enter key on row - trigger resume action in app."""
+        self.app.action_resume_session()
+
     @property
     def displayed_sessions(self) -> list[Session]:
         """Get the list of displayed sessions."""
