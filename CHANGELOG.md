@@ -1,3 +1,11 @@
+## [1.14.3](https://github.com/angristan/fast-resume/compare/v1.14.2...v1.14.3) (2026-02-04)
+
+
+### Bug Fixes
+
+* **opencode:** use time.updated for session timestamp instead of time.created ([8200a3d](https://github.com/angristan/fast-resume/commit/8200a3d4925b97f5e07a3c0f141cc80022158563))
+* **tui:** show existing sessions immediately during streaming load ([26ae477](https://github.com/angristan/fast-resume/commit/26ae477cace6673f6c6a0f0c636b867c1d52a98b))
+
 ## [1.14.2](https://github.com/angristan/fast-resume/compare/v1.14.1...v1.14.2) (2026-02-04)
 
 
