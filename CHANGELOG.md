@@ -1,3 +1,10 @@
+## [1.14.2](https://github.com/angristan/fast-resume/compare/v1.14.1...v1.14.2) (2026-02-04)
+
+
+### Bug Fixes
+
+* **vibe:** update adapter for Vibe 2.0 session format ([#16](https://github.com/angristan/fast-resume/issues/16)) ([85a52aa](https://github.com/angristan/fast-resume/commit/85a52aa44d615fc3530f3533092146ce61fc8e9d))
+
 ## [1.14.1](https://github.com/angristan/fast-resume/compare/v1.14.0...v1.14.1) (2026-01-21)
 
 
