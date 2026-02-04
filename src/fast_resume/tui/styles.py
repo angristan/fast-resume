@@ -31,6 +31,7 @@ YoloModeModal #buttons {
 YoloModeModal Button {
     margin: 0 1;
     min-width: 10;
+    pointer: pointer;
 }
 
 YoloModeModal Button:focus {
@@ -117,6 +118,7 @@ Screen {
     border: none;
     background: transparent;
     color: $text-muted;
+    pointer: pointer;
 }
 
 .filter-btn:hover {
@@ -224,6 +226,7 @@ Screen {
 DataTable {
     background: transparent;
     overflow-x: hidden;
+    pointer: pointer;
 }
 
 DataTable > .datatable--header {

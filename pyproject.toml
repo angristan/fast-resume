@@ -5,7 +5,7 @@ description = "Fuzzy finder for coding agent session history"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "textual>=0.47.0",
+    "textual>=7.4.0",
     "rich>=13.0.0",
     "click>=8.0.0",
     "humanize>=4.14.0",

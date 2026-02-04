@@ -164,7 +164,7 @@ requires-dist = [
     { name = "orjson", specifier = ">=3.10.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "tantivy", specifier = ">=0.25.0" },
-    { name = "textual", specifier = ">=0.47.0" },
+    { name = "textual", specifier = ">=7.4.0" },
     { name = "textual-image", specifier = ">=0.8.4" },
 ]
 
