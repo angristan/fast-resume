@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/angristan/fast-resume/compare/v1.14.3...v1.15.0) (2026-02-04)
+
+
+### Features
+
+* **tui:** add pointer cursor styles using Textual 7.4.0 ([29628dc](https://github.com/angristan/fast-resume/commit/29628dcdf1c1c11851354536329931bfcca385ab))
+
 ## [1.14.3](https://github.com/angristan/fast-resume/compare/v1.14.2...v1.14.3) (2026-02-04)
 
 
