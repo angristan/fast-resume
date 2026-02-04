@@ -214,6 +214,6 @@ class VibeAdapter(BaseSessionAdapter):
         """Get command to resume a Vibe session."""
         cmd = ["vibe"]
         if yolo:
-            cmd.append("--auto-approve")
+            cmd.extend(["--agent", "auto-approve"])
         cmd.extend(["--resume", session.id])
         return cmd

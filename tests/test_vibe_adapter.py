@@ -393,7 +393,7 @@ class TestVibeAdapter:
 
         cmd = adapter.get_resume_command(session, yolo=True)
 
-        assert cmd == ["vibe", "--auto-approve", "--resume", "vibe-abc123"]
+        assert cmd == ["vibe", "--agent", "auto-approve", "--resume", "vibe-abc123"]
 
     def test_find_sessions(self, temp_dir):
         """Test finding all Vibe sessions."""
