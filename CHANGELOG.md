@@ -1,3 +1,11 @@
+## [1.15.1](https://github.com/angristan/fast-resume/compare/v1.15.0...v1.15.1) (2026-02-04)
+
+
+### Bug Fixes
+
+* **tui:** handle Enter key when results table is focused ([5488f48](https://github.com/angristan/fast-resume/commit/5488f483fe96771e77a2aed8c0bc80cae333a48a))
+* **vibe:** use --agent auto-approve instead of non-existent --auto-approve flag ([7fb5fae](https://github.com/angristan/fast-resume/commit/7fb5fae1dfdbf6d60aba4a7f82750d744635e8dc))
+
 # [1.15.0](https://github.com/angristan/fast-resume/compare/v1.14.3...v1.15.0) (2026-02-04)
 
 
