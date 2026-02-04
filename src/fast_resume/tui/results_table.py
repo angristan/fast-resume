@@ -173,7 +173,13 @@ class ResultsTable(DataTable):
         self.post_message(self.Selected(session))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle Enter key on row - trigger resume action in app."""
+        """Handle Enter key or click on row - trigger resume action in app."""
+        from .app import FastResumeApp
+
+        assert isinstance(self.app, FastResumeApp)
+        # Update selected_session first (click may fire before RowHighlighted updates it)
+        if session := self.get_selected_session():
+            self.app.selected_session = session
         self.app.action_resume_session()
 
     @property
