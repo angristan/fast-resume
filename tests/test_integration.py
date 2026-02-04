@@ -95,29 +95,33 @@ def integration_env(temp_dir):
         for entry in claude_data_2:
             f.write(json.dumps(entry) + "\n")
 
-    # Vibe session: REST API development
-    vibe_session = vibe_dir / "session_api-dev.json"
-    vibe_data = {
-        "metadata": {
-            "session_id": "api-dev-001",
-            "start_time": (datetime.now() - timedelta(hours=3)).isoformat(),
-            "environment": {"working_directory": "/home/user/api-project"},
-        },
-        "messages": [
-            {
-                "role": "user",
-                "content": "Create a REST API endpoint for user registration",
-            },
-            {"role": "assistant", "content": "I'll create a POST /api/users endpoint."},
-            {"role": "user", "content": "Add input validation"},
-            {
-                "role": "assistant",
-                "content": "Added email and password validation with proper error responses.",
-            },
-        ],
+    # Vibe session: REST API development (folder-based format)
+    vibe_session_dir = vibe_dir / "session_20251220_100000_apidev"
+    vibe_session_dir.mkdir()
+
+    vibe_meta = {
+        "session_id": "api-dev-001",
+        "start_time": (datetime.now() - timedelta(hours=3)).isoformat(),
+        "environment": {"working_directory": "/home/user/api-project"},
     }
-    with open(vibe_session, "w") as f:
-        json.dump(vibe_data, f)
+    with open(vibe_session_dir / "meta.json", "w") as f:
+        json.dump(vibe_meta, f)
+
+    vibe_messages = [
+        {
+            "role": "user",
+            "content": "Create a REST API endpoint for user registration",
+        },
+        {"role": "assistant", "content": "I'll create a POST /api/users endpoint."},
+        {"role": "user", "content": "Add input validation"},
+        {
+            "role": "assistant",
+            "content": "Added email and password validation with proper error responses.",
+        },
+    ]
+    with open(vibe_session_dir / "messages.jsonl", "w") as f:
+        for msg in vibe_messages:
+            f.write(json.dumps(msg) + "\n")
 
     return {
         "temp_dir": temp_dir,

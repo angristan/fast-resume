@@ -231,7 +231,7 @@ class OpenCodeAdapter:
                         else:
                             mtime = session_file.stat().st_mtime
                         current_sessions[session_id] = (session_file, mtime)
-                except (OSError, orjson.JSONDecodeError):
+                except OSError, orjson.JSONDecodeError:
                     # Skip files that can't be read during scanning
                     continue
 
@@ -269,7 +269,7 @@ class OpenCodeAdapter:
                 role = data.get("role", "")
                 if msg_id:
                     return (msg_file.parent.name, msg_file, msg_id, role)
-            except (OSError, orjson.JSONDecodeError):
+            except OSError, orjson.JSONDecodeError:
                 pass
             return None
 
@@ -282,7 +282,7 @@ class OpenCodeAdapter:
                     text = data.get("text", "")
                     if text:
                         return (part_file.parent.name, text)
-            except (OSError, orjson.JSONDecodeError):
+            except OSError, orjson.JSONDecodeError:
                 pass
             return None
 

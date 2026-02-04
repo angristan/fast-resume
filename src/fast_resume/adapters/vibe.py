@@ -1,4 +1,8 @@
-"""Vibe (Mistral) session adapter."""
+"""Vibe (Mistral) session adapter.
+
+Supports the Vibe 2.0 session format with per-session folders containing
+meta.json and messages.jsonl files.
+"""
 
 import orjson
 from datetime import datetime
@@ -26,30 +30,46 @@ class VibeAdapter(BaseSessionAdapter):
             return []
 
         sessions = []
-        for session_file in self._sessions_dir.glob("session_*.json"):
-            session = self._parse_session_file(session_file)
-            if session:
-                sessions.append(session)
+        for session_dir in self._sessions_dir.glob("session_*"):
+            if session_dir.is_dir():
+                session = self._parse_session_file(session_dir)
+                if session:
+                    sessions.append(session)
 
         return sessions
 
     def _parse_session_file(
         self, session_file: Path, on_error: ErrorCallback = None
     ) -> Session | None:
-        """Parse a Vibe session file."""
-        try:
-            with open(session_file, "rb") as f:
-                data = orjson.loads(f.read())
+        """Parse a Vibe session folder (meta.json + messages.jsonl).
 
-            metadata = data.get("metadata", {})
-            session_id = metadata.get("session_id", session_file.stem)
+        Note: For Vibe 2.0, session_file is actually a directory containing
+        meta.json and messages.jsonl files.
+        """
+        session_dir = session_file  # Vibe uses directories, not files
+        metadata_file = session_dir / "meta.json"
+        messages_file = session_dir / "messages.jsonl"
+
+        if not metadata_file.exists():
+            return None
+
+        try:
+            # Read metadata
+            with open(metadata_file, "rb") as f:
+                metadata = orjson.loads(f.read())
+
+            session_id = metadata.get("session_id", session_dir.name)
 
             # Get directory from environment
             env = metadata.get("environment", {})
             directory = env.get("working_directory", "")
 
             # Check if session was started with auto_approve
-            yolo = metadata.get("auto_approve", False)
+            # New format: config.auto_approve, Old format: auto_approve at root
+            config = metadata.get("config", {})
+            yolo = config.get("auto_approve", False) or metadata.get(
+                "auto_approve", False
+            )
 
             # Parse timestamps
             start_time = metadata.get("start_time", "")
@@ -57,45 +77,60 @@ class VibeAdapter(BaseSessionAdapter):
                 try:
                     timestamp = datetime.fromisoformat(start_time)
                 except ValueError:
-                    timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
+                    timestamp = datetime.fromtimestamp(metadata_file.stat().st_mtime)
             else:
-                timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
+                timestamp = datetime.fromtimestamp(metadata_file.stat().st_mtime)
 
-            # Extract messages
-            messages_data = data.get("messages", [])
+            # Get title from metadata if available
+            title = metadata.get("title", "")
+
+            # Read messages from JSONL file
             messages: list[str] = []
+            messages_data: list[dict] = []
 
-            for msg in messages_data:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
+            if messages_file.exists():
+                with open(messages_file, "rb") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            msg = orjson.loads(line)
+                            messages_data.append(msg)
 
-                # Skip system messages
-                if role == "system":
-                    continue
+                            role = msg.get("role", "")
+                            content = msg.get("content", "")
 
-                role_prefix = "» " if role == "user" else "  "
+                            # Skip system messages
+                            if role == "system":
+                                continue
 
-                if isinstance(content, str) and content:
-                    messages.append(f"{role_prefix}{content}")
-                elif isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict):
-                            text = part.get("text", "")
-                            if text:
-                                messages.append(f"{role_prefix}{text}")
+                            role_prefix = "» " if role == "user" else "  "
 
-            # Generate title from first user message (80-char hard truncate)
-            user_messages = [
-                m for i, m in enumerate(messages_data) if m.get("role") == "user"
-            ]
-            if user_messages:
-                first_msg = user_messages[0].get("content", "")
-                if isinstance(first_msg, str):
-                    title = truncate_title(first_msg, max_length=80, word_break=False)
+                            if isinstance(content, str) and content:
+                                messages.append(f"{role_prefix}{content}")
+                            elif isinstance(content, list):
+                                for part in content:
+                                    if isinstance(part, dict):
+                                        text = part.get("text", "")
+                                        if text:
+                                            messages.append(f"{role_prefix}{text}")
+                        except orjson.JSONDecodeError:
+                            continue
+
+            # Generate title from first user message if not in metadata
+            if not title:
+                user_messages = [m for m in messages_data if m.get("role") == "user"]
+                if user_messages:
+                    first_msg = user_messages[0].get("content", "")
+                    if isinstance(first_msg, str):
+                        title = truncate_title(
+                            first_msg, max_length=80, word_break=False
+                        )
+                    else:
+                        title = "Vibe session"
                 else:
                     title = "Vibe session"
-            else:
-                title = "Vibe session"
 
             full_content = "\n\n".join(messages)
 
@@ -112,7 +147,7 @@ class VibeAdapter(BaseSessionAdapter):
         except OSError as e:
             error = ParseError(
                 agent=self.name,
-                file_path=str(session_file),
+                file_path=str(session_dir),
                 error_type="OSError",
                 message=str(e),
             )
@@ -125,7 +160,7 @@ class VibeAdapter(BaseSessionAdapter):
         except orjson.JSONDecodeError as e:
             error = ParseError(
                 agent=self.name,
-                file_path=str(session_file),
+                file_path=str(metadata_file),
                 error_type="JSONDecodeError",
                 message=str(e),
             )
@@ -138,7 +173,7 @@ class VibeAdapter(BaseSessionAdapter):
         except (KeyError, TypeError, AttributeError) as e:
             error = ParseError(
                 agent=self.name,
-                file_path=str(session_file),
+                file_path=str(session_dir),
                 error_type=type(e).__name__,
                 message=str(e),
             )
@@ -150,30 +185,26 @@ class VibeAdapter(BaseSessionAdapter):
             return None
 
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
-        """Scan all Vibe session files.
+        """Scan all Vibe session folders.
 
-        Uses start_time from JSON metadata as mtime for consistency with parsing.
+        Uses meta.json file mtime for incremental update detection.
+        Vibe updates meta.json on every turn, so this correctly detects changes.
         """
         current_files: dict[str, tuple[Path, float]] = {}
 
-        for session_file in self._sessions_dir.glob("session_*.json"):
+        for session_dir in self._sessions_dir.glob("session_*"):
+            if not session_dir.is_dir():
+                continue
+            metadata_file = session_dir / "meta.json"
+            if not metadata_file.exists():
+                continue
             try:
-                with open(session_file, "rb") as f:
-                    data = orjson.loads(f.read())
-                metadata = data.get("metadata", {})
-                session_id = metadata.get("session_id", session_file.stem)
+                with open(metadata_file, "rb") as f:
+                    metadata = orjson.loads(f.read())
+                session_id = metadata.get("session_id", session_dir.name)
+                mtime = metadata_file.stat().st_mtime
 
-                # Use start_time to match what _parse_session_file stores
-                start_time = metadata.get("start_time", "")
-                if start_time:
-                    try:
-                        mtime = datetime.fromisoformat(start_time).timestamp()
-                    except ValueError:
-                        mtime = session_file.stat().st_mtime
-                else:
-                    mtime = session_file.stat().st_mtime
-
-                current_files[session_id] = (session_file, mtime)
+                current_files[session_id] = (session_dir, mtime)
             except Exception:
                 continue
 

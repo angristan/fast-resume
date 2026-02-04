@@ -135,8 +135,10 @@ class TestVibeAdapterErrorHandling:
 
     def test_json_decode_error_calls_callback(self, temp_dir):
         """Test that JSONDecodeError calls on_error callback."""
-        session_file = temp_dir / "session_test.json"
-        session_file.write_text("not valid json at all")
+        session_dir = temp_dir / "session_20251220_100000_test"
+        session_dir.mkdir()
+        meta_file = session_dir / "meta.json"
+        meta_file.write_text("not valid json at all")
 
         errors: list[ParseError] = []
 
@@ -144,7 +146,7 @@ class TestVibeAdapterErrorHandling:
             errors.append(error)
 
         adapter = VibeAdapter(sessions_dir=temp_dir)
-        result = adapter._parse_session_file(session_file, on_error=on_error)
+        result = adapter._parse_session_file(session_dir, on_error=on_error)
 
         assert result is None
         assert len(errors) == 1
@@ -153,9 +155,11 @@ class TestVibeAdapterErrorHandling:
 
     def test_oserror_calls_callback(self, temp_dir):
         """Test that OSError calls on_error callback for Vibe."""
-        session_file = temp_dir / "session_unreadable.json"
-        session_file.write_text('{"metadata": {}}')
-        os.chmod(session_file, 0o000)
+        session_dir = temp_dir / "session_20251220_100000_unreadable"
+        session_dir.mkdir()
+        meta_file = session_dir / "meta.json"
+        meta_file.write_text('{"session_id": "test"}')
+        os.chmod(meta_file, 0o000)
 
         errors: list[ParseError] = []
 
@@ -163,9 +167,9 @@ class TestVibeAdapterErrorHandling:
             errors.append(error)
 
         adapter = VibeAdapter(sessions_dir=temp_dir)
-        result = adapter._parse_session_file(session_file, on_error=on_error)
+        result = adapter._parse_session_file(session_dir, on_error=on_error)
 
-        os.chmod(session_file, 0o644)
+        os.chmod(meta_file, 0o644)
 
         assert result is None
         assert len(errors) == 1

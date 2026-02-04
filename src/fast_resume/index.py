@@ -93,7 +93,7 @@ class TantivyIndex:
         try:
             stored_version = int(self._version_file.read_text().strip())
             return stored_version == SCHEMA_VERSION
-        except (ValueError, OSError):
+        except ValueError, OSError:
             return False
 
     def _write_version(self) -> None:
