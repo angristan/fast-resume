@@ -1,3 +1,10 @@
+## [1.15.3](https://github.com/angristan/fast-resume/compare/v1.15.2...v1.15.3) (2026-02-05)
+
+
+### Bug Fixes
+
+* pin rich <14.3.2 to prevent freeze with images in iTerm ([08b76a1](https://github.com/angristan/fast-resume/commit/08b76a13f0e58bdcde16211a89d82aa60d162dc6))
+
 ## [1.15.2](https://github.com/angristan/fast-resume/compare/v1.15.1...v1.15.2) (2026-02-04)
 
 
