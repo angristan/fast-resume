@@ -162,7 +162,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "humanize", specifier = ">=4.14.0" },
     { name = "orjson", specifier = ">=3.10.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<14.3.2" },
     { name = "tantivy", specifier = ">=0.25.0" },
     { name = "textual", specifier = ">=7.4.0" },
     { name = "textual-image", specifier = ">=0.8.4" },
