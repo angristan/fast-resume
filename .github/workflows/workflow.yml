@@ -160,3 +160,18 @@ jobs:
           gh release upload "v${{ needs.release.outputs.new_release_version }}" \
             dist/fast-resume-*.tar.gz \
             --clobber
+
+  update-homebrew:
+    name: Update Homebrew formula
+    needs: [release, build-binaries]
+    if: needs.release.outputs.new_release_version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh api repos/angristan/homebrew-tap/dispatches \
+            -f event_type=update-formula \
+            -f "client_payload[formula]=fast-resume" \
+            -f "client_payload[version]=${{ needs.release.outputs.new_release_version }}"
