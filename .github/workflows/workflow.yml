@@ -86,6 +86,9 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,6 +102,54 @@ jobs:
       - name: Install dependencies
         run: npm install -D semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/exec
       - name: Release
+        id: semantic
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+
+  build-binaries:
+    name: Build binary (${{ matrix.platform.name }})
+    needs: [release]
+    if: needs.release.outputs.new_release_published == 'true'
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS (Apple Silicon)
+            runner: macos-latest
+          - name: macOS (Intel)
+            runner: macos-13
+          - name: Linux (x86_64)
+            runner: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.new_release_version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build binary
+        run: uv run python build_binary.py
+
+      - name: Verify binary runs
+        run: |
+          ./dist/fr/fr --version
+          ./dist/fr/fr --help
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ needs.release.outputs.new_release_version }}" \
+            dist/fast-resume-*.tar.gz \
+            --clobber

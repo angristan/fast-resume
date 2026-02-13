@@ -13,7 +13,8 @@
       "@semantic-release/exec",
       {
         "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' pyproject.toml && uv lock",
-        "publishCmd": "uv build && uv publish"
+        "publishCmd": "uv build && uv publish",
+        "successCmd": "echo \"new_release_published=true\" >> ${GITHUB_OUTPUT:-/dev/null} && echo \"new_release_version=${nextRelease.version}\" >> ${GITHUB_OUTPUT:-/dev/null}"
       }
     ],
     [
