@@ -1,3 +1,10 @@
+## [1.16.2](https://github.com/angristan/fast-resume/compare/v1.16.1...v1.16.2) (2026-02-13)
+
+
+### Bug Fixes
+
+* trigger binary build pipeline ([f9043e2](https://github.com/angristan/fast-resume/commit/f9043e26b11525f1a16f2cc4d48119656bbe71fa))
+
 ## [1.16.1](https://github.com/angristan/fast-resume/compare/v1.16.0...v1.16.1) (2026-02-13)
 
 
