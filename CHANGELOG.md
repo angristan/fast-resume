@@ -1,3 +1,11 @@
+## [1.16.1](https://github.com/angristan/fast-resume/compare/v1.16.0...v1.16.1) (2026-02-13)
+
+
+### Bug Fixes
+
+* move binary builds into CI workflow and wire up semantic-release outputs ([d5abd55](https://github.com/angristan/fast-resume/commit/d5abd5586342de92acaa773e2afad26d3b8707da))
+* wire binary builds into CI workflow ([81d156a](https://github.com/angristan/fast-resume/commit/81d156a4701f8e356c578b83804edbf4aa0cd21a))
+
 # [1.16.0](https://github.com/angristan/fast-resume/compare/v1.15.3...v1.16.0) (2026-02-13)
 
 
