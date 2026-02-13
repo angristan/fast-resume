@@ -35,5 +35,8 @@ ENV/
 .coverage
 htmlcov/
 
+# PyInstaller
+*.spec
+
 # uv
 .python-version

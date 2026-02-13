@@ -1,0 +1,58 @@
+name: Build Binaries
+
+# Build standalone binaries when a new release is published.
+# Uploads them as assets to the existing GitHub Release.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS (Apple Silicon)
+            runner: macos-latest
+            artifact: fast-resume-*-macos-arm64.tar.gz
+          - name: macOS (Intel)
+            runner: macos-13
+            artifact: fast-resume-*-macos-x86_64.tar.gz
+          - name: Linux (x86_64)
+            runner: ubuntu-latest
+            artifact: fast-resume-*-linux-x86_64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build binary
+        run: uv run python build_binary.py
+
+      - name: Verify binary runs
+        run: |
+          ./dist/fr/fr --version
+          ./dist/fr/fr --help
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            dist/fast-resume-*.tar.gz \
+            --clobber
