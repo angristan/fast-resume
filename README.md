@@ -43,6 +43,15 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap angristan/tap
+brew install fast-resume
+```
+
+### uv (PyPI)
+
 ```bash
 # Run directly (no install needed)
 uvx --from fast-resume fr
