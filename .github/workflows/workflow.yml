@@ -87,8 +87,7 @@ jobs:
       pull-requests: write
       id-token: write
     outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,18 +98,28 @@ jobs:
           node-version: lts/*
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+      - name: Get latest tag before release
+        id: before
+        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
         run: npm install -D semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/exec
       - name: Release
-        id: semantic
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+      - name: Check if a new release was created
+        id: check
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo '')
+          if [ "$LATEST_TAG" != "${{ steps.before.outputs.tag }}" ] && [ -n "$LATEST_TAG" ]; then
+            echo "version=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
+          fi
 
   build-binaries:
     name: Build binary (${{ matrix.platform.name }})
     needs: [release]
-    if: needs.release.outputs.new_release_published == 'true'
+    if: needs.release.outputs.new_release_version != ''
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
