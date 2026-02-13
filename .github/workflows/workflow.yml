@@ -127,8 +127,6 @@ jobs:
         platform:
           - name: macOS (Apple Silicon)
             runner: macos-latest
-          - name: macOS (Intel)
-            runner: macos-13
           - name: Linux (x86_64)
             runner: ubuntu-latest
     permissions:
