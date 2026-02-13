@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/angristan/fast-resume/compare/v1.15.3...v1.16.0) (2026-02-13)
+
+
+### Features
+
+* add standalone binary builds for Homebrew distribution ([11cedec](https://github.com/angristan/fast-resume/commit/11cedec9dd8d94f903567edcd8c769642d7bf08b))
+
 ## [1.15.3](https://github.com/angristan/fast-resume/compare/v1.15.2...v1.15.3) (2026-02-05)
 
 
