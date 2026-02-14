@@ -45,7 +45,7 @@ class CrushAdapter:
         try:
             with open(self._projects_file, "rb") as f:
                 projects_data = orjson.loads(f.read())
-        except (orjson.JSONDecodeError, OSError):
+        except orjson.JSONDecodeError, OSError:
             return []
 
         for project in projects_data.get("projects", []):
@@ -250,7 +250,7 @@ class CrushAdapter:
         try:
             with open(self._projects_file, "rb") as f:
                 projects_data = orjson.loads(f.read())
-        except (orjson.JSONDecodeError, OSError):
+        except orjson.JSONDecodeError, OSError:
             deleted_ids = [
                 sid for sid, (_, agent) in known.items() if agent == self.name
             ]
@@ -319,7 +319,7 @@ class CrushAdapter:
         try:
             with open(self._projects_file, "rb") as f:
                 projects_data = orjson.loads(f.read())
-        except (orjson.JSONDecodeError, OSError):
+        except orjson.JSONDecodeError, OSError:
             return RawAdapterStats(
                 agent=self.name,
                 data_dir=str(self._projects_file.parent),
