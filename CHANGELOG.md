@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/angristan/fast-resume/compare/v1.16.2...v1.17.0) (2026-02-14)
+
+
+### Features
+
+* add SQLite support for OpenCode 1.2 storage format ([4b23eeb](https://github.com/angristan/fast-resume/commit/4b23eebf05218c16dfe6d36721c3745c271c514e))
+
 ## [1.16.2](https://github.com/angristan/fast-resume/compare/v1.16.1...v1.16.2) (2026-02-13)
 
 
