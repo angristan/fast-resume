@@ -16,7 +16,9 @@ AGENTS = {
 # Storage paths
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
 CODEX_DIR = Path.home() / ".codex" / "sessions"
-OPENCODE_DIR = Path.home() / ".local" / "share" / "opencode" / "storage"
+OPENCODE_DIR = Path.home() / ".local" / "share" / "opencode"
+OPENCODE_LEGACY_DIR = OPENCODE_DIR / "storage"
+OPENCODE_DB = OPENCODE_DIR / "opencode.db"
 VIBE_DIR = Path.home() / ".vibe" / "logs" / "session"
 CRUSH_PROJECTS_FILE = Path.home() / ".local" / "share" / "crush" / "projects.json"
 COPILOT_DIR = Path.home() / ".copilot" / "session-state"

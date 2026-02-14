@@ -76,6 +76,10 @@ class VibeAdapter(BaseSessionAdapter):
             if start_time:
                 try:
                     timestamp = datetime.fromisoformat(start_time)
+                    # Normalize tz-aware datetimes to naive local time
+                    # for consistency with other adapters
+                    if timestamp.tzinfo is not None:
+                        timestamp = timestamp.astimezone().replace(tzinfo=None)
                 except ValueError:
                     timestamp = datetime.fromtimestamp(metadata_file.stat().st_mtime)
             else:
