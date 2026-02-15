@@ -28,20 +28,13 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Direct Resume**: Select, Enter, you're back in your session
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
 - **Update Notifications**: Get notified when a new version is available
-
-## Supported Agents
-
-| Agent               | Data Location                                 | Resume Command                  |
-| ------------------- | --------------------------------------------- | ------------------------------- |
-| **Claude Code**     | `~/.claude/projects/`                         | `claude --resume <id>`          |
-| **Codex CLI**       | `~/.codex/sessions/`                          | `codex resume <id>`             |
-| **Copilot CLI**     | `~/.copilot/session-state/`                   | `copilot --resume <id>`         |
-| **VS Code Copilot** | `~/Library/Application Support/Code/` (macOS) | `code <directory>`              |
-| **Crush**           | `~/.local/share/crush/projects.json`          | _(interactive only)_            |
-| **OpenCode**        | `~/.local/share/opencode/storage/`            | `opencode <dir> --session <id>` |
-| **Vibe**            | `~/.vibe/logs/session/`                       | `vibe --resume <id>`            |
+- **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, and more
 
 ## Installation
+
+### Recommended Terminal
+
+For the best experience, [Ghostty 👻](https://ghostty.org/) is recommended. Other terminals may have issues with interactive features and displaying images.
 
 ### Homebrew
 
