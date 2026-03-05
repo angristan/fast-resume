@@ -1,3 +1,10 @@
+## [1.17.2](https://github.com/angristan/fast-resume/compare/v1.17.1...v1.17.2) (2026-03-05)
+
+
+### Bug Fixes
+
+* detect Copilot CLI sessions in UUID subdirectories ([787ec65](https://github.com/angristan/fast-resume/commit/787ec65f26951272b33cc85e5d710f8af8b17564)), closes [#27](https://github.com/angristan/fast-resume/issues/27)
+
 ## [1.17.1](https://github.com/angristan/fast-resume/compare/v1.17.0...v1.17.1) (2026-03-05)
 
 
