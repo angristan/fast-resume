@@ -27,7 +27,7 @@ class CopilotAdapter(BaseSessionAdapter):
             return []
 
         sessions = []
-        for session_file in self._sessions_dir.glob("*.jsonl"):
+        for session_file in self._sessions_dir.glob("**/*.jsonl"):
             session = self._parse_session_file(session_file)
             if session:
                 sessions.append(session)
@@ -39,7 +39,7 @@ class CopilotAdapter(BaseSessionAdapter):
     ) -> Session | None:
         """Parse a Copilot CLI session file."""
         try:
-            session_id = session_file.stem
+            session_id = self._fallback_session_id(session_file)
             first_user_message = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
@@ -59,11 +59,14 @@ class CopilotAdapter(BaseSessionAdapter):
                     msg_type = entry.get("type", "")
                     data = entry.get("data", {})
 
-                    # Get session ID from session.start
+                    # Get session ID and directory from session.start
                     if msg_type == "session.start":
                         session_id = data.get("sessionId", session_id)
+                        if not directory:
+                            context = data.get("context", {})
+                            directory = context.get("cwd", "")
 
-                    # Get directory from folder_trust info
+                    # Get directory from folder_trust info (older Copilot CLI versions)
                     if msg_type == "session.info" and not directory:
                         if data.get("infoType") == "folder_trust":
                             # Extract path from message like "Folder /path/to/dir has been added..."
@@ -154,13 +157,23 @@ class CopilotAdapter(BaseSessionAdapter):
                         continue
         except Exception:
             pass
+        return self._fallback_session_id(session_file)
+
+    def _fallback_session_id(self, session_file: Path) -> str:
+        """Get fallback session ID from filename or parent directory name.
+
+        For files directly in session-state (e.g., session-abc.jsonl), use the stem.
+        For files in UUID subdirectories (e.g., <UUID>/events.jsonl), use the parent dir name.
+        """
+        if session_file.parent != self._sessions_dir:
+            return session_file.parent.name
         return session_file.stem
 
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
         """Scan all Copilot CLI session files."""
         current_files: dict[str, tuple[Path, float]] = {}
 
-        for session_file in self._sessions_dir.glob("*.jsonl"):
+        for session_file in self._sessions_dir.glob("**/*.jsonl"):
             try:
                 mtime = session_file.stat().st_mtime
             except OSError:

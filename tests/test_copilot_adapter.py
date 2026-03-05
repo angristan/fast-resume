@@ -129,7 +129,7 @@ class TestCopilotAdapter:
         assert session is not None
         assert session.id == "real-session-id-123"
 
-    def test_parse_session_uses_filename_as_fallback_id(self, adapter, temp_dir):
+    def test_parse_session_uses_filename_as_fallback_id(self, temp_dir):
         """Test that filename is used as ID when session.start is missing."""
         session_dir = temp_dir / "session-state"
         session_dir.mkdir(parents=True)
@@ -150,15 +150,53 @@ class TestCopilotAdapter:
             for entry in data:
                 f.write(json.dumps(entry) + "\n")
 
+        adapter = CopilotAdapter(sessions_dir=session_dir)
         session = adapter._parse_session_file(session_file)
 
         assert session is not None
         assert session.id == "my-session-file"
 
+    def test_parse_session_extracts_directory_from_context(self, adapter, temp_dir):
+        """Test directory extraction from session.start context (newer Copilot CLI)."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / "session-ctx.jsonl"
+
+        data = [
+            {
+                "type": "session.start",
+                "data": {
+                    "sessionId": "ctx-session",
+                    "context": {
+                        "cwd": "/Users/dev/new-project",
+                        "gitRoot": "/Users/dev/new-project",
+                        "branch": "main",
+                    },
+                },
+            },
+            {
+                "type": "user.message",
+                "data": {"content": "Test context directory extraction"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response"},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.directory == "/Users/dev/new-project"
+
     def test_parse_session_extracts_directory_from_folder_trust(
         self, adapter, temp_dir
     ):
-        """Test directory extraction from folder_trust message."""
+        """Test directory extraction from folder_trust message (older Copilot CLI)."""
         session_dir = temp_dir / "session-state"
         session_dir.mkdir(parents=True)
         session_file = session_dir / "session-dir.jsonl"
@@ -306,6 +344,85 @@ class TestCopilotAdapter:
         sessions = adapter.find_sessions()
 
         assert len(sessions) == 2
+
+    def test_find_sessions_in_uuid_subdirectories(self, temp_dir):
+        """Test finding sessions stored under UUID subdirectories."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+
+        # Create a session in a UUID subdirectory
+        uuid_dir = session_dir / "abcd1234-5678-9abc-def0-123456789abc"
+        uuid_dir.mkdir()
+        session_file = uuid_dir / "events.jsonl"
+        data = [
+            {
+                "type": "session.start",
+                "data": {"sessionId": "uuid-session-id"},
+            },
+            {
+                "type": "user.message",
+                "data": {"content": "Message from UUID subdirectory session"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response from assistant"},
+            },
+        ]
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        # Create a top-level session file
+        top_level_file = session_dir / "top-level-session.jsonl"
+        data2 = [
+            {
+                "type": "user.message",
+                "data": {"content": "Message from top-level session"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response"},
+            },
+        ]
+        with open(top_level_file, "w") as f:
+            for entry in data2:
+                f.write(json.dumps(entry) + "\n")
+
+        adapter = CopilotAdapter(sessions_dir=session_dir)
+        sessions = adapter.find_sessions()
+
+        assert len(sessions) == 2
+        session_ids = {s.id for s in sessions}
+        assert "uuid-session-id" in session_ids
+        assert "top-level-session" in session_ids
+
+    def test_parse_session_uuid_subdir_fallback_id(self, temp_dir):
+        """Test that UUID subdirectory name is used as fallback ID."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+
+        uuid_dir = session_dir / "my-uuid-dir"
+        uuid_dir.mkdir()
+        session_file = uuid_dir / "events.jsonl"
+        data = [
+            {
+                "type": "user.message",
+                "data": {"content": "Message without session.start"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response"},
+            },
+        ]
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        adapter = CopilotAdapter(sessions_dir=session_dir)
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.id == "my-uuid-dir"  # Parent dir name, not "events"
 
     def test_is_available_when_dir_exists(self, temp_dir):
         """Test is_available returns True when directory exists."""
