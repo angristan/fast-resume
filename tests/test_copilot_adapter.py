@@ -390,3 +390,30 @@ class TestCopilotAdapter:
         assert session is not None
         assert len(session.title) <= 103  # 100 chars + "..."
         assert session.title.endswith("...")
+
+    def test_scan_skips_dangling_symlinks(self, temp_dir):
+        """Test that dangling symlinks don't crash _scan_session_files."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+
+        # Create a valid session file
+        valid_file = session_dir / "session-001.jsonl"
+        with open(valid_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user.message",
+                        "data": {"content": "Hello"},
+                    }
+                )
+                + "\n"
+            )
+
+        # Create a dangling symlink
+        dangling = session_dir / ".#session-002.jsonl"
+        dangling.symlink_to(temp_dir / "nonexistent.jsonl")
+
+        adapter = CopilotAdapter(sessions_dir=session_dir)
+        files = adapter._scan_session_files()
+
+        assert len(files) == 1

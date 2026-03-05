@@ -462,3 +462,35 @@ class TestCopilotVSCodeAdapter:
 
         # Return value should match callbacks
         assert len(new_or_modified) == 2
+
+    def test_incremental_scan_skips_dangling_symlinks(self, temp_dir):
+        """Test that dangling symlinks don't crash find_sessions_incremental."""
+        session_dir = temp_dir / "emptyWindowChatSessions"
+        session_dir.mkdir(parents=True)
+
+        # Create a valid session file
+        valid_file = session_dir / "session-valid.json"
+        data = {
+            "sessionId": "valid-session",
+            "requests": [
+                {
+                    "message": {"text": "Hello"},
+                    "response": [{"value": "Response"}],
+                },
+            ],
+        }
+        with open(valid_file, "w") as f:
+            json.dump(data, f)
+
+        # Create a dangling symlink
+        dangling = session_dir / ".#session-broken.json"
+        dangling.symlink_to(temp_dir / "nonexistent.json")
+
+        adapter = CopilotVSCodeAdapter(
+            chat_sessions_dir=session_dir,
+            workspace_storage_dir=temp_dir / "nonexistent",
+        )
+        sessions, deleted = adapter.find_sessions_incremental({})
+
+        assert len(sessions) == 1
+        assert sessions[0].id == "valid-session"

@@ -311,3 +311,32 @@ class TestClaudeAdapter:
 
         assert len(sessions) == 1
         assert "Regular session" in sessions[0].content
+
+    def test_scan_skips_dangling_symlinks(self, temp_dir):
+        """Test that dangling symlinks don't crash _scan_session_files."""
+        project_dir = temp_dir / "project-abc"
+        project_dir.mkdir(parents=True)
+
+        # Create a valid session file
+        valid_file = project_dir / "session-001.jsonl"
+        with open(valid_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "cwd": "/test",
+                        "message": {"content": "Hello"},
+                    }
+                )
+                + "\n"
+            )
+
+        # Create a dangling symlink
+        dangling = project_dir / ".#session-002.jsonl"
+        dangling.symlink_to(temp_dir / "nonexistent.jsonl")
+
+        adapter = ClaudeAdapter(sessions_dir=temp_dir)
+        files = adapter._scan_session_files()
+
+        assert len(files) == 1
+        assert "session-001" in files

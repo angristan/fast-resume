@@ -296,3 +296,31 @@ class TestCodexAdapter:
         sessions = adapter.find_sessions()
 
         assert len(sessions) == 2
+
+    def test_scan_skips_dangling_symlinks(self, temp_dir):
+        """Test that dangling symlinks don't crash _scan_session_files."""
+        session_dir = temp_dir / "2025" / "12" / "20"
+        session_dir.mkdir(parents=True)
+
+        # Create a valid session file
+        valid_file = session_dir / "rollout-2025-12-20T10-00-00-valid123.jsonl"
+        with open(valid_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": "valid123", "cwd": "/test"},
+                    }
+                )
+                + "\n"
+            )
+
+        # Create a dangling symlink (e.g. Emacs lock file)
+        dangling = session_dir / ".#rollout-2025-12-20T10-00-00-broken.jsonl"
+        dangling.symlink_to(temp_dir / "nonexistent.jsonl")
+
+        adapter = CodexAdapter(sessions_dir=temp_dir)
+        files = adapter._scan_session_files()
+
+        assert len(files) == 1
+        assert "valid123" in files
