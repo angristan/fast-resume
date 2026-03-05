@@ -161,8 +161,11 @@ class CopilotAdapter(BaseSessionAdapter):
         current_files: dict[str, tuple[Path, float]] = {}
 
         for session_file in self._sessions_dir.glob("*.jsonl"):
+            try:
+                mtime = session_file.stat().st_mtime
+            except OSError:
+                continue
             session_id = self._get_session_id_from_file(session_file)
-            mtime = session_file.stat().st_mtime
             current_files[session_id] = (session_file, mtime)
 
         return current_files

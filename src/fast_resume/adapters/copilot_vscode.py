@@ -275,7 +275,10 @@ class CopilotVSCodeAdapter:
             session_id = self._get_session_id_from_file(session_file)
             if session_id is None:
                 continue
-            mtime = session_file.stat().st_mtime
+            try:
+                mtime = session_file.stat().st_mtime
+            except OSError:
+                continue
             current_files[session_id] = (session_file, mtime, ws_directory)
 
         # Find new and modified sessions

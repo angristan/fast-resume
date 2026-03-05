@@ -194,8 +194,11 @@ class ClaudeAdapter(BaseSessionAdapter):
                 if session_file.name.startswith("agent-"):
                     continue
 
+                try:
+                    mtime = session_file.stat().st_mtime
+                except OSError:
+                    continue
                 session_id = session_file.stem
-                mtime = session_file.stat().st_mtime
                 current_files[session_id] = (session_file, mtime)
 
         return current_files
