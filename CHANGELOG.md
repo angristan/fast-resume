@@ -1,3 +1,10 @@
+## [1.17.1](https://github.com/angristan/fast-resume/compare/v1.17.0...v1.17.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* handle FileNotFoundError when scanning session files ([d1096a7](https://github.com/angristan/fast-resume/commit/d1096a7bd34654d09b282221830a8324c9bdcc6c)), closes [#29](https://github.com/angristan/fast-resume/issues/29)
+
 # [1.17.0](https://github.com/angristan/fast-resume/compare/v1.16.2...v1.17.0) (2026-02-14)
 
 
