@@ -363,7 +363,9 @@ class GeminiAdapter(BaseSessionAdapter):
                         if isinstance(sid, str) and sid:
                             return sid
                     return session_file.stem
-        except OSError, orjson.JSONDecodeError:
+        except OSError:
+            return session_file.stem
+        except orjson.JSONDecodeError:
             return session_file.stem
 
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:

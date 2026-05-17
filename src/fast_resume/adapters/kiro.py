@@ -30,13 +30,17 @@ class KiroAdapter(BaseSessionAdapter):
         self._sessions_dir = sessions_dir if sessions_dir is not None else KIRO_DIR
 
     def find_sessions(self) -> list[Session]:
-        """Find all Kiro CLI sessions."""
+        """Find all Kiro CLI sessions.
+
+        Routes through `_scan_session_files` so iteration shares a single
+        source of truth with the incremental scanner and we don't duplicate
+        the `glob("*.json")` logic in two places.
+        """
         if not self.is_available():
             return []
-
-        sessions = []
-        for meta_file in self._sessions_dir.glob("*.json"):
-            session = self._parse_session_file(meta_file)
+        sessions: list[Session] = []
+        for path, _mtime in self._scan_session_files().values():
+            session = self._parse_session_file(path)
             if session:
                 sessions.append(session)
         return sessions
