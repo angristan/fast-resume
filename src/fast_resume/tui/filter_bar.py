@@ -18,6 +18,8 @@ FILTER_KEYS: list[str | None] = [
     "copilot-cli",
     "copilot-vscode",
     "crush",
+    "gemini",
+    "kiro",
     "opencode",
     "vibe",
 ]

@@ -26,6 +26,8 @@ from .tui import run_tui
             "copilot-cli",
             "copilot-vscode",
             "crush",
+            "gemini",
+            "kiro",
             "opencode",
             "vibe",
         ]

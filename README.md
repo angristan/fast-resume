@@ -28,7 +28,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Direct Resume**: Select, Enter, you're back in your session
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
 - **Update Notifications**: Get notified when a new version is available
-- **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, and more
+- **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, Kiro, Gemini, and more
 
 ## Installation
 
@@ -132,6 +132,8 @@ Resume sessions with auto-approve / skip-permissions flags:
 | Claude          | `--dangerously-skip-permissions`             | No            |
 | Codex           | `--dangerously-bypass-approvals-and-sandbox` | Yes           |
 | Copilot CLI     | `--allow-all-tools --allow-all-paths`        | No            |
+| Gemini          | `--yolo`                                     | No            |
+| Kiro            | `--trust-all-tools`                          | No            |
 | Vibe            | `--auto-approve`                             | Yes           |
 | OpenCode        | _(config-based)_                             | —             |
 | Crush           | _(no CLI resume)_                            | —             |
@@ -139,7 +141,7 @@ Resume sessions with auto-approve / skip-permissions flags:
 
 **Auto-detection:** Codex and Vibe store the permissions mode in their session files. Sessions originally started in yolo mode are automatically resumed in yolo mode.
 
-**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
+**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI, Gemini, Kiro), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
 
 **Force yolo:** Use `fr --yolo` to skip the prompt and always resume in yolo mode, if supported.
 
@@ -152,7 +154,7 @@ Arguments:
   QUERY                    Search query (optional)
 
 Options:
-  -a, --agent [claude|codex|copilot-cli|copilot-vscode|crush|opencode|vibe]
+  -a, --agent [claude|codex|copilot-cli|copilot-vscode|crush|gemini|kiro|opencode|vibe]
                           Filter by agent
   -d, --directory TEXT    Filter by directory (substring match)
   --no-tui                Output list to stdout instead of TUI
@@ -267,31 +269,33 @@ Top Directories
                       │                                       │
          ┌────────────┴────────────┐                          │
          ▼                         ▼                          ▼
-┌──────────────────┐    ┌───────────────────────────────────────────────────────────────────────────────┐
-│  TantivyIndex    │    │                                 Adapters                                       │
-│                  │    │  ┌────────┐ ┌───────┐ ┌───────┐ ┌─────────┐ ┌───────┐ ┌────────┐ ┌────┐        │
-│ • Fuzzy search   │◄───│  │ Claude │ │ Codex │ │Copilot│ │ Copilot │ │ Crush │ │OpenCode│ │Vibe│        │
-│ • mtime tracking │    │  │        │ │       │ │  CLI  │ │ VS Code │ │       │ │        │ │    │        │
-│                  │    │  └───┬────┘ └───┬───┘ └───┬───┘ └────┬────┘ └───┬───┘ └───┬────┘ └─┬──┘        │
-│ ~/.cache/        │    │      │          │         │          │          │         │        │           │
-│   fast-resume/   │    └──────┼──────────┼─────────┼──────────┼──────────┼─────────┼────────┼───────────┘
-└──────────────────┘           ▼          ▼         ▼          ▼          ▼         ▼        ▼
-                          ~/.claude/ ~/.codex/ ~/.copilot/  VS Code/   crush.db opencode/ ~/.vibe/
+┌──────────────────┐    ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  TantivyIndex    │    │                                          Adapters                                                    │
+│                  │    │  ┌────────┐ ┌───────┐ ┌───────┐ ┌─────────┐ ┌───────┐ ┌────────┐ ┌────┐ ┌────────┐ ┌──────┐        │
+│ • Fuzzy search   │◄───│  │ Claude │ │ Codex │ │Copilot│ │ Copilot │ │ Crush │ │OpenCode│ │Vibe│ │ Gemini │ │ Kiro │        │
+│ • mtime tracking │    │  │        │ │       │ │  CLI  │ │ VS Code │ │       │ │        │ │    │ │        │ │      │        │
+│                  │    │  └───┬────┘ └───┬───┘ └───┬───┘ └────┬────┘ └───┬───┘ └───┬────┘ └─┬──┘ └───┬────┘ └──┬───┘        │
+│ ~/.cache/        │    │      │          │         │          │          │         │        │         │          │           │
+│   fast-resume/   │    └──────┼──────────┼─────────┼──────────┼──────────┼─────────┼────────┼─────────┼──────────┼───────────┘
+└──────────────────┘           ▼          ▼         ▼          ▼          ▼         ▼        ▼         ▼          ▼
+                          ~/.claude/ ~/.codex/ ~/.copilot/  VS Code/   crush.db opencode/ ~/.vibe/ ~/.gemini/ ~/.kiro/
 ```
 
 ### Session Parsing
 
 Each agent stores sessions differently. Adapters normalize them into a common `Session` structure:
 
-| Agent          | Format                                               | Parsing Strategy                                                                            |
-| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Claude Code    | JSONL in `~/.claude/projects/<project>/*.jsonl`      | Stream line-by-line, extract `user`/`assistant` messages, skip `agent-*` subprocess files   |
-| Codex          | JSONL in `~/.codex/sessions/**/*.jsonl`              | Line-by-line parsing, extract from `session_meta`, `response_item`, and `event_msg` entries |
-| Copilot CLI    | JSONL in `~/.copilot/session-state/*.jsonl`          | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
-| Copilot VSCode | JSON in VS Code's `workspaceStorage/*/chatSessions/` | Parse `requests` array with message text and response values                                |
-| Crush          | SQLite DB at `<project>/crush.db`                    | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
-| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`     | Lazy-load `message/` and `part/` per session for progressive indexing                       |
-| Vibe           | JSON in `~/.vibe/logs/session/session_*.json`        | Parse `messages` array with role-based content                                              |
+| Agent          | Format                                                                  | Parsing Strategy                                                                                                                            |
+| -------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code    | JSONL in `~/.claude/projects/<project>/*.jsonl`                         | Stream line-by-line, extract `user`/`assistant` messages, skip `agent-*` subprocess files                                                   |
+| Codex          | JSONL in `~/.codex/sessions/**/*.jsonl`                                 | Line-by-line parsing, extract from `session_meta`, `response_item`, and `event_msg` entries                                                 |
+| Copilot CLI    | JSONL in `~/.copilot/session-state/*.jsonl`                             | Line-by-line parsing, extract `user.message` and `assistant.message` types                                                                  |
+| Copilot VSCode | JSON in VS Code's `workspaceStorage/*/chatSessions/`                    | Parse `requests` array with message text and response values                                                                                |
+| Crush          | SQLite DB at `<project>/crush.db`                                       | Query `sessions` and `messages` tables directly, parse JSON `parts` column                                                                  |
+| Gemini         | JSON or JSONL in `~/.gemini/tmp/<slug>/chats/session-*.{json,jsonl}`    | Legacy JSON: `messages[]` array; JSONL: first line is session header, subsequent lines are message rows interleaved with `{"$set": {}}` patches; repeated message ids are deduped; working directory recovered from `~/.gemini/projects.json` |
+| Kiro           | Paired files in `~/.kiro/sessions/cli/<uuid>.{json,jsonl}`             | Read `<uuid>.json` for metadata (`session_id`, `cwd`, `title`); parse `<uuid>.jsonl` event stream for `Prompt` and `AssistantMessage` kinds; `ToolResults` excluded |
+| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`                        | Lazy-load `message/` and `part/` per session for progressive indexing                                                                       |
+| Vibe           | JSON in `~/.vibe/logs/session/session_*.json`                           | Parse `messages` array with role-based content                                                                                              |
 
 **The normalized Session structure:**
 
@@ -299,7 +303,7 @@ Each agent stores sessions differently. Adapters normalize them into a common `S
 @dataclass
 class Session:
     id: str              # Unique identifier (usually filename or UUID)
-    agent: str           # "claude", "codex", "copilot-cli", "copilot-vscode", "crush", "opencode", "vibe"
+    agent: str           # "claude", "codex", "copilot-cli", "copilot-vscode", "crush", "gemini", "kiro", "opencode", "vibe"
     title: str           # Summary or first user message (max 100 chars)
     directory: str       # Working directory where session was created
     timestamp: datetime  # Last modified time
@@ -436,15 +440,17 @@ if resume_cmd:
 
 Each adapter returns the appropriate command:
 
-| Agent          | Resume Command                  | With `--yolo`                                                  |
-| -------------- | ------------------------------- | -------------------------------------------------------------- |
-| Claude         | `claude --resume <id>`          | `claude --dangerously-skip-permissions --resume <id>`          |
-| Codex          | `codex resume <id>`             | `codex --dangerously-bypass-approvals-and-sandbox resume <id>` |
-| Copilot CLI    | `copilot --resume <id>`         | `copilot --allow-all-tools --allow-all-paths --resume <id>`    |
-| Copilot VSCode | `code <directory>`              | _(no change)_                                                  |
-| OpenCode       | `opencode <dir> --session <id>` | _(no change)_                                                  |
-| Vibe           | `vibe --resume <id>`            | `vibe --auto-approve --resume <id>`                            |
-| Crush          | `crush`                         | _(no change)_                                                  |
+| Agent          | Resume Command                          | With `--yolo`                                                      |
+| -------------- | --------------------------------------- | ------------------------------------------------------------------ |
+| Claude         | `claude --resume <id>`                  | `claude --dangerously-skip-permissions --resume <id>`              |
+| Codex          | `codex resume <id>`                     | `codex --dangerously-bypass-approvals-and-sandbox resume <id>`     |
+| Copilot CLI    | `copilot --resume <id>`                 | `copilot --allow-all-tools --allow-all-paths --resume <id>`        |
+| Copilot VSCode | `code <directory>`                      | _(no change)_                                                      |
+| Gemini         | `gemini --resume <id>`                  | `gemini --yolo --resume <id>`                                      |
+| Kiro           | `kiro-cli chat --resume-id <id>`        | `kiro-cli chat --trust-all-tools --resume-id <id>`                 |
+| OpenCode       | `opencode <dir> --session <id>`         | _(no change)_                                                      |
+| Vibe           | `vibe --resume <id>`                    | `vibe --auto-approve --resume <id>`                                |
+| Crush          | `crush`                                 | _(no change)_                                                      |
 
 ### Performance
 
@@ -504,6 +510,8 @@ fast-resume/
 │       ├── copilot.py      # GitHub Copilot CLI adapter
 │       ├── copilot_vscode.py # VS Code Copilot Chat adapter
 │       ├── crush.py        # Crush adapter
+│       ├── gemini.py       # Gemini CLI adapter
+│       ├── kiro.py         # Kiro CLI adapter
 │       ├── opencode.py     # OpenCode adapter
 │       └── vibe.py         # Vibe adapter
 ├── tests/                  # pytest test suite

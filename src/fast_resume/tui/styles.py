@@ -205,6 +205,22 @@ Screen {
     color: #FF6B35;
 }
 
+#filter-gemini {
+    color: #4285F4;
+}
+#filter-gemini.-active {
+    background: #4285F4 20%;
+    color: #4285F4;
+}
+
+#filter-kiro {
+    color: #5C1FFB;
+}
+#filter-kiro.-active {
+    background: #5C1FFB 20%;
+    color: #5C1FFB;
+}
+
 /* Main content area */
 #main-container {
     height: 1fr;
@@ -281,6 +297,24 @@ DataTable > .datatable--hover {
 
 .agent-crush {
     color: #FF5F87;
+}
+
+.agent-gemini {
+    color: #4285F4;
+}
+
+.agent-kiro {
+    color: #5C1FFB;
+}
+
+/* Filter labels use the full agent key (e.g. "copilot-cli"), so the
+ * generic `.agent-copilot` rule above doesn't match. Map both. */
+.agent-copilot-cli {
+    color: #9CA3AF;
+}
+
+.agent-copilot-vscode {
+    color: #007ACC;
 }
 
 /* Footer styling */

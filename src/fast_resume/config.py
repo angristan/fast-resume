@@ -11,6 +11,8 @@ AGENTS = {
     "crush": {"color": "#6B51FF", "badge": "crush"},
     "copilot-cli": {"color": "#9CA3AF", "badge": "copilot"},
     "copilot-vscode": {"color": "#007ACC", "badge": "vscode"},
+    "gemini": {"color": "#4285F4", "badge": "gemini"},
+    "kiro": {"color": "#5C1FFB", "badge": "kiro"},
 }
 
 # Storage paths
@@ -22,11 +24,11 @@ OPENCODE_DB = OPENCODE_DIR / "opencode.db"
 VIBE_DIR = Path.home() / ".vibe" / "logs" / "session"
 CRUSH_PROJECTS_FILE = Path.home() / ".local" / "share" / "crush" / "projects.json"
 COPILOT_DIR = Path.home() / ".copilot" / "session-state"
+GEMINI_DIR = Path.home() / ".gemini"
+KIRO_DIR = Path.home() / ".kiro" / "sessions" / "cli"
 
 # Storage location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
-SCHEMA_VERSION = (
-    20  # Bump when schema changes (20: fast timestamp field for sorting by date)
-)
+SCHEMA_VERSION = 21  # Bump when schema changes (21: add gemini + kiro adapters)

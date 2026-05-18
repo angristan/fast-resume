@@ -11,6 +11,8 @@ from .adapters import (
     CopilotVSCodeAdapter,
     CrushAdapter,
     ErrorCallback,
+    GeminiAdapter,
+    KiroAdapter,
     OpenCodeAdapter,
     Session,
     VibeAdapter,
@@ -32,6 +34,8 @@ class SessionSearch:
             CopilotAdapter(),
             CopilotVSCodeAdapter(),
             CrushAdapter(),
+            GeminiAdapter(),
+            KiroAdapter(),
             OpenCodeAdapter(),
             VibeAdapter(),
         ]
