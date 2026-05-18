@@ -118,11 +118,22 @@ class FilterBar(Horizontal):
         Args:
             agents: Set of agent names that have at least one session.
         """
+        changed = False
         for filter_key, btn in self._filter_buttons.items():
-            if filter_key is None:
-                # "All" button is always visible
-                btn.display = True
-            elif filter_key in agents:
-                btn.display = True
-            else:
-                btn.display = False
+            visible = filter_key is None or filter_key in agents
+            # Use a CSS class instead of toggling .display directly.  Direct
+            # display toggling on a container that holds an ImageWidget can
+            # leave SIXEL/Kitty pixel data as black blocks in the left margin
+            # because the image protocol bytes are not re-sent on re-display.
+            # Hiding via CSS class lets Textual repaint the full layout.
+            if visible and "hidden" in btn.classes:
+                btn.remove_class("hidden")
+                changed = True
+            elif not visible and "hidden" not in btn.classes:
+                btn.add_class("hidden")
+                changed = True
+
+        if changed:
+            # Force a layout pass on the filter bar so the parent repaints
+            # the region previously occupied by hidden buttons.
+            self.refresh(layout=True)

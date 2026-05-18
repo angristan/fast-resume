@@ -8,7 +8,7 @@ YoloModeModal {
 }
 
 YoloModeModal > Vertical {
-    width: 36;
+    width: 48;
     height: auto;
     background: $surface;
     border: thick $primary 80%;
@@ -19,6 +19,24 @@ YoloModeModal #title {
     text-align: center;
     text-style: bold;
     width: 100%;
+}
+
+YoloModeModal #yolo-row {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+YoloModeModal Checkbox {
+    width: auto;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+YoloModeModal Checkbox:focus {
+    text-style: bold;
 }
 
 YoloModeModal #buttons {
@@ -34,8 +52,21 @@ YoloModeModal Button {
     pointer: pointer;
 }
 
-YoloModeModal Button:focus {
+/* Only the primary action gets the warning highlight on focus, so
+ * Tab-cycling onto Cancel doesn't look like the "do it" button. */
+YoloModeModal #launch-btn:focus {
     background: $warning;
+}
+
+YoloModeModal #cancel-btn:focus {
+    background: $surface-lighten-2;
+}
+
+YoloModeModal #hint {
+    width: 100%;
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
 }
 """
 
@@ -108,6 +139,15 @@ Screen {
     width: 100%;
     padding: 0 1;
     margin-bottom: 1;
+    /* With 9+ adapters the bar can exceed an 80-column terminal; let it
+     * scroll horizontally instead of silently clipping the rightmost
+     * buttons. */
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.filter-btn.hidden {
+    display: none;
 }
 
 .filter-btn {

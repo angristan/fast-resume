@@ -369,6 +369,17 @@ class TestTantivyFiltering:
         """Create an index with multiple sessions for comprehensive filter testing."""
         index = TantivyIndex(index_path=temp_dir / "filter_test_index")
         now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def within_today(delta: timedelta) -> datetime:
+            """Clamp `now - delta` to today's calendar day.
+
+            If the test runs shortly after midnight, `now - timedelta(hours=1)`
+            falls into yesterday and breaks date:today filter tests. Clamp it
+            so the timestamp is still ordered before `now` but stays inside
+            today's window.
+            """
+            return max(now - delta, today_start + timedelta(seconds=1))
 
         sessions = [
             # Claude sessions
@@ -377,7 +388,9 @@ class TestTantivyFiltering:
                 agent="claude",
                 title="Fix auth bug",
                 directory="/home/user/web-app",
-                timestamp=now - timedelta(hours=1),  # 1 hour ago
+                timestamp=within_today(
+                    timedelta(hours=1)
+                ),  # 1 hour ago (clamped to today)
                 content="authentication token validation",
                 message_count=5,
                 mtime=1000.0,
@@ -398,7 +411,9 @@ class TestTantivyFiltering:
                 agent="codex",
                 title="Refactor code",
                 directory="/home/user/web-app",
-                timestamp=now - timedelta(hours=2),  # 2 hours ago
+                timestamp=within_today(
+                    timedelta(hours=2)
+                ),  # 2 hours ago (clamped to today)
                 content="refactoring the database layer",
                 message_count=4,
                 mtime=1002.0,
@@ -419,7 +434,9 @@ class TestTantivyFiltering:
                 agent="vibe",
                 title="Create API",
                 directory="/home/user/api-server",
-                timestamp=now - timedelta(minutes=30),  # 30 min ago
+                timestamp=within_today(
+                    timedelta(minutes=30)
+                ),  # 30 min ago (clamped to today)
                 content="REST API endpoint creation",
                 message_count=6,
                 mtime=1004.0,

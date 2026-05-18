@@ -499,6 +499,24 @@ def mock_search_engine(sample_sessions):
     return mock
 
 
+@pytest.fixture(autouse=True)
+def mock_shutil_which_for_tui(request):
+    """Patch shutil.which in app.py so resume commands appear findable by default.
+
+    Tests that specifically want to test the "binary not found" path opt out by
+    including 'path_validation' in their marker or by using their own patch.
+    """
+    # The TestPathValidation tests manage their own shutil.which patch
+    if (
+        request.node.cls is not None
+        and request.node.cls.__name__ == "TestPathValidation"
+    ):
+        yield
+        return
+    with patch("fast_resume.tui.app.shutil.which", return_value="/usr/bin/fake-agent"):
+        yield
+
+
 class TestFastResumeAppBasic:
     """Basic TUI integration tests."""
 
@@ -1080,8 +1098,9 @@ class TestFastResumeAppYoloModal:
                 # App should still be running (modal is shown)
                 assert app.is_running
 
-                # Press 'n' to select normal mode
-                await pilot.press("n")
+                # Default switch state is off; pressing Enter on the launch
+                # button dismisses the modal and exits the TUI without yolo.
+                await pilot.press("enter")
                 await pilot.pause()
 
                 # Now app should have exited
@@ -1174,8 +1193,10 @@ class TestFastResumeAppYoloModal:
                 await pilot.press("enter")
                 await pilot.pause()
 
-                # Press 'y' to select yolo mode
+                # Press 'y' to turn the yolo checkbox on, then Enter to launch
                 await pilot.press("y")
+                await pilot.pause()
+                await pilot.press("enter")
                 await pilot.pause()
 
                 # App should have exited
@@ -1187,8 +1208,8 @@ class TestFastResumeAppYoloModal:
                 assert "--dangerously-skip-permissions" in cmd
 
     @pytest.mark.asyncio
-    async def test_tab_toggles_focus_in_modal(self, sample_sessions):
-        """Test that tab key toggles focus between buttons in yolo modal."""
+    async def test_modal_arrow_keys_move_focus(self, sample_sessions):
+        """Left/Right arrow keys move focus between Cancel and Launch."""
         mock = MagicMock()
         mock.search.return_value = sample_sessions
         mock.get_session_count.return_value = len(sample_sessions)
@@ -1210,23 +1231,55 @@ class TestFastResumeAppYoloModal:
                 await pilot.press("enter")
                 await pilot.pause()
 
-                # Initial focus should be on normal-btn
+                # Initial focus should be on launch-btn (so Enter launches).
                 modal = app.screen
-                assert modal.focused.id == "normal-btn"
+                assert modal.focused is not None
+                assert modal.focused.id == "launch-btn"
 
-                # Press tab to toggle focus to yolo-btn
-                await pilot.press("tab")
+                # Left arrow moves focus to cancel-btn
+                await pilot.press("left")
                 await pilot.pause()
-                assert modal.focused.id == "yolo-btn"
+                assert modal.focused.id == "cancel-btn"
 
-                # Press tab again to toggle back to normal-btn
-                await pilot.press("tab")
+                # Right arrow moves focus back to launch-btn
+                await pilot.press("right")
                 await pilot.pause()
-                assert modal.focused.id == "normal-btn"
+                assert modal.focused.id == "launch-btn"
 
-                # Dismiss modal
+                # Escape cancels (returns None, no resume)
                 await pilot.press("escape")
                 await pilot.pause()
+                assert app.get_resume_command() is None
+
+    @pytest.mark.asyncio
+    async def test_modal_cancel_keeps_tui_open(self, sample_sessions):
+        """Pressing Escape on the modal cancels without exiting the TUI."""
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+        mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                await pilot.press("enter")  # show modal
+                await pilot.pause()
+                await pilot.press("escape")  # cancel modal
+                await pilot.pause()
+
+                # The modal closes (FastResumeApp's `escape` binding then
+                # exits the app once the modal stack is empty), but no resume
+                # command should have been set.
+                assert app.get_resume_command() is None
 
 
 class TestFastResumeAppRunTui:
@@ -1353,3 +1406,709 @@ class TestKeywordSuggester:
         """Test that suggestions are case insensitive."""
         result = await suggester.get_suggestion("agent:CL")
         assert result == "agent:claude"
+
+
+class TestPathValidation:
+    """Tests for PATH validation before launching agent CLI."""
+
+    @pytest.mark.asyncio
+    async def test_missing_binary_shows_notification_and_keeps_app_running(
+        self, mock_search_engine
+    ):
+        """When the agent binary is not on PATH, show an error notification and
+        do not exit the TUI."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            with patch("fast_resume.tui.app.shutil.which", return_value=None):
+                app = FastResumeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+
+                    # Press Enter to trigger resume attempt
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+                    # App should still be running (binary not found)
+                    assert app.is_running
+
+                    # _resume_command must not have been set
+                    assert app.get_resume_command() is None
+
+                    # Quit cleanly so run_test context exits without error
+                    await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_missing_binary_notification_message(self, mock_search_engine):
+        """When the agent binary is missing the notification references the binary
+        name and the agent name."""
+        notifications_posted: list = []
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            with patch("fast_resume.tui.app.shutil.which", return_value=None):
+                app = FastResumeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+
+                    # Capture notifications via the app's notify method
+                    original_notify = app.notify
+
+                    def capturing_notify(*args, **kwargs):
+                        notifications_posted.append((args, kwargs))
+                        return original_notify(*args, **kwargs)
+
+                    app.notify = capturing_notify  # type: ignore[method-assign]
+
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+                    # Should have shown an error notification
+                    assert len(notifications_posted) >= 1
+                    notif_text = notifications_posted[0][0][0]
+                    # The notification should mention the binary (claude) and severity=error
+                    assert "claude" in notif_text
+                    assert notifications_posted[0][1].get("severity") == "error"
+
+                    await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_binary_found_exits_normally(self, mock_search_engine):
+        """When the agent binary is on PATH, the TUI exits and sets _resume_command."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            # which returns a real path — binary is found
+            with patch(
+                "fast_resume.tui.app.shutil.which",
+                return_value="/usr/bin/claude",
+            ):
+                app = FastResumeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+                    # App should have exited
+                    assert not app.is_running
+                    assert app.get_resume_command() == [
+                        "claude",
+                        "--resume",
+                        "session-1",
+                    ]
+
+    @pytest.mark.asyncio
+    async def test_missing_binary_notification_has_long_timeout(
+        self, mock_search_engine
+    ):
+        """Error notification for missing binary should stay visible long enough."""
+        notifications_posted: list = []
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            with patch("fast_resume.tui.app.shutil.which", return_value=None):
+                app = FastResumeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+
+                    original_notify = app.notify
+
+                    def capturing_notify(*args, **kwargs):
+                        notifications_posted.append((args, kwargs))
+                        return original_notify(*args, **kwargs)
+
+                    app.notify = capturing_notify  # type: ignore[method-assign]
+
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+                    assert len(notifications_posted) >= 1
+                    # Timeout should be generous so user can read the message
+                    timeout = notifications_posted[0][1].get("timeout", 0)
+                    assert timeout >= 5
+
+                    await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_resume_command_not_set_on_missing_binary(self, mock_search_engine):
+        """_resume_command stays None when the binary cannot be found."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            with patch("fast_resume.tui.app.shutil.which", return_value=None):
+                app = FastResumeApp()
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause()
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+                    # Command must not be set if we never validated the binary.
+                    assert app._resume_command is None
+
+                    await pilot.press("escape")
+
+
+class TestYoloModalBehavior:
+    """Unit-level integration tests for the redesigned YoloModeModal widget."""
+
+    def _make_yolo_mock(self, sample_sessions):
+        """Build a mock search engine whose adapter supports yolo."""
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+
+        def _resume_cmd(session, yolo=False):
+            if yolo:
+                return [
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "--resume",
+                    session.id,
+                ]
+            return ["claude", "--resume", session.id]
+
+        mock.get_resume_command.side_effect = _resume_cmd
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_checkbox_starts_unchecked(self, sample_sessions):
+        """The yolo checkbox is unchecked when the modal first opens."""
+        from fast_resume.tui.modal import YoloModeModal
+        from textual.widgets import Checkbox
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                modal = app.screen
+                assert isinstance(modal, YoloModeModal)
+                checkbox = modal.query_one("#yolo-checkbox", Checkbox)
+                assert checkbox.value is False
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_space_toggles_checkbox_on(self, sample_sessions):
+        """Pressing Space turns the yolo checkbox on."""
+        from textual.widgets import Checkbox
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                await pilot.press("space")  # toggle on
+                await pilot.pause()
+
+                modal = app.screen
+                checkbox = modal.query_one("#yolo-checkbox", Checkbox)
+                assert checkbox.value is True
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_space_toggles_checkbox_off(self, sample_sessions):
+        """Pressing Space twice returns the checkbox to unchecked."""
+        from textual.widgets import Checkbox
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                await pilot.press("space")  # on
+                await pilot.press("space")  # back off
+                await pilot.pause()
+
+                modal = app.screen
+                checkbox = modal.query_one("#yolo-checkbox", Checkbox)
+                assert checkbox.value is False
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_n_key_turns_yolo_off_after_y(self, sample_sessions):
+        """After turning yolo on with 'y', pressing 'n' turns it off."""
+        from textual.widgets import Checkbox
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                await pilot.press("y")  # turn on
+                await pilot.press("n")  # turn off
+                await pilot.pause()
+
+                modal = app.screen
+                checkbox = modal.query_one("#yolo-checkbox", Checkbox)
+                assert checkbox.value is False
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_y_key_turns_yolo_on(self, sample_sessions):
+        """Pressing 'y' while in the modal checks the yolo checkbox."""
+        from textual.widgets import Checkbox
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                await pilot.press("y")
+                await pilot.pause()
+
+                modal = app.screen
+                checkbox = modal.query_one("#yolo-checkbox", Checkbox)
+                assert checkbox.value is True
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_enter_launches_with_yolo_state(self, sample_sessions):
+        """Enter dismisses the modal and launches with the current checkbox value."""
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                # Turn on yolo then confirm with Enter
+                await pilot.press("y")
+                await pilot.pause()
+                await pilot.press("enter")  # launch
+                await pilot.pause()
+
+                assert not app.is_running
+                cmd = app.get_resume_command()
+                assert cmd is not None
+                assert "--dangerously-skip-permissions" in cmd
+
+    @pytest.mark.asyncio
+    async def test_tab_cycles_focus_between_buttons(self, sample_sessions):
+        """Tab key navigates modal focus; focus stays on a button (not checkbox)."""
+        from fast_resume.tui.modal import YoloModeModal
+        from textual.widgets import Button
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                modal = app.screen
+                assert isinstance(modal, YoloModeModal)
+                # Default focus is on launch-btn
+                assert modal.focused is not None
+                assert modal.focused.id == "launch-btn"
+
+                # Tab cycles focus; checkbox is excluded (can_focus=False) so
+                # focus stays on one of the two buttons (exact Textual wrapping
+                # direction is an implementation detail we don't pin).
+                await pilot.press("tab")
+                await pilot.pause()
+                assert isinstance(modal.focused, Button)
+
+                # Left arrow definitively moves focus to cancel-btn.
+                await pilot.press("left")
+                await pilot.pause()
+                assert modal.focused.id == "cancel-btn"
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_cancel_button_click_dismisses_with_none(self, sample_sessions):
+        """Clicking Cancel leaves no resume command set."""
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                # Move focus to cancel-btn and press Enter to activate it
+                await pilot.press("left")
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                assert app.get_resume_command() is None
+
+    @pytest.mark.asyncio
+    async def test_modal_title_is_launch_session(self, sample_sessions):
+        """The modal title text says 'Launch session'."""
+        from fast_resume.tui.modal import YoloModeModal
+        from textual.widgets import Label
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                modal = app.screen
+                assert isinstance(modal, YoloModeModal)
+                title = modal.query_one("#title", Label)
+                assert "Launch" in str(title.render())
+
+                await pilot.press("escape")
+
+
+class TestModalGuards:
+    """Tests for the guard conditions that prevent actions while modal is open."""
+
+    def _make_yolo_mock(self, sample_sessions):
+        mock = MagicMock()
+        mock.search.return_value = sample_sessions
+        mock.get_session_count.return_value = len(sample_sessions)
+        mock._load_from_index.return_value = sample_sessions
+        mock._sessions = sample_sessions
+        mock._streaming_in_progress = False
+        mock.get_sessions_streaming.return_value = (sample_sessions, 0, 0, 0)
+        mock.get_resume_command.return_value = ["claude", "--resume", "session-1"]
+        mock_adapter = MagicMock()
+        mock_adapter.supports_yolo = True
+        mock.get_adapter_for_session.return_value = mock_adapter
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_copy_cmd_noop_during_modal(self, sample_sessions):
+        """Pressing 'c' while the yolo modal is open doesn't stack a second modal."""
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                screen_before = app.screen
+
+                # Press 'c' which would normally open another modal
+                await pilot.press("c")
+                await pilot.pause()
+
+                # Screen stack should not have grown
+                assert app.screen is screen_before
+                assert len(app.screen_stack) == 2  # app screen + one modal
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_slash_noop_during_modal(self, sample_sessions):
+        """Pressing '/' while the yolo modal is open does not steal focus."""
+        from fast_resume.tui.modal import YoloModeModal
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                # Modal has focus; pressing '/' should be a no-op
+                await pilot.press("/")
+                await pilot.pause()
+
+                # Modal should still be the active screen
+                assert isinstance(app.screen, YoloModeModal)
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_toggle_preview_noop_during_modal(self, sample_sessions):
+        """Ctrl+` does not toggle show_preview while the modal is active."""
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                initial_show_preview = app.show_preview
+
+                await pilot.press("enter")  # open modal
+                await pilot.pause()
+
+                await pilot.press("ctrl+grave_accent")  # should be no-op
+                await pilot.pause()
+
+                # show_preview must be unchanged
+                assert app.show_preview == initial_show_preview
+
+                await pilot.press("escape")
+
+    @pytest.mark.asyncio
+    async def test_tab_in_modal_does_not_accept_suggestion(self, sample_sessions):
+        """Tab while modal is open cycles modal buttons, not search-input suggestions."""
+        from fast_resume.tui.modal import YoloModeModal
+
+        mock = self._make_yolo_mock(sample_sessions)
+        with patch("fast_resume.tui.app.SessionSearch", return_value=mock):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                # Tab should move focus within the modal, not close it
+                await pilot.press("tab")
+                await pilot.pause()
+
+                assert isinstance(app.screen, YoloModeModal)
+
+                await pilot.press("escape")
+
+
+class TestRefreshPreviewMemoization:
+    """Tests for the _refresh_preview memoization in FastResumeApp."""
+
+    @pytest.mark.asyncio
+    async def test_preview_updated_on_session_change(
+        self, mock_search_engine, sample_sessions
+    ):
+        """Switching to a different session updates the preview."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # App starts with session-1 previewed
+                assert app._previewed_session is not None
+                first_previewed = app._previewed_session
+
+                # Navigate to second session
+                table = app.query_one("#results-table")
+                table.focus()
+                await pilot.press("down")
+                await pilot.pause()
+
+                # Preview should have updated to the new session
+                assert app._previewed_session is not first_previewed
+
+    @pytest.mark.asyncio
+    async def test_preview_not_updated_on_same_session_same_query(
+        self, mock_search_engine, sample_sessions
+    ):
+        """Calling _refresh_preview with the same session+query is a no-op."""
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Record preview state
+                previewed_after_load = app._previewed_session
+                assert previewed_after_load is not None
+
+                # Call _refresh_preview with the same session and no query change
+                app._refresh_preview(previewed_after_load)
+
+                # The memo guard should prevent _previewed_session from changing
+                assert app._previewed_session is previewed_after_load
+
+    @pytest.mark.asyncio
+    async def test_preview_updated_on_query_change(
+        self, mock_search_engine, sample_sessions
+    ):
+        """When the query changes for the same session, preview refreshes."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                session = app._previewed_session
+
+                # Simulate a query change
+                app._current_query = "new-query"
+                app._refresh_preview(session)
+                await pilot.pause()
+
+                # Memo should now reflect the new query
+                assert app._previewed_query == "new-query"
+
+    @pytest.mark.asyncio
+    async def test_refresh_preview_with_none_session_updates_memo(
+        self, mock_search_engine
+    ):
+        """Calling _refresh_preview(None) does not update _previewed_session memo."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                # Pass None — the memo guard short-circuits only for non-None
+                # sessions, so calling with None should always pass through.
+                app._refresh_preview(None)
+                await pilot.pause()
+
+                # previewed_session should now be None (we refreshed to empty)
+                assert app._previewed_session is None
+
+
+class TestFilterBarCSSHidden:
+    """Tests for FilterBar.update_agents_with_sessions CSS class approach."""
+
+    @pytest.mark.asyncio
+    async def test_filter_button_hidden_for_agent_with_no_sessions(
+        self, mock_search_engine
+    ):
+        """Filter buttons for agents without sessions get the 'hidden' CSS class."""
+        from fast_resume.tui.filter_bar import FilterBar
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                filter_bar = app.query_one(FilterBar)
+                # Update with only claude and vibe present
+                filter_bar.update_agents_with_sessions({"claude", "vibe"})
+                await pilot.pause()
+
+                # codex button should be hidden
+                codex_btn = filter_bar._filter_buttons.get("codex")
+                assert codex_btn is not None
+                assert "hidden" in codex_btn.classes
+
+    @pytest.mark.asyncio
+    async def test_filter_button_visible_for_agent_with_sessions(
+        self, mock_search_engine
+    ):
+        """Filter buttons for agents WITH sessions do NOT have the 'hidden' CSS class."""
+        from fast_resume.tui.filter_bar import FilterBar
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                filter_bar = app.query_one(FilterBar)
+                filter_bar.update_agents_with_sessions({"claude", "vibe"})
+                await pilot.pause()
+
+                # claude and vibe buttons should NOT be hidden
+                claude_btn = filter_bar._filter_buttons.get("claude")
+                vibe_btn = filter_bar._filter_buttons.get("vibe")
+                assert claude_btn is not None
+                assert "hidden" not in claude_btn.classes
+                assert vibe_btn is not None
+                assert "hidden" not in vibe_btn.classes
+
+    @pytest.mark.asyncio
+    async def test_all_button_never_hidden(self, mock_search_engine):
+        """The 'All' filter button (key=None) is never hidden."""
+        from fast_resume.tui.filter_bar import FilterBar
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                filter_bar = app.query_one(FilterBar)
+                # Pass an empty set — no agents have sessions
+                filter_bar.update_agents_with_sessions(set())
+                await pilot.pause()
+
+                all_btn = filter_bar._filter_buttons.get(None)
+                assert all_btn is not None
+                assert "hidden" not in all_btn.classes
+
+    @pytest.mark.asyncio
+    async def test_hidden_class_removed_when_agent_reappears(self, mock_search_engine):
+        """When an agent gains sessions, its button's 'hidden' class is removed."""
+        from fast_resume.tui.filter_bar import FilterBar
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                filter_bar = app.query_one(FilterBar)
+
+                # Hide codex
+                filter_bar.update_agents_with_sessions({"claude"})
+                await pilot.pause()
+                codex_btn = filter_bar._filter_buttons.get("codex")
+                assert "hidden" in codex_btn.classes
+
+                # Now codex has sessions again
+                filter_bar.update_agents_with_sessions({"claude", "codex"})
+                await pilot.pause()
+                assert "hidden" not in codex_btn.classes
+
+    @pytest.mark.asyncio
+    async def test_no_change_when_visibility_already_correct(self, mock_search_engine):
+        """Calling update_agents_with_sessions with unchanged state does nothing."""
+        from fast_resume.tui.filter_bar import FilterBar
+
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+
+                filter_bar = app.query_one(FilterBar)
+
+                # Apply a state
+                filter_bar.update_agents_with_sessions({"claude", "vibe"})
+                await pilot.pause()
+
+                # Patch refresh to detect spurious calls
+                with patch.object(filter_bar, "refresh") as mock_refresh:
+                    # Calling again with the same set must not trigger a refresh
+                    filter_bar.update_agents_with_sessions({"claude", "vibe"})
+                    await pilot.pause()
+
+                mock_refresh.assert_not_called()

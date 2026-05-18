@@ -1,10 +1,13 @@
 """CLI entry point for fast-resume."""
 
 import os
+import shlex
+import sys
 
 import click
 import humanize
 from rich.console import Console
+from rich.markup import escape as escape_markup
 from rich.table import Table
 
 from .config import AGENTS, INDEX_DIR
@@ -119,8 +122,23 @@ def main(
             # Change to session directory before running command
             if resume_dir:
                 os.chdir(resume_dir)
+            # Print a brief launch banner so the gap between the TUI tearing
+            # down and the agent CLI drawing its own screen isn't silent.
+            # Escape the joined command: session ids come from JSON on disk
+            # and could otherwise be parsed as Rich markup.
+            console = Console()
+            console.print(
+                f"[dim]Launching:[/dim] [bold]{escape_markup(shlex.join(resume_cmd))}[/bold]"
+            )
             # Execute the resume command
-            os.execvp(resume_cmd[0], resume_cmd)
+            try:
+                os.execvp(resume_cmd[0], resume_cmd)
+            except OSError as e:
+                console.print(
+                    f"[bold red]Error:[/bold red] couldn't execute "
+                    f"'{escape_markup(resume_cmd[0])}': {escape_markup(str(e))}"
+                )
+                sys.exit(1)
 
 
 def _show_stats() -> None:

@@ -311,8 +311,8 @@ class TestEndToEndDataFlow:
             # App should still be running (modal is shown)
             assert integration_app.is_running
 
-            # Press 'n' to select normal mode (no yolo)
-            await pilot.press("n")
+            # Default checkbox is off; press Enter to launch without yolo.
+            await pilot.press("enter")
             await pilot.pause()
 
             # App should have exited after modal selection

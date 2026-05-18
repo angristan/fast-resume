@@ -139,7 +139,7 @@ Resume sessions with auto-approve / skip-permissions flags:
 
 **Auto-detection:** Codex and Vibe store the permissions mode in their session files. Sessions originally started in yolo mode are automatically resumed in yolo mode.
 
-**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
+**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI), you'll see a Launch modal with a yolo checkbox. Press `Space`/`y`/`n` to toggle, then Enter to launch (or Esc to cancel).
 
 **Force yolo:** Use `fr --yolo` to skip the prompt and always resume in yolo mode, if supported.
 
@@ -187,15 +187,16 @@ Options:
 | `Ctrl+P`  | Open command palette                  |
 | `q`/`Esc` | Quit                                  |
 
-### Yolo Mode Modal
+### Launch Modal
 
-| Key             | Action            |
-| --------------- | ----------------- |
-| `Tab` / `←` `→` | Toggle selection  |
-| `Enter`         | Confirm selection |
-| `y`             | Select Yolo       |
-| `n`             | Select No         |
-| `Esc`           | Cancel            |
+| Key             | Action                                  |
+| --------------- | --------------------------------------- |
+| `Tab` / `←` `→` | Move focus between Cancel and Launch    |
+| `Space`         | Toggle yolo checkbox                    |
+| `y`             | Turn yolo on                            |
+| `n`             | Turn yolo off                           |
+| `Enter`         | Launch (with the checkbox's yolo state) |
+| `Esc`           | Cancel (stay in the TUI)                |
 
 ## Statistics Dashboard
 

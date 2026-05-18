@@ -2,42 +2,16 @@
 
 import re
 from io import StringIO
-from pathlib import Path
-from typing import Any
 
-from rich.columns import Columns
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape as escape_markup
 from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Static
-from textual_image.renderable import Image as ImageRenderable
 
 from ..adapters.base import Session
 from ..config import AGENTS
 from .utils import highlight_matches
-
-# Asset paths for agent icons
-ASSETS_DIR = Path(__file__).parent.parent / "assets"
-
-# Cache for agent icon renderables
-_preview_icon_cache: dict[str, Any] = {}
-
-
-def _get_agent_icon(agent: str) -> RenderableType | None:
-    """Get the icon renderable for an agent."""
-    if agent not in _preview_icon_cache:
-        icon_path = ASSETS_DIR / f"{agent}.png"
-        if icon_path.exists():
-            try:
-                _preview_icon_cache[agent] = ImageRenderable(
-                    icon_path, width=2, height=1
-                )
-            except Exception:
-                _preview_icon_cache[agent] = None
-        else:
-            _preview_icon_cache[agent] = None
-    return _preview_icon_cache[agent]
 
 
 class SessionPreview(Static):
@@ -100,11 +74,14 @@ class SessionPreview(Static):
             if len(content) > 5000:
                 preview_text += "..."
 
-        # Get agent config and icon
+        # Get agent config — no inline image per message, badge text only.
+        # Rendering an ImageRenderable inside Columns for every assistant turn
+        # sends inline-image protocol bytes (Kitty/Sixel) that Textual's
+        # compositor cannot erase on refresh, leaving pixel artifacts when
+        # switching between sessions.
         agent_config = AGENTS.get(
             session.agent, {"color": "white", "badge": session.agent}
         )
-        agent_icon = _get_agent_icon(session.agent)
 
         # Build list of renderables
         renderables: list[RenderableType] = []
@@ -117,26 +94,10 @@ class SessionPreview(Static):
             if not msg.strip():
                 continue
 
-            # Detect if this is a user message
             is_user = msg.startswith("» ")
-
-            if is_user:
-                # User message - render as text
-                text = Text()
-                self._render_message(text, msg, query, is_user, agent_config)
-                renderables.append(text)
-            else:
-                # Assistant message - add icon + text
-                if agent_icon is not None:
-                    # Create icon with text on same line using Columns
-                    text = Text()
-                    self._render_message_content(text, msg, query, agent_config)
-                    renderables.append(Columns([agent_icon, text], padding=(0, 1)))
-                else:
-                    # Fallback to badge
-                    text = Text()
-                    self._render_message(text, msg, query, is_user, agent_config)
-                    renderables.append(text)
+            text = Text()
+            self._render_message(text, msg, query, is_user, agent_config)
+            renderables.append(text)
 
         return Group(*renderables)
 

@@ -385,3 +385,120 @@ class TestOutputFormatting:
         captured = capsys.readouterr()
         assert "Showing 3 of 3 sessions" in captured.out
         assert "/home/user" in captured.out or "home" in captured.out
+
+
+class TestLaunchBanner:
+    """Tests for the launch banner added in this PR.
+
+    The banner is printed between TUI teardown and agent CLI startup so the
+    transition isn't silent.
+    """
+
+    def test_launch_banner_is_printed(self, cli_runner):
+        """Launch banner shows 'Launching:' followed by the command."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch("fast_resume.cli.os.execvp"),
+        ):
+            mock_run_tui.return_value = (
+                ["claude", "--resume", "abc123"],
+                "/home/user/project",
+            )
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 0
+        assert "Launching:" in result.output
+        assert "claude" in result.output
+        assert "abc123" in result.output
+
+    def test_launch_banner_not_printed_when_no_resume(self, cli_runner):
+        """No launch banner when TUI exits without selecting a session."""
+        with patch("fast_resume.cli.run_tui") as mock_run_tui:
+            mock_run_tui.return_value = (None, None)
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 0
+        assert "Launching:" not in result.output
+
+    def test_launch_banner_escapes_rich_markup_in_session_id(self, cli_runner):
+        """Session IDs that look like Rich markup are escaped in the banner."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch("fast_resume.cli.os.execvp"),
+        ):
+            # Session id contains Rich markup characters that must not be
+            # interpreted as markup tags.
+            mock_run_tui.return_value = (
+                ["claude", "--resume", "[bold]evil[/bold]"],
+                "/tmp",
+            )
+            result = cli_runner.invoke(main, [])
+
+        # The output must not render "[bold]" as styling; the literal text
+        # should appear instead (Rich escaping replaces "[" with the escaped
+        # form so the tag shows as plain text on the terminal).
+        assert "Launching:" in result.output
+        # The raw Rich markup tags should NOT appear unescaped in the plain
+        # text output — if escaping worked, "evil" will still be visible but
+        # "[bold]" will be shown literally rather than treated as a tag.
+        assert "evil" in result.output
+
+    def test_oserror_prints_error_message(self, cli_runner):
+        """OSError from os.execvp is caught and an error message is printed."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch("fast_resume.cli.os.execvp", side_effect=OSError("No such file")),
+        ):
+            mock_run_tui.return_value = (
+                ["nonexistent-agent", "--resume", "xyz"],
+                "/tmp",
+            )
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 1
+        assert "Error" in result.output
+        assert "nonexistent-agent" in result.output
+
+    def test_oserror_exit_code_is_1(self, cli_runner):
+        """Process exits with code 1 when os.execvp raises OSError."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch(
+                "fast_resume.cli.os.execvp", side_effect=OSError("permission denied")
+            ),
+        ):
+            mock_run_tui.return_value = (["claude", "--resume", "x"], None)
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 1
+
+    def test_oserror_message_mentions_original_error(self, cli_runner):
+        """The OSError message text is included in the printed error."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch(
+                "fast_resume.cli.os.execvp",
+                side_effect=OSError("no such file or directory"),
+            ),
+        ):
+            mock_run_tui.return_value = (["claude", "--resume", "x"], None)
+            result = cli_runner.invoke(main, [])
+
+        assert "no such file or directory" in result.output
+
+    def test_successful_execvp_does_not_exit_with_error(self, cli_runner):
+        """When os.execvp succeeds the exit code is 0 (CliRunner returns 0)."""
+        with (
+            patch("fast_resume.cli.run_tui") as mock_run_tui,
+            patch("fast_resume.cli.os.chdir"),
+            patch("fast_resume.cli.os.execvp"),
+        ):
+            mock_run_tui.return_value = (["claude", "--resume", "ok"], "/tmp")
+            result = cli_runner.invoke(main, [])
+
+        assert result.exit_code == 0
