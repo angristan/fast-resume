@@ -24,7 +24,7 @@ class CrushAdapter:
     name = "crush"
     color = AGENTS["crush"]["color"]
     badge = AGENTS["crush"]["badge"]
-    supports_yolo = False
+    supports_yolo = True
 
     def __init__(self, projects_file: Path | None = None) -> None:
         self._projects_file = (
@@ -301,9 +301,11 @@ class CrushAdapter:
 
     def get_resume_command(self, session: Session, yolo: bool = False) -> list[str]:
         """Get command to resume a Crush session."""
-        # Crush is interactive - it shows a session picker when launched in a project directory
-        # fast-resume changes to session.directory before executing this command
-        return ["crush"]
+        cmd = ["crush"]
+        if yolo:
+            cmd.append("--yolo")
+        cmd.extend(["--session", session.id])
+        return cmd
 
     def get_raw_stats(self) -> RawAdapterStats:
         """Get raw statistics from Crush database files."""

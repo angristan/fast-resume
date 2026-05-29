@@ -318,6 +318,23 @@ class TestCopilotAdapter:
 
         assert cmd == ["copilot", "--resume", "abc123-def456-ghi789"]
 
+    def test_get_resume_command_with_yolo(self, adapter):
+        """Test resume command generation with yolo flag."""
+        from fast_resume.adapters.base import Session
+
+        session = Session(
+            id="abc123-def456-ghi789",
+            agent="copilot",
+            title="Test",
+            directory="/test",
+            timestamp=datetime.now(),
+            content="",
+        )
+
+        cmd = adapter.get_resume_command(session, yolo=True)
+
+        assert cmd == ["copilot", "--yolo", "--resume", "abc123-def456-ghi789"]
+
     def test_find_sessions(self, temp_dir):
         """Test finding sessions in the session directory."""
         session_dir = temp_dir / "session-state"

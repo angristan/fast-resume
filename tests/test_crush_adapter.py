@@ -79,7 +79,7 @@ class TestCrushAdapter:
         assert adapter.name == "crush"
         assert adapter.color is not None
         assert adapter.badge == "crush"
-        assert adapter.supports_yolo is False
+        assert adapter.supports_yolo is True
 
     def test_parse_session_basic(self, adapter, temp_dir):
         """Test parsing a basic Crush session from database."""
@@ -292,8 +292,24 @@ class TestCrushAdapter:
 
         cmd = adapter.get_resume_command(session)
 
-        # Crush just opens in the project directory
-        assert cmd == ["crush"]
+        assert cmd == ["crush", "--session", "session-abc123"]
+
+    def test_get_resume_command_with_yolo(self, adapter):
+        """Test resume command generation with yolo flag."""
+        from fast_resume.adapters.base import Session
+
+        session = Session(
+            id="session-abc123",
+            agent="crush",
+            title="Test",
+            directory="/test/project",
+            timestamp=datetime.now(),
+            content="",
+        )
+
+        cmd = adapter.get_resume_command(session, yolo=True)
+
+        assert cmd == ["crush", "--yolo", "--session", "session-abc123"]
 
     def test_find_sessions_from_projects_file(self, temp_dir):
         """Test finding sessions from projects.json file."""
