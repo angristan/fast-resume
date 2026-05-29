@@ -187,6 +187,6 @@ class CopilotAdapter(BaseSessionAdapter):
         """Get command to resume a Copilot CLI session."""
         cmd = ["copilot"]
         if yolo:
-            cmd.extend(["--allow-all-tools", "--allow-all-paths"])
+            cmd.append("--yolo")
         cmd.extend(["--resume", session.id])
         return cmd

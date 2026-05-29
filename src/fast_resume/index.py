@@ -212,7 +212,8 @@ class TantivyIndex:
         schema = index.schema
         query = tantivy.Query.term_query(schema, "agent", agent_filter)
         # Tantivy requires limit > 0, use count property for total matches
-        return searcher.search(query, limit=1).count  # type: ignore[attr-defined]
+        result = searcher.search(query, limit=1)
+        return int(getattr(result, "count"))
 
     def get_stats(self) -> IndexStats:
         """Get statistics about the index contents."""

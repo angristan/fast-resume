@@ -131,15 +131,15 @@ Resume sessions with auto-approve / skip-permissions flags:
 | --------------- | -------------------------------------------- | ------------- |
 | Claude          | `--dangerously-skip-permissions`             | No            |
 | Codex           | `--dangerously-bypass-approvals-and-sandbox` | Yes           |
-| Copilot CLI     | `--allow-all-tools --allow-all-paths`        | No            |
+| Copilot CLI     | `--yolo`                                     | No            |
 | Vibe            | `--auto-approve`                             | Yes           |
 | OpenCode        | _(config-based)_                             | —             |
-| Crush           | _(no CLI resume)_                            | —             |
+| Crush           | `--yolo`                                     | No            |
 | VS Code Copilot | _(n/a)_                                      | —             |
 
 **Auto-detection:** Codex and Vibe store the permissions mode in their session files. Sessions originally started in yolo mode are automatically resumed in yolo mode.
 
-**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
+**Interactive prompt:** For agents that support yolo but don't store it (Claude, Copilot CLI, Crush), you'll see a modal asking whether to resume in yolo mode. Use Tab to toggle, Enter to confirm.
 
 **Force yolo:** Use `fr --yolo` to skip the prompt and always resume in yolo mode, if supported.
 
@@ -440,11 +440,11 @@ Each adapter returns the appropriate command:
 | -------------- | ------------------------------- | -------------------------------------------------------------- |
 | Claude         | `claude --resume <id>`          | `claude --dangerously-skip-permissions --resume <id>`          |
 | Codex          | `codex resume <id>`             | `codex --dangerously-bypass-approvals-and-sandbox resume <id>` |
-| Copilot CLI    | `copilot --resume <id>`         | `copilot --allow-all-tools --allow-all-paths --resume <id>`    |
+| Copilot CLI    | `copilot --resume <id>`         | `copilot --yolo --resume <id>`                                 |
 | Copilot VSCode | `code <directory>`              | _(no change)_                                                  |
 | OpenCode       | `opencode <dir> --session <id>` | _(no change)_                                                  |
 | Vibe           | `vibe --resume <id>`            | `vibe --auto-approve --resume <id>`                            |
-| Crush          | `crush`                         | _(no change)_                                                  |
+| Crush          | `crush --session <id>`          | `crush --yolo --session <id>`                                  |
 
 ### Performance
 
