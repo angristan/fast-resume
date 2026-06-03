@@ -1,6 +1,7 @@
 """TUI package for fast-resume."""
 
 from .. import __version__
+from ..update import update_instruction
 from .app import FastResumeApp
 from .search_input import KeywordSuggester
 from .modal import YoloModeModal
@@ -35,7 +36,7 @@ def run_tui(
     if not no_version_check and app._available_update:
         print(
             f"\nUpdate available: {__version__} → {app._available_update}\n"
-            f"Run: uv tool upgrade fast-resume"
+            f"{update_instruction()}"
         )
 
     return app.get_resume_command(), app.get_resume_directory()
