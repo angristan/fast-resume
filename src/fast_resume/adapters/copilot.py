@@ -41,6 +41,7 @@ class CopilotAdapter(BaseSessionAdapter):
         try:
             session_id = self._fallback_session_id(session_file)
             first_user_message = ""
+            session_title = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
@@ -75,6 +76,12 @@ class CopilotAdapter(BaseSessionAdapter):
                             if match:
                                 directory = match.group(1)
 
+                    # Get title from /rename or generated session name updates
+                    if msg_type == "session.title_changed":
+                        title = data.get("title", "")
+                        if isinstance(title, str) and title.strip():
+                            session_title = title.strip()
+
                     # Process user messages
                     if msg_type == "user.message":
                         content = data.get("content", "")
@@ -95,8 +102,7 @@ class CopilotAdapter(BaseSessionAdapter):
             if not first_user_message:
                 return None
 
-            # Use first user message as title
-            title = truncate_title(first_user_message)
+            title = truncate_title(session_title or first_user_message)
 
             # Skip sessions with no actual conversation content
             if not messages:
