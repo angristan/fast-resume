@@ -187,6 +187,8 @@ Options:
 | `Ctrl+P`  | Open command palette                  |
 | `q`/`Esc` | Quit                                  |
 
+The preview pane size you set with `+` / `-` is remembered across sessions.
+
 ### Yolo Mode Modal
 
 | Key             | Action            |

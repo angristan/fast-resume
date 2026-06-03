@@ -516,6 +516,41 @@ class TestFastResumeAppBasic:
                 assert app.is_running
 
     @pytest.mark.asyncio
+    async def test_restores_persisted_preview_height(self, mock_search_engine):
+        """A persisted preview height is restored when the app starts."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ), patch(
+            "fast_resume.tui.app.load_settings",
+            return_value={"preview_height": 21},
+        ):
+            app = FastResumeApp(no_version_check=True)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                assert app.preview_height == 21
+
+    @pytest.mark.asyncio
+    async def test_resizing_preview_persists_height(self, mock_search_engine):
+        """Resizing the preview pane saves the new height to settings."""
+        save_mock = MagicMock()
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ), patch(
+            "fast_resume.tui.app.load_settings",
+            return_value={"preview_height": 12},
+        ), patch("fast_resume.tui.app.save_settings", save_mock):
+            app = FastResumeApp(no_version_check=True)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.action_increase_preview()
+                await pilot.pause()
+
+        assert app.preview_height == 15
+        save_mock.assert_called()
+        saved = save_mock.call_args[0][0]
+        assert saved["preview_height"] == 15
+
+    @pytest.mark.asyncio
     async def test_no_version_check_skips_update_check(self, mock_search_engine):
         """Test that no_version_check=True skips the version check."""
         with patch(
@@ -884,7 +919,10 @@ class TestFastResumeAppPreview:
         """Test that preview height can be adjusted."""
         with patch(
             "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
-        ):
+        ), patch(
+            "fast_resume.tui.app.load_settings",
+            return_value={"preview_height": 12},
+        ), patch("fast_resume.tui.app.save_settings"):
             app = FastResumeApp()
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause()

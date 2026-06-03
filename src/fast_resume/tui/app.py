@@ -19,6 +19,7 @@ from .. import __version__
 from ..adapters.base import ParseError, Session
 from ..config import LOG_FILE
 from ..search import SessionSearch
+from ..settings import load_settings, save_settings
 from .filter_bar import FILTER_KEYS, FilterBar
 from .modal import YoloModeModal
 from .preview import SessionPreview
@@ -39,6 +40,10 @@ class FastResumeApp(App):
     SUB_TITLE = "Session manager"
 
     CSS = APP_CSS
+
+    # Preview pane height bounds (rows)
+    PREVIEW_MIN_HEIGHT = 6
+    PREVIEW_MAX_HEIGHT = 30
 
     BINDINGS = [
         Binding("escape", "quit", "Quit", priority=True),
@@ -92,6 +97,7 @@ class FastResumeApp(App):
         self._search_timer: Timer | None = None
         self._available_update: str | None = None
         self._syncing_filter: bool = False  # Prevent infinite loops during sync
+        self._settings = load_settings()
 
     def compose(self) -> ComposeResult:
         """Create child widgets."""
@@ -129,6 +135,14 @@ class FastResumeApp(App):
         """Set up the app when mounted."""
         # Set initial filter state from agent_filter parameter
         self.active_filter = self.agent_filter
+
+        # Restore persisted preview pane height
+        saved_height = self._settings.get("preview_height", self.preview_height)
+        if isinstance(saved_height, int):
+            self.preview_height = max(
+                self.PREVIEW_MIN_HEIGHT, min(self.PREVIEW_MAX_HEIGHT, saved_height)
+            )
+            self._apply_preview_height()
 
         # Focus search input
         self.query_one("#search-input", Input).focus()
@@ -551,20 +565,27 @@ class FastResumeApp(App):
 
     def action_increase_preview(self) -> None:
         """Increase preview pane height."""
-        if self.preview_height < 30:
+        if self.preview_height < self.PREVIEW_MAX_HEIGHT:
             self.preview_height += 3
             self._apply_preview_height()
+            self._persist_preview_height()
 
     def action_decrease_preview(self) -> None:
         """Decrease preview pane height."""
-        if self.preview_height > 6:
+        if self.preview_height > self.PREVIEW_MIN_HEIGHT:
             self.preview_height -= 3
             self._apply_preview_height()
+            self._persist_preview_height()
 
     def _apply_preview_height(self) -> None:
         """Apply the current preview height to the container."""
         preview_container = self.query_one("#preview-container")
         preview_container.styles.height = self.preview_height
+
+    def _persist_preview_height(self) -> None:
+        """Remember the preview pane height across sessions."""
+        self._settings["preview_height"] = self.preview_height
+        save_settings(self._settings)
 
     def _set_filter(self, agent: str | None) -> None:
         """Set the agent filter and refresh results, syncing query string."""
