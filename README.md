@@ -26,6 +26,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Very fast**: Built on the Rust-powered Tantivy search engine for blazing-fast indexing and searching
 - **Fuzzy Matching**: Typo-tolerant search with smart ranking (exact matches boosted)
 - **Direct Resume**: Select, Enter, you're back in your session
+- **Named Sessions**: Shows the session name in the list — your `/rename` titles (`✎`) and Claude's auto-generated titles (`✦`) — with `Ctrl+N` to filter to sessions you named yourself
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
 - **Update Notifications**: Get notified when a new version is available
 - **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, and more
@@ -184,6 +185,7 @@ Options:
 | `+` / `-` | Resize preview pane                   |
 | `Tab`     | Accept autocomplete suggestion        |
 | `c`       | Copy full resume command to clipboard |
+| `Ctrl+N`  | Toggle showing only named sessions    |
 | `Ctrl+P`  | Open command palette                  |
 | `q`/`Esc` | Quit                                  |
 
@@ -196,6 +198,18 @@ Options:
 | `y`             | Select Yolo       |
 | `n`             | Select No         |
 | `Esc`           | Cancel            |
+
+## Session Titles
+
+Each result shows the most meaningful name available for a session:
+
+| Marker | Source                                                              |
+| ------ | ------------------------------------------------------------------- |
+| `✎`    | A name you set yourself (e.g. Claude Code's `/rename` command)       |
+| `✦`    | A title the agent generated automatically (e.g. Claude's `aiTitle`) |
+| (none) | No assigned name — falls back to the first user message             |
+
+A user-set name always takes priority over an auto-generated one. Press `Ctrl+N` to filter the list to sessions you named yourself (those marked `✎`).
 
 ## Statistics Dashboard
 

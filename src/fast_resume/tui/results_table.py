@@ -10,6 +10,7 @@ from ..adapters.base import Session
 from .utils import (
     format_directory,
     format_time_ago,
+    format_title,
     get_age_color,
     get_agent_icon,
     highlight_matches,
@@ -132,9 +133,12 @@ class ResultsTable(DataTable):
             # Get agent icon (image or text fallback)
             icon = get_agent_icon(session.agent)
 
-            # Title - truncate and highlight matches
-            title = highlight_matches(
-                session.title, self._current_query, max_len=self._title_width
+            # Title - truncate, highlight matches, and mark named sessions by source
+            title = format_title(
+                session.title,
+                session.title_source,
+                self._current_query,
+                max_len=self._title_width,
             )
 
             # Format directory - truncate based on column width

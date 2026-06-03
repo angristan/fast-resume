@@ -47,6 +47,8 @@ class ClaudeAdapter(BaseSessionAdapter):
         """Parse a Claude Code session file."""
         try:
             first_user_message = ""
+            ai_title = ""
+            custom_title = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
@@ -64,6 +66,14 @@ class ClaudeAdapter(BaseSessionAdapter):
                         continue
 
                     msg_type = data.get("type", "")
+
+                    # A user-set name from /rename is written as a custom-title record
+                    if msg_type == "custom-title":
+                        custom_title = data.get("customTitle", "") or custom_title
+
+                    # Claude assigns a generated session name via an ai-title record
+                    if msg_type == "ai-title":
+                        ai_title = data.get("aiTitle", "") or ai_title
 
                     # Get directory from user message
                     if msg_type == "user" and not directory:
@@ -136,9 +146,18 @@ class ClaudeAdapter(BaseSessionAdapter):
             if not first_user_message:
                 return None
 
-            # Always use first user message as title (matches Claude Code's Resume Session UI)
-            # The summary field is not a good title - it's often stale after session resume
-            title = truncate_title(first_user_message)
+            # Title precedence: a user-set name (/rename -> customTitle) wins, then
+            # Claude's generated name (aiTitle), then the first user message. The
+            # source is tracked so the UI can distinguish user-named from AI-named.
+            if custom_title.strip():
+                title_source = "custom"
+                title = truncate_title(custom_title)
+            elif ai_title.strip():
+                title_source = "ai"
+                title = truncate_title(ai_title)
+            else:
+                title_source = ""
+                title = truncate_title(first_user_message)
 
             # Skip sessions with no actual conversation content
             if not messages:
@@ -154,6 +173,7 @@ class ClaudeAdapter(BaseSessionAdapter):
                 timestamp=timestamp,
                 content=full_content,
                 message_count=turn_count,
+                title_source=title_source,
             )
         except OSError as e:
             error = ParseError(

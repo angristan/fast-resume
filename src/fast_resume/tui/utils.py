@@ -99,6 +99,34 @@ def highlight_matches(
     return result
 
 
+# Markers prefixed to titles by source: a user-set name (/rename) vs an agent name.
+MARKER_CUSTOM = "✎ "  # user-named via /rename
+MARKER_AI = "✦ "  # agent-generated title
+
+_TITLE_MARKERS = {
+    "custom": (MARKER_CUSTOM, "#9ece6a"),  # green
+    "ai": (MARKER_AI, "#7aa2f7"),  # blue
+}
+
+
+def format_title(
+    title: str, title_source: str, query: str = "", max_len: int | None = None
+) -> Text:
+    """Render a session title, prefixing a source-specific marker when it is named.
+
+    title_source is "custom" (user /rename), "ai" (agent-generated), or "" (unnamed).
+    The marker is accounted for in max_len so the cell does not overflow its column.
+    """
+    marker_spec = _TITLE_MARKERS.get(title_source)
+    if marker_spec is None:
+        return highlight_matches(title, query, max_len=max_len)
+
+    glyph, color = marker_spec
+    title_max = max_len - len(glyph) if max_len is not None else None
+    marker = Text(glyph, style=color)
+    return marker + highlight_matches(title, query, max_len=title_max)
+
+
 def get_age_color(age_hours: float) -> str:
     """Return a hex color based on session age using exponential decay gradient.
 

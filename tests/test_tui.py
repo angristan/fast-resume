@@ -19,6 +19,41 @@ from fast_resume.tui import (
 )
 
 
+class TestFormatTitle:
+    """Tests for format_title (named-session markers)."""
+
+    def test_custom_title_gets_custom_marker(self):
+        from fast_resume.tui.utils import MARKER_AI, MARKER_CUSTOM, format_title
+
+        result = format_title("graylog-removal", title_source="custom")
+        assert result.plain.startswith(MARKER_CUSTOM)
+        assert not result.plain.startswith(MARKER_AI)
+        assert "graylog-removal" in result.plain
+
+    def test_ai_title_gets_ai_marker(self):
+        from fast_resume.tui.utils import MARKER_AI, MARKER_CUSTOM, format_title
+
+        result = format_title("Generated name", title_source="ai")
+        assert result.plain.startswith(MARKER_AI)
+        assert not result.plain.startswith(MARKER_CUSTOM)
+        assert "Generated name" in result.plain
+
+    def test_unnamed_session_has_no_marker(self):
+        from fast_resume.tui.utils import MARKER_AI, MARKER_CUSTOM, format_title
+
+        result = format_title("Fix the login bug", title_source="")
+        assert not result.plain.startswith(MARKER_CUSTOM)
+        assert not result.plain.startswith(MARKER_AI)
+        assert result.plain == "Fix the login bug"
+
+    def test_marker_plus_title_respects_max_len(self):
+        from fast_resume.tui.utils import format_title
+
+        long = "x" * 100
+        result = format_title(long, title_source="custom", max_len=20)
+        assert len(result.plain) <= 20
+
+
 class TestFormatDirectory:
     """Tests for format_directory function."""
 
@@ -828,7 +863,7 @@ class TestFastResumeAppFilters:
         mock.get_session_count.side_effect = mock_get_session_count
 
         # Mock search to return filtered results
-        def mock_search(query, agent_filter=None, limit=100):
+        def mock_search(query, agent_filter=None, named_only=False, limit=100):
             if agent_filter == "claude":
                 return [s for s in sample_sessions if s.agent == "claude"]
             elif agent_filter == "vibe":

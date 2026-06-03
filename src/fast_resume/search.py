@@ -230,6 +230,7 @@ class SessionSearch:
         query: str,
         agent_filter: str | None = None,
         directory_filter: str | None = None,
+        named_only: bool = False,
         limit: int = 100,
     ) -> list[Session]:
         """Search sessions using Tantivy full-text search with fuzzy matching.
@@ -271,6 +272,7 @@ class SessionSearch:
             agent_filter=effective_agent,
             directory_filter=effective_dir,
             date_filter=date_filter,
+            named_only=named_only,
             limit=limit,
         )
 

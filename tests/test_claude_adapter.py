@@ -76,6 +76,117 @@ class TestClaudeAdapter:
         assert "Help me fix this bug" in session.content
         assert "I'll help you fix the bug" in session.content
 
+    def test_parse_session_with_ai_title_uses_it_and_marks_named(
+        self, adapter, temp_dir
+    ):
+        """A session with an ai-title record uses aiTitle and is marked named."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-named.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Help me fix this bug in the login system"},
+            },
+            {
+                "type": "ai-title",
+                "aiTitle": "Fix token validation in auth.py",
+                "sessionId": "session-named",
+            },
+            {"type": "assistant", "message": {"content": "I'll help you."}},
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Fix token validation in auth.py"
+        assert session.title_source == "ai"
+
+    def test_parse_session_with_custom_title_uses_it_and_marks_named(
+        self, adapter, temp_dir
+    ):
+        """A user-renamed session (custom-title) uses customTitle and is named."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-custom.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Help me remove graylog from the stack"},
+            },
+            {"type": "custom-title", "customTitle": "graylog-removal"},
+            {"type": "assistant", "message": {"content": "Sure."}},
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "graylog-removal"
+        assert session.title_source == "custom"
+
+    def test_custom_title_takes_priority_over_ai_title(self, adapter, temp_dir):
+        """A user-set custom title wins over the auto-generated aiTitle."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-both.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Help me remove graylog from the stack"},
+            },
+            {"type": "ai-title", "aiTitle": "Remove Graylog logging integration"},
+            {"type": "custom-title", "customTitle": "graylog-removal"},
+            {"type": "assistant", "message": {"content": "Sure."}},
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "graylog-removal"
+
+    def test_parse_session_without_ai_title_is_not_named(self, adapter, temp_dir):
+        """A session without an ai-title falls back to first user message, not named."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-unnamed.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Help me fix this bug in the login system"},
+            },
+            {"type": "assistant", "message": {"content": "I'll help you."}},
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Help me fix this bug in the login system"
+        assert session.title_source == ""
+
     def test_parse_session_without_summary(self, adapter, temp_dir):
         """Test parsing session without summary uses first user message as title."""
         project_dir = temp_dir / "projects" / "project-abc123"

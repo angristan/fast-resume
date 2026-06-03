@@ -28,5 +28,5 @@ CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
 SCHEMA_VERSION = (
-    20  # Bump when schema changes (20: fast timestamp field for sorting by date)
+    23  # Bump when schema changes (23: title_source field replaces named, custom vs ai)
 )

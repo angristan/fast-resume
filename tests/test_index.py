@@ -58,6 +58,60 @@ class TestTantivyIndex:
         assert sessions[0].title == "Test session"
         assert sessions[0].agent == "claude"
 
+    def test_title_source_round_trips(self, index):
+        """The title_source persists through indexing and retrieval."""
+        named = Session(
+            id="named-1",
+            agent="claude",
+            title="A user name",
+            directory="/p",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            content="content",
+            title_source="custom",
+        )
+        index.add_sessions([named])
+
+        sessions = index.get_all_sessions()
+        assert len(sessions) == 1
+        assert sessions[0].title_source == "custom"
+
+    def test_named_only_filter_returns_only_custom_titles(self, index):
+        """search(named_only=True) returns only user-named (custom) sessions."""
+        sessions = [
+            Session(
+                id="s-custom",
+                agent="claude",
+                title="graylog-removal",
+                directory="/p",
+                timestamp=datetime(2024, 1, 15, 10, 30, 0),
+                content="alpha",
+                title_source="custom",
+            ),
+            Session(
+                id="s-ai",
+                agent="claude",
+                title="Generated name",
+                directory="/p",
+                timestamp=datetime(2024, 1, 15, 10, 31, 0),
+                content="alpha",
+                title_source="ai",
+            ),
+            Session(
+                id="s-plain",
+                agent="claude",
+                title="just the first message",
+                directory="/p",
+                timestamp=datetime(2024, 1, 15, 10, 32, 0),
+                content="alpha",
+                title_source="",
+            ),
+        ]
+        index.add_sessions(sessions)
+
+        results = index.search("alpha", named_only=True)
+        ids = {sid for sid, _ in results}
+        assert ids == {"s-custom"}
+
     def test_add_sessions_empty_list(self, index):
         """Test adding empty list does nothing."""
         index.add_sessions([])

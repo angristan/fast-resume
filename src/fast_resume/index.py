@@ -84,6 +84,10 @@ class TantivyIndex:
         schema_builder.add_float_field("mtime", stored=True)
         # Yolo mode - session was started with auto-approve/skip-permissions
         schema_builder.add_boolean_field("yolo", stored=True)
+        # Title source - "custom"/"ai"/"" (raw tokenizer for exact-term filtering)
+        schema_builder.add_text_field(
+            "title_source", stored=True, tokenizer_name="raw"
+        )
         return schema_builder.build()
 
     def _check_version(self) -> bool:
@@ -398,6 +402,7 @@ class TantivyIndex:
                 message_count=doc.get_first("message_count") or 0,
                 mtime=doc.get_first("mtime") or 0.0,
                 yolo=doc.get_first("yolo") or False,
+                title_source=doc.get_first("title_source") or "",
             )
         except Exception:
             return None
@@ -432,6 +437,7 @@ class TantivyIndex:
                     message_count=session.message_count,
                     mtime=session.mtime,
                     yolo=session.yolo,
+                    title_source=session.title_source,
                 )
             )
         writer.commit()
@@ -459,6 +465,7 @@ class TantivyIndex:
                     message_count=session.message_count,
                     mtime=session.mtime,
                     yolo=session.yolo,
+                    title_source=session.title_source,
                 )
             )
         writer.commit()
@@ -469,6 +476,7 @@ class TantivyIndex:
         agent_filter: Filter | None = None,
         directory_filter: Filter | None = None,
         date_filter: DateFilter | None = None,
+        named_only: bool = False,
         limit: int = 100,
     ) -> list[tuple[str, float]]:
         """Search the index and return (session_id, score) pairs.
@@ -509,6 +517,13 @@ class TantivyIndex:
             date_query = self._build_date_filter_query(date_filter, schema)
             if date_query:
                 query_parts.append((tantivy.Occur.Must, date_query))
+
+            # Restrict to sessions the user named themselves (e.g. /rename -> custom)
+            if named_only:
+                named_query = tantivy.Query.term_query(
+                    schema, "title_source", "custom"
+                )
+                query_parts.append((tantivy.Occur.Must, named_query))
 
             # Combine all query parts
             if not query_parts:

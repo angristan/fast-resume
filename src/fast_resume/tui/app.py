@@ -47,6 +47,7 @@ class FastResumeApp(App):
         Binding("/", "focus_search", "Search", priority=True),
         Binding("enter", "resume_session", "Resume"),
         Binding("c", "copy_path", "Copy resume command", priority=True),
+        Binding("ctrl+n", "toggle_named_filter", "Named only", priority=True),
         Binding("ctrl+grave_accent", "toggle_preview", "Preview", priority=True),
         Binding("tab", "accept_suggestion", "Accept", show=False, priority=True),
         Binding("j", "cursor_down", "Down", show=False),
@@ -64,6 +65,7 @@ class FastResumeApp(App):
     show_preview: reactive[bool] = reactive(True)
     selected_session: reactive[Session | None] = reactive(None)
     active_filter: reactive[str | None] = reactive(None)
+    named_only: reactive[bool] = reactive(False)
     is_loading: reactive[bool] = reactive(True)
     preview_height: reactive[int] = reactive(12)
     search_query: reactive[str] = reactive("", init=False)
@@ -158,7 +160,10 @@ class FastResumeApp(App):
             self._total_loaded = len(sessions)
             start_time = time.perf_counter()
             self.sessions = self.search_engine.search(
-                self.initial_query, agent_filter=self.active_filter, limit=100
+                self.initial_query,
+                agent_filter=self.active_filter,
+                named_only=self.named_only,
+                limit=100,
             )
             self.query_time_ms = (time.perf_counter() - start_time) * 1000
             self._finish_loading()
@@ -191,10 +196,11 @@ class FastResumeApp(App):
             shown = len(self.sessions)
             # Get total for current filter (or all if no filter)
             total = self.search_engine.get_session_count(self.active_filter)
+            suffix = " · named only" if self.named_only else ""
             if shown < total:
-                count_label.update(f"{shown}/{total} sessions")
+                count_label.update(f"{shown}/{total} sessions{suffix}")
             else:
-                count_label.update(f"{total} sessions")
+                count_label.update(f"{total} sessions{suffix}")
             # Update query time in search box
             if self.query_time_ms is not None:
                 time_label.update(f"{self.query_time_ms:.1f}ms")
@@ -212,7 +218,10 @@ class FastResumeApp(App):
             query = self.initial_query
             start_time = time.perf_counter()
             sessions = self.search_engine.search(
-                query, agent_filter=self.active_filter, limit=100
+                query,
+                agent_filter=self.active_filter,
+                named_only=self.named_only,
+                limit=100,
             )
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             total = self.search_engine.get_session_count()
@@ -334,7 +343,10 @@ class FastResumeApp(App):
         self._current_query = query
         start_time = time.perf_counter()
         sessions = self.search_engine.search(
-            query, agent_filter=self.active_filter, limit=100
+            query,
+            agent_filter=self.active_filter,
+            named_only=self.named_only,
+            limit=100,
         )
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         # Update UI from worker thread via call_from_thread
@@ -515,6 +527,11 @@ class FastResumeApp(App):
     def action_focus_search(self) -> None:
         """Focus the search input."""
         self.query_one("#search-input", Input).focus()
+
+    def action_toggle_named_filter(self) -> None:
+        """Toggle showing only sessions the user named themselves (e.g. /rename)."""
+        self.named_only = not self.named_only
+        self._do_search(self._current_query)
 
     def action_toggle_preview(self) -> None:
         """Toggle the preview pane."""
