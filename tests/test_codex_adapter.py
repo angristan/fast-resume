@@ -1,6 +1,7 @@
 """Tests for Codex CLI session adapter."""
 
 import json
+import os
 from datetime import datetime
 
 import pytest
@@ -111,6 +112,49 @@ class TestCodexAdapter:
         assert "First prompt" in session.title
         assert "First prompt" in session.content
         assert "Second prompt" in session.content
+
+    def test_parse_session_prefers_thread_name_from_session_index(self, temp_dir):
+        """Test that renamed Codex thread names are used as session titles."""
+        sessions_dir = temp_dir / "sessions"
+        sessions_dir.mkdir()
+        session_file = sessions_dir / "session.jsonl"
+        session_index_file = temp_dir / "session_index.jsonl"
+
+        data = [
+            {"type": "session_meta", "payload": {"id": "test123", "cwd": "/test"}},
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": "Original first prompt",
+                },
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        with open(session_index_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "test123",
+                        "thread_name": "Renamed thread title",
+                        "updated_at": "2026-06-03T16:11:02.882926Z",
+                    }
+                )
+                + "\n"
+            )
+
+        adapter = CodexAdapter(
+            sessions_dir=sessions_dir, session_index_file=session_index_file
+        )
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Renamed thread title"
+        assert "Original first prompt" in session.content
 
     def test_parse_session_skips_environment_context(self, adapter, temp_dir):
         """Test that environment context messages are skipped in content."""
@@ -324,3 +368,52 @@ class TestCodexAdapter:
 
         assert len(files) == 1
         assert "valid123" in files
+
+    def test_incremental_detects_thread_name_update(self, temp_dir):
+        """Test that session_index updated_at triggers Codex title refreshes."""
+        sessions_dir = temp_dir / "sessions"
+        sessions_dir.mkdir()
+        session_file = sessions_dir / "session.jsonl"
+        session_index_file = temp_dir / "session_index.jsonl"
+
+        data = [
+            {"type": "session_meta", "payload": {"id": "test123", "cwd": "/test"}},
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": "Original first prompt",
+                },
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session_file_mtime = 1700000000.0
+        os.utime(session_file, (session_file_mtime, session_file_mtime))
+
+        with open(session_index_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "test123",
+                        "thread_name": "Updated thread title",
+                        "updated_at": "2024-01-01T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+        adapter = CodexAdapter(
+            sessions_dir=sessions_dir, session_index_file=session_index_file
+        )
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            {"test123": (session_file_mtime, "codex")}
+        )
+
+        assert deleted_ids == []
+        assert len(new_or_modified) == 1
+        assert new_or_modified[0].title == "Updated thread title"
+        assert new_or_modified[0].mtime > session_file_mtime

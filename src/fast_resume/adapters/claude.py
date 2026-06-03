@@ -19,6 +19,9 @@ class ClaudeAdapter(BaseSessionAdapter):
 
     def __init__(self, sessions_dir: Path | None = None) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else CLAUDE_DIR
+        self._project_indexes: dict[
+            Path, tuple[float, dict[str, tuple[str, float]]]
+        ] = {}
 
     def find_sessions(self) -> list[Session]:
         """Find all Claude Code sessions."""
@@ -136,9 +139,10 @@ class ClaudeAdapter(BaseSessionAdapter):
             if not first_user_message:
                 return None
 
-            # Always use first user message as title (matches Claude Code's Resume Session UI)
-            # The summary field is not a good title - it's often stale after session resume
-            title = truncate_title(first_user_message)
+            # Prefer Claude's session-list title when available. This is where
+            # /rename stores the display name; older sessions may not have one.
+            title_source = self._get_index_title(session_file) or first_user_message
+            title = truncate_title(title_source)
 
             # Skip sessions with no actual conversation content
             if not messages:
@@ -182,6 +186,75 @@ class ClaudeAdapter(BaseSessionAdapter):
                 on_error(error)
             return None
 
+    def _get_project_index_mtime(self, project_dir: Path) -> float:
+        """Return the mtime of a Claude project sessions-index file."""
+        try:
+            return (project_dir / "sessions-index.json").stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _parse_index_timestamp(self, value: str) -> float:
+        """Parse a Claude sessions-index ISO timestamp to a unix timestamp."""
+        if not value:
+            return 0.0
+
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
+    def _load_project_index(self, project_dir: Path) -> dict[str, tuple[str, float]]:
+        """Load Claude session titles from a project's sessions-index.json."""
+        index_mtime = self._get_project_index_mtime(project_dir)
+        cached = self._project_indexes.get(project_dir)
+        if cached and cached[0] == index_mtime:
+            return cached[1]
+
+        session_titles: dict[str, tuple[str, float]] = {}
+        if index_mtime:
+            try:
+                with open(project_dir / "sessions-index.json", "rb") as f:
+                    data = orjson.loads(f.read())
+
+                entries = data.get("entries", [])
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+
+                        session_id = entry.get("sessionId", "")
+                        summary = entry.get("summary", "")
+                        if not isinstance(session_id, str) or not session_id:
+                            continue
+                        if not isinstance(summary, str) or not summary.strip():
+                            continue
+
+                        entry_mtime = index_mtime
+                        modified = entry.get("modified", "")
+                        if isinstance(modified, str):
+                            entry_mtime = max(
+                                entry_mtime, self._parse_index_timestamp(modified)
+                            )
+
+                        file_mtime = entry.get("fileMtime")
+                        if isinstance(file_mtime, int | float):
+                            entry_mtime = max(entry_mtime, file_mtime / 1000)
+
+                        session_titles[session_id] = (
+                            summary.strip(),
+                            entry_mtime,
+                        )
+            except OSError, orjson.JSONDecodeError:
+                session_titles = {}
+
+        self._project_indexes[project_dir] = (index_mtime, session_titles)
+        return session_titles
+
+    def _get_index_title(self, session_file: Path) -> str:
+        """Return Claude's indexed session title for a session file."""
+        entry = self._load_project_index(session_file.parent).get(session_file.stem)
+        return entry[0] if entry else ""
+
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
         """Scan all Claude Code session files."""
         current_files: dict[str, tuple[Path, float]] = {}
@@ -189,6 +262,8 @@ class ClaudeAdapter(BaseSessionAdapter):
         for project_dir in self._sessions_dir.iterdir():
             if not project_dir.is_dir():
                 continue
+
+            project_index = self._load_project_index(project_dir)
 
             for session_file in project_dir.glob("*.jsonl"):
                 if session_file.name.startswith("agent-"):
@@ -199,6 +274,9 @@ class ClaudeAdapter(BaseSessionAdapter):
                 except OSError:
                     continue
                 session_id = session_file.stem
+                index_entry = project_index.get(session_id)
+                if index_entry:
+                    mtime = max(mtime, index_entry[1])
                 current_files[session_id] = (session_file, mtime)
 
         return current_files
