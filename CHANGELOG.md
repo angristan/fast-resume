@@ -1,3 +1,15 @@
+# [1.18.0](https://github.com/angristan/fast-resume/compare/v1.17.3...v1.18.0) (2026-06-03)
+
+
+### Bug Fixes
+
+* tailor update instructions to install source ([#52](https://github.com/angristan/fast-resume/issues/52)) ([81c83c7](https://github.com/angristan/fast-resume/commit/81c83c7492b0471dd41fbd5c8129f7e7e43c15e8))
+
+
+### Features
+
+* support renamed coding agent session titles ([#51](https://github.com/angristan/fast-resume/issues/51)) ([9f8f04b](https://github.com/angristan/fast-resume/commit/9f8f04bc93715cc514ad9b0379eb5d0482979289))
+
 ## [1.17.3](https://github.com/angristan/fast-resume/compare/v1.17.2...v1.17.3) (2026-05-29)
 
 

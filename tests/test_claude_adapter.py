@@ -1,6 +1,7 @@
 """Tests for Claude Code session adapter."""
 
 import json
+import os
 from datetime import datetime
 
 import pytest
@@ -104,6 +105,51 @@ class TestClaudeAdapter:
 
         assert session is not None
         assert "Implement a new feature" in session.title
+
+    def test_parse_session_prefers_sessions_index_summary(self, temp_dir):
+        """Test that Claude /rename titles from sessions-index are used."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-rename.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Original first prompt for this session"},
+            },
+            {
+                "type": "assistant",
+                "message": {"content": "Response"},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        with open(project_dir / "sessions-index.json", "w") as f:
+            json.dump(
+                {
+                    "version": 1,
+                    "entries": [
+                        {
+                            "sessionId": "session-rename",
+                            "summary": "Renamed Claude thread",
+                            "modified": "2026-06-03T16:11:02.882Z",
+                            "fileMtime": 1780503062882,
+                        }
+                    ],
+                },
+                f,
+            )
+
+        adapter = ClaudeAdapter(sessions_dir=temp_dir / "projects")
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Renamed Claude thread"
+        assert "Original first prompt" in session.content
 
     def test_parse_session_with_list_content(self, adapter, temp_dir):
         """Test parsing session with list-style content (multi-part messages)."""
@@ -340,3 +386,54 @@ class TestClaudeAdapter:
 
         assert len(files) == 1
         assert "session-001" in files
+
+    def test_incremental_detects_sessions_index_title_update(self, temp_dir):
+        """Test that sessions-index mtime triggers Claude title refreshes."""
+        project_dir = temp_dir / "project-abc"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-rename.jsonl"
+        sessions_index_file = project_dir / "sessions-index.json"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/test",
+                "message": {"content": "Original first prompt for this session"},
+            },
+            {"type": "assistant", "message": {"content": "Response"}},
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session_file_mtime = 1700000000.0
+        os.utime(session_file, (session_file_mtime, session_file_mtime))
+
+        with open(sessions_index_file, "w") as f:
+            json.dump(
+                {
+                    "version": 1,
+                    "entries": [
+                        {
+                            "sessionId": "session-rename",
+                            "summary": "Updated Claude title",
+                            "modified": "2023-01-01T00:00:00.000Z",
+                            "fileMtime": int(session_file_mtime * 1000),
+                        }
+                    ],
+                },
+                f,
+            )
+        index_mtime = session_file_mtime + 10
+        os.utime(sessions_index_file, (index_mtime, index_mtime))
+
+        adapter = ClaudeAdapter(sessions_dir=temp_dir)
+        new_or_modified, deleted_ids = adapter.find_sessions_incremental(
+            {"session-rename": (session_file_mtime, "claude")}
+        )
+
+        assert deleted_ids == []
+        assert len(new_or_modified) == 1
+        assert new_or_modified[0].title == "Updated Claude title"
+        assert new_or_modified[0].mtime == index_mtime
