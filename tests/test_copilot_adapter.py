@@ -99,6 +99,80 @@ class TestCopilotAdapter:
         assert "Help me implement a REST API endpoint" in session.content
         assert "I'll help you create a REST API endpoint" in session.content
 
+    def test_parse_session_prefers_title_changed_event(self, adapter, temp_dir):
+        """Test parsing a Copilot session title from /rename events."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / "renamed-session.jsonl"
+
+        data = [
+            {
+                "type": "session.start",
+                "data": {"sessionId": "renamed-session-id"},
+            },
+            {
+                "type": "session.title_changed",
+                "data": {"title": "Renamed Copilot Session"},
+            },
+            {
+                "type": "user.message",
+                "data": {"content": "The first user message should not become title"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response"},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.id == "renamed-session-id"
+        assert session.title == "Renamed Copilot Session"
+        assert "The first user message should not become title" in session.content
+
+    def test_parse_session_uses_last_title_changed_event(self, adapter, temp_dir):
+        """Test that later Copilot title changes replace earlier ones."""
+        session_dir = temp_dir / "session-state"
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / "renamed-again-session.jsonl"
+
+        data = [
+            {
+                "type": "session.start",
+                "data": {"sessionId": "renamed-again-session-id"},
+            },
+            {
+                "type": "session.title_changed",
+                "data": {"title": "Initial Generated Title"},
+            },
+            {
+                "type": "user.message",
+                "data": {"content": "A prompt that keeps the session non-empty"},
+            },
+            {
+                "type": "session.title_changed",
+                "data": {"title": "Manual Rename Wins"},
+            },
+            {
+                "type": "assistant.message",
+                "data": {"content": "Response"},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Manual Rename Wins"
+
     def test_parse_session_extracts_session_id(self, adapter, temp_dir):
         """Test that session ID is extracted from session.start."""
         session_dir = temp_dir / "session-state"
