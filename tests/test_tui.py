@@ -681,6 +681,22 @@ class TestFastResumeAppNavigation:
                 await pilot.press("f2")
                 assert app.show_preview is True
 
+    def test_f2_uses_distinct_action_so_footer_shows_it(self):
+        """F2 must use a separate action from Ctrl+`.
+
+        Textual's Footer groups bindings by action and renders only one key per
+        action, so both keys sharing 'toggle_preview' would hide F2 from the
+        footer. A distinct (delegating) action gives F2 its own footer entry.
+        """
+        actions = {
+            b.key: b.action
+            for b in FastResumeApp.BINDINGS
+            if b.key in ("f2", "ctrl+grave_accent")
+        }
+        assert actions["ctrl+grave_accent"] == "toggle_preview"
+        assert actions["f2"] == "toggle_preview_alt"
+        assert actions["f2"] != actions["ctrl+grave_accent"]
+
 
 class TestFastResumeAppSearch:
     """Tests for search functionality."""
