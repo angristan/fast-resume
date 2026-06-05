@@ -180,7 +180,7 @@ Options:
 
 | Key       | Action                                |
 | --------- | ------------------------------------- |
-| `Ctrl+\`` | Toggle preview pane (or `F2`)          |
+| `F2`      | Toggle preview pane (or `Ctrl+\``)     |
 | `+` / `-` | Resize preview pane                   |
 | `Tab`     | Accept autocomplete suggestion        |
 | `c`       | Copy full resume command to clipboard |

@@ -47,10 +47,14 @@ class FastResumeApp(App):
         Binding("/", "focus_search", "Search", priority=True),
         Binding("enter", "resume_session", "Resume"),
         Binding("c", "copy_path", "Copy resume command", priority=True),
-        Binding("ctrl+grave_accent", "toggle_preview", "Preview", priority=True),
-        # F2 is a layout-independent alternative; Ctrl+` is hard to reach on many
-        # non-US keyboards (e.g. the backtick is a dead key on Nordic layouts).
-        Binding("f2", "toggle_preview_alt", "Preview", priority=True),
+        # F2 is the primary, layout-independent toggle shown in the footer. Ctrl+`
+        # still works but is hidden: the backtick is hard to reach on many non-US
+        # keyboards (e.g. a dead key on Nordic layouts). Textual's footer groups by
+        # action and skips show=False bindings, so only F2 appears.
+        Binding("f2", "toggle_preview", "Preview", priority=True),
+        Binding(
+            "ctrl+grave_accent", "toggle_preview", "Preview", show=False, priority=True
+        ),
         Binding("tab", "accept_suggestion", "Accept", show=False, priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -527,12 +531,6 @@ class FastResumeApp(App):
             preview_container.remove_class("hidden")
         else:
             preview_container.add_class("hidden")
-
-    # Distinct action so the footer shows F2 as its own entry: Textual's Footer
-    # groups bindings by action and renders only one key per action.
-    def action_toggle_preview_alt(self) -> None:
-        """Alias for the preview toggle, bound to F2 (see action_toggle_preview)."""
-        self.action_toggle_preview()
 
     def action_cursor_down(self) -> None:
         """Move cursor down in results."""
