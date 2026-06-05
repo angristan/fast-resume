@@ -17,11 +17,6 @@ def setup_logging() -> None:
     # Ensure cache directory exists
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Silence textual_image's noisy WARNING (with traceback) emitted when the
-    # terminal can't report cell size - e.g. VTE terminals like Terminator or
-    # GNOME Terminal. It falls back to default sizes, so this is not actionable.
-    logging.getLogger("textual_image").setLevel(logging.ERROR)
-
     # Configure parse error logger
     parse_logger.setLevel(logging.WARNING)
 

@@ -1,24 +1,22 @@
-"""Tests for logging configuration."""
+"""Tests for early logging configuration."""
 
+import importlib
 import logging
 
-from fast_resume.logging_config import setup_logging
 
+def test_textual_image_logger_silenced_on_package_import():
+    """Importing the package raises the textual_image logger to ERROR.
 
-def test_setup_logging_silences_textual_image_warning():
-    """textual_image's logger is raised to ERROR to suppress the cell-size warning.
-
-    On terminals that cannot report cell size (e.g. VTE terminals), textual_image
-    logs a WARNING with a traceback that surfaces on exit. We silence it since the
-    library falls back gracefully.
+    textual_image probes the terminal for cell size at import time (in
+    textual_image.widget) and logs a WARNING + traceback when the terminal can't
+    answer (e.g. VTE terminals like Terminator). The package must silence it
+    before any submodule imports textual_image, so the fix lives in
+    fast_resume/__init__.py rather than in setup_logging() (which runs too late).
     """
-    # Start from a clean slate so we observe setup_logging's effect.
+    import fast_resume
+
     logging.getLogger("textual_image").setLevel(logging.NOTSET)
+    importlib.reload(fast_resume)
 
-    setup_logging()
-
-    assert logging.getLogger("textual_image").level == logging.ERROR
-    # A WARNING from a child logger is therefore suppressed.
-    assert not logging.getLogger("textual_image._terminal").isEnabledFor(
-        logging.WARNING
-    )
+    terminal_logger = logging.getLogger("textual_image._terminal")
+    assert not terminal_logger.isEnabledFor(logging.WARNING)
