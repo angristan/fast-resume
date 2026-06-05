@@ -50,7 +50,7 @@ class FastResumeApp(App):
         Binding("ctrl+grave_accent", "toggle_preview", "Preview", priority=True),
         # F2 is a layout-independent alternative; Ctrl+` is hard to reach on many
         # non-US keyboards (e.g. the backtick is a dead key on Nordic layouts).
-        Binding("f2", "toggle_preview", "Preview", show=False, priority=True),
+        Binding("f2", "toggle_preview", "Preview", priority=True),
         Binding("tab", "accept_suggestion", "Accept", show=False, priority=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
