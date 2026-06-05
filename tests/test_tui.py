@@ -944,6 +944,57 @@ class TestFastResumeAppPreview:
                 await pilot.pause()
                 assert app.preview_height < initial_height
 
+    @pytest.mark.asyncio
+    async def test_max_preview_height_is_80_percent_of_view(self, mock_search_engine):
+        """The preview height ceiling is 80% of the view height."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ), patch(
+            "fast_resume.tui.app.load_settings", return_value={"preview_height": 12}
+        ), patch("fast_resume.tui.app.save_settings"):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                assert app._max_preview_height() == 32  # int(40 * 0.8)
+
+    @pytest.mark.asyncio
+    async def test_increase_preview_caps_at_80_percent(self, mock_search_engine):
+        """Pressing + repeatedly never grows the preview past 80% of the view."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ), patch(
+            "fast_resume.tui.app.load_settings", return_value={"preview_height": 12}
+        ), patch("fast_resume.tui.app.save_settings"):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.query_one("#results-table").focus()
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.press("equals")
+                await pilot.pause()
+                assert app.preview_height == 32
+
+    @pytest.mark.asyncio
+    async def test_shrinking_window_clamps_preview_height(self, mock_search_engine):
+        """Resizing the window smaller clamps the preview to 80% of the new view."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ), patch(
+            "fast_resume.tui.app.load_settings", return_value={"preview_height": 12}
+        ), patch("fast_resume.tui.app.save_settings"):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                app.preview_height = 30
+                app._apply_preview_height()
+
+                await pilot.resize_terminal(120, 10)
+                await pilot.pause()
+
+                # 80% of 10 == 8; the oversized preview must be clamped down
+                assert app.preview_height == 8
+
 
 class TestFastResumeAppResumeCommand:
     """Tests for resume command functionality."""

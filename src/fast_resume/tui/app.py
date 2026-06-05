@@ -6,7 +6,7 @@ import shlex
 import time
 from collections.abc import Callable
 
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
 from textual.binding import Binding
@@ -42,9 +42,9 @@ class FastResumeApp(App):
 
     CSS = APP_CSS
 
-    # Preview pane height bounds (rows)
+    # Preview pane height: a minimum in rows and a ceiling as a fraction of the view.
     PREVIEW_MIN_HEIGHT = 6
-    PREVIEW_MAX_HEIGHT = 30
+    PREVIEW_MAX_FRACTION = 0.8
 
     BINDINGS = [
         Binding("escape", "quit", "Quit", priority=True),
@@ -137,12 +137,11 @@ class FastResumeApp(App):
         # Set initial filter state from agent_filter parameter
         self.active_filter = self.agent_filter
 
-        # Restore persisted preview pane height
+        # Restore persisted preview pane height (the 80%-of-view ceiling is
+        # enforced by on_resize once the real view size is known).
         saved_height = self._settings.get("preview_height", self.preview_height)
         if isinstance(saved_height, int):
-            self.preview_height = max(
-                self.PREVIEW_MIN_HEIGHT, min(self.PREVIEW_MAX_HEIGHT, saved_height)
-            )
+            self.preview_height = max(self.PREVIEW_MIN_HEIGHT, saved_height)
             self._apply_preview_height()
 
         # Focus search input
@@ -564,10 +563,20 @@ class FastResumeApp(App):
         for _ in range(10):
             table.action_cursor_up()
 
+    def _max_preview_height(self, view_height: int | None = None) -> int:
+        """Preview height ceiling: 80% of the view height, floored at the minimum.
+
+        Pass view_height when the app's own size isn't current yet (e.g. while
+        handling a resize event, where self.size still holds the old value).
+        """
+        height = self.size.height if view_height is None else view_height
+        return max(self.PREVIEW_MIN_HEIGHT, int(height * self.PREVIEW_MAX_FRACTION))
+
     def action_increase_preview(self) -> None:
-        """Increase preview pane height."""
-        if self.preview_height < self.PREVIEW_MAX_HEIGHT:
-            self.preview_height += 3
+        """Increase preview pane height, up to 80% of the view."""
+        max_height = self._max_preview_height()
+        if self.preview_height < max_height:
+            self.preview_height = min(self.preview_height + 3, max_height)
             self._apply_preview_height()
             self._persist_preview_height()
 
@@ -577,6 +586,16 @@ class FastResumeApp(App):
             self.preview_height -= 3
             self._apply_preview_height()
             self._persist_preview_height()
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Clamp the preview height when the window shrinks below its 80% ceiling."""
+        max_height = self._max_preview_height(event.size.height)
+        if self.preview_height > max_height:
+            self.preview_height = max_height
+            try:
+                self._apply_preview_height()
+            except NoMatches:
+                pass  # Layout not ready yet; on_mount will apply it.
 
     def _apply_preview_height(self) -> None:
         """Apply the current preview height to the container."""
