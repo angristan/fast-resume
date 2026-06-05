@@ -664,6 +664,23 @@ class TestFastResumeAppNavigation:
                 await pilot.press("ctrl+grave_accent")
                 assert app.show_preview is True
 
+    @pytest.mark.asyncio
+    async def test_f2_toggles_preview(self, mock_search_engine):
+        """F2 toggles the preview pane (layout-independent alternative to Ctrl+`)."""
+        with patch(
+            "fast_resume.tui.app.SessionSearch", return_value=mock_search_engine
+        ):
+            app = FastResumeApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                assert app.show_preview is True
+
+                await pilot.press("f2")
+                assert app.show_preview is False
+
+                await pilot.press("f2")
+                assert app.show_preview is True
+
 
 class TestFastResumeAppSearch:
     """Tests for search functionality."""
