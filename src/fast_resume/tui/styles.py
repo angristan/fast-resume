@@ -165,6 +165,14 @@ Screen {
     color: #00A67E;
 }
 
+#filter-cursor {
+    color: #00B7C3;
+}
+#filter-cursor.-active {
+    background: #00B7C3 20%;
+    color: #00B7C3;
+}
+
 #filter-copilot-cli {
     color: #9CA3AF;
 }
@@ -265,6 +273,10 @@ DataTable > .datatable--hover {
 
 .agent-codex {
     color: #00A67E;
+}
+
+.agent-cursor {
+    color: #00B7C3;
 }
 
 .agent-copilot {

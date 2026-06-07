@@ -12,6 +12,7 @@ from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 from .copilot import CopilotAdapter
 from .copilot_vscode import CopilotVSCodeAdapter
+from .cursor import CursorAdapter
 from .crush import CrushAdapter
 from .opencode import OpenCodeAdapter
 from .vibe import VibeAdapter
@@ -27,6 +28,7 @@ __all__ = [
     "CodexAdapter",
     "CopilotAdapter",
     "CopilotVSCodeAdapter",
+    "CursorAdapter",
     "CrushAdapter",
     "OpenCodeAdapter",
     "VibeAdapter",
