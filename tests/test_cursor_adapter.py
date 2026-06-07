@@ -13,15 +13,20 @@ from fast_resume.index import TantivyIndex
 from fast_resume.search import SessionSearch
 
 
-def create_workspace_db(db_path: Path, composers: list[dict]) -> None:
+def create_workspace_db(
+    db_path: Path,
+    composers: list[dict] | None = None,
+    payload: dict | None = None,
+) -> None:
     """Create a minimal Cursor workspace state.vscdb."""
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
-    payload = json.dumps({"allComposers": composers})
+    if payload is None:
+        payload = {"allComposers": composers or []}
     cursor.execute(
         "INSERT INTO ItemTable (key, value) VALUES (?, ?)",
-        ("composer.composerData", payload),
+        ("composer.composerData", json.dumps(payload)),
     )
     conn.commit()
     conn.close()
@@ -35,6 +40,14 @@ def create_global_db(db_path: Path, rows: list[tuple[str, str]]) -> None:
     cursor.executemany("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)", rows)
     conn.commit()
     conn.close()
+
+
+def create_transcript_file(transcript_file: Path, rows: list[dict]) -> None:
+    """Create a Cursor agent transcript JSONL file."""
+    transcript_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(transcript_file, "w") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
 
 
 @pytest.fixture
@@ -77,6 +90,10 @@ def cursor_fixture(temp_dir):
                 "composerData:cmp-active-1",
                 json.dumps(
                     {
+                        "composerId": "cmp-active-1",
+                        "name": "Debug auth flow",
+                        "createdAt": 1704067200000,
+                        "lastUpdatedAt": 1704067300000,
                         "fullConversationHeadersOnly": [
                             {"bubbleId": "u-1", "type": 1},
                             {"bubbleId": "a-1", "type": 2},
@@ -101,11 +118,41 @@ def cursor_fixture(temp_dir):
         ],
     )
 
+    projects_dir = temp_dir / ".cursor" / "projects"
+    project_key = str(project_dir).lstrip("/").replace("/", "-")
+    create_transcript_file(
+        projects_dir
+        / project_key
+        / "agent-transcripts"
+        / "cmp-active-1"
+        / "cmp-active-1.jsonl",
+        [
+            {
+                "role": "user",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "How do I fix auth?"},
+                    ]
+                },
+            },
+            {
+                "role": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "read_file", "input": {}},
+                        {"type": "text", "text": "Check token validation."},
+                    ]
+                },
+            },
+        ],
+    )
+
     return {
         "user_dir": user_dir,
         "workspace_storage": workspace_storage,
         "global_db": global_storage / "state.vscdb",
         "project_dir": project_dir,
+        "projects_dir": projects_dir,
     }
 
 
@@ -123,6 +170,7 @@ class TestCursorAdapter:
             user_dir=cursor_fixture["user_dir"],
             global_db_path=cursor_fixture["global_db"],
             workspace_storage_dir=cursor_fixture["workspace_storage"],
+            projects_dir=cursor_fixture["projects_dir"],
         )
 
         sessions = adapter.find_sessions()
@@ -143,6 +191,7 @@ class TestCursorAdapter:
             user_dir=cursor_fixture["user_dir"],
             global_db_path=cursor_fixture["global_db"],
             workspace_storage_dir=cursor_fixture["workspace_storage"],
+            projects_dir=cursor_fixture["projects_dir"],
         )
 
         new_sessions, deleted = adapter.find_sessions_incremental({})
@@ -159,6 +208,7 @@ class TestCursorAdapter:
             user_dir=Path("/does/not/exist"),
             global_db_path=Path("/does/not/exist/global.vscdb"),
             workspace_storage_dir=Path("/does/not/exist/workspaceStorage"),
+            projects_dir=Path("/does/not/exist/projects"),
         )
         known = {"cursor:missing": (123.0, "cursor")}
         sessions, deleted = adapter.find_sessions_incremental(known)
@@ -207,6 +257,7 @@ class TestCursorAdapter:
             user_dir=user_dir,
             global_db_path=user_dir / "globalStorage" / "state.vscdb",
             workspace_storage_dir=workspace_storage,
+            projects_dir=temp_dir / ".cursor" / "projects",
         )
         sessions = adapter.find_sessions()
         assert len(sessions) == 1
@@ -263,6 +314,7 @@ class TestCursorAdapter:
             user_dir=user_dir,
             global_db_path=global_storage / "state.vscdb",
             workspace_storage_dir=workspace_storage,
+            projects_dir=temp_dir / ".cursor" / "projects",
         )
         sessions = adapter.find_sessions()
         assert len(sessions) == 1
@@ -273,6 +325,7 @@ class TestCursorAdapter:
             user_dir=cursor_fixture["user_dir"],
             global_db_path=cursor_fixture["global_db"],
             workspace_storage_dir=cursor_fixture["workspace_storage"],
+            projects_dir=cursor_fixture["projects_dir"],
         )
 
         stats = adapter.get_raw_stats()
@@ -289,6 +342,7 @@ class TestCursorSearchIntegration:
             user_dir=cursor_fixture["user_dir"],
             global_db_path=cursor_fixture["global_db"],
             workspace_storage_dir=cursor_fixture["workspace_storage"],
+            projects_dir=cursor_fixture["projects_dir"],
         )
 
         search = SessionSearch()
@@ -305,3 +359,84 @@ class TestCursorSearchIntegration:
 
         filtered = search.search("", agent_filter="cursor")
         assert len(filtered) == 1
+
+    def test_new_workspace_schema_with_selected_ids(self, temp_dir):
+        user_dir = temp_dir / "Cursor" / "User"
+        workspace_storage = user_dir / "workspaceStorage"
+        workspace = workspace_storage / "ws-new"
+        workspace.mkdir(parents=True)
+
+        project_dir = temp_dir / "new-workspace"
+        project_dir.mkdir(parents=True)
+        with open(workspace / "workspace.json", "w") as f:
+            json.dump({"folder": project_dir.as_uri()}, f)
+
+        create_workspace_db(
+            workspace / "state.vscdb",
+            payload={
+                "selectedComposerIds": ["cmp-new-1"],
+                "lastFocusedComposerIds": ["cmp-new-1"],
+            },
+        )
+
+        global_storage = user_dir / "globalStorage"
+        global_storage.mkdir(parents=True)
+        create_global_db(
+            global_storage / "state.vscdb",
+            [
+                (
+                    "composerData:cmp-new-1",
+                    json.dumps(
+                        {
+                            "composerId": "cmp-new-1",
+                            "name": "Recent session",
+                            "createdAt": 1780741000000,
+                            "lastUpdatedAt": 1780741778000,
+                            "fullConversationHeadersOnly": [],
+                        }
+                    ),
+                )
+            ],
+        )
+
+        projects_dir = temp_dir / ".cursor" / "projects"
+        project_key = str(project_dir).lstrip("/").replace("/", "-")
+        create_transcript_file(
+            projects_dir
+            / project_key
+            / "agent-transcripts"
+            / "cmp-new-1"
+            / "cmp-new-1.jsonl",
+            [
+                {
+                    "role": "user",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Latest Cursor chat"},
+                        ]
+                    },
+                },
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Session is available."},
+                        ]
+                    },
+                },
+            ],
+        )
+
+        adapter = CursorAdapter(
+            user_dir=user_dir,
+            global_db_path=global_storage / "state.vscdb",
+            workspace_storage_dir=workspace_storage,
+            projects_dir=projects_dir,
+        )
+
+        sessions = adapter.find_sessions()
+        assert len(sessions) == 1
+        assert sessions[0].id == "cursor:cmp-new-1"
+        assert sessions[0].title == "Recent session"
+        assert sessions[0].directory == str(project_dir)
+        assert "Latest Cursor chat" in sessions[0].content

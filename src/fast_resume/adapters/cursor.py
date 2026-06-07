@@ -27,9 +27,48 @@ elif sys.platform == "win32":
 else:  # Linux
     CURSOR_USER_DIR = Path.home() / ".config" / "Cursor" / "User"
 
+CURSOR_PROJECTS_DIR = Path.home() / ".cursor" / "projects"
+
+
+@dataclass
+class _GlobalComposerData:
+    title: str
+    created_ms: int
+    updated_ms: int
+    mtime: float
+    directory: str
+
+
+@dataclass
+class _WorkspaceComposerData:
+    title: str
+    created_ms: int
+    updated_ms: int
+    mtime: float
+    directory: str
+
+
+@dataclass
+class _TranscriptData:
+    file_path: Path
+    mtime: float
+    directory: str
+    title_hint: str
+
+
+@dataclass
+class _SessionMetadata:
+    id: str
+    composer_id: str
+    title: str
+    directory: str
+    timestamp: datetime
+    mtime: float
+    transcript_file: Path | None
+
 
 class CursorAdapter:
-    """Adapter for Cursor editor sessions stored in SQLite."""
+    """Adapter for Cursor sessions stored in SQLite and local transcripts."""
 
     name = "cursor"
     color = AGENTS["cursor"]["color"]
@@ -41,6 +80,7 @@ class CursorAdapter:
         user_dir: Path | None = None,
         global_db_path: Path | None = None,
         workspace_storage_dir: Path | None = None,
+        projects_dir: Path | None = None,
     ) -> None:
         self._user_dir = user_dir if user_dir is not None else CURSOR_USER_DIR
         self._global_db_path = (
@@ -53,6 +93,7 @@ class CursorAdapter:
             if workspace_storage_dir is not None
             else self._user_dir / "workspaceStorage"
         )
+        self._projects_dir = projects_dir if projects_dir is not None else CURSOR_PROJECTS_DIR
 
     def _emit_error(
         self,
@@ -76,15 +117,13 @@ class CursorAdapter:
         """Create a namespaced session ID to avoid cross-agent collisions."""
         return f"cursor:{composer_id}"
 
-    def _composer_id_from_session_id(self, session_id: str) -> str:
-        """Extract raw composer ID from a namespaced session ID."""
-        if session_id.startswith("cursor:"):
-            return session_id.split(":", 1)[1]
-        return session_id
-
     def is_available(self) -> bool:
         """Check if Cursor data is available."""
-        return self._global_db_path.exists() or self._workspace_storage_dir.exists()
+        return (
+            self._global_db_path.exists()
+            or self._workspace_storage_dir.exists()
+            or self._projects_dir.exists()
+        )
 
     def _iter_workspace_dirs(self) -> list[Path]:
         """List Cursor workspace storage directories."""
@@ -100,6 +139,17 @@ class CursorAdapter:
             return []
 
         return dirs
+
+    def _iter_transcript_files(self) -> list[Path]:
+        """List top-level Cursor agent transcript files."""
+        if not self._projects_dir.exists():
+            return []
+
+        try:
+            # Match: <project>/agent-transcripts/<session>/<session>.jsonl
+            return sorted(self._projects_dir.glob("*/agent-transcripts/*/*.jsonl"))
+        except OSError:
+            return []
 
     def _sanitize_json_text(self, raw: str) -> str:
         """Sanitize Cursor JSON payloads that may include control chars."""
@@ -138,6 +188,23 @@ class CursorAdapter:
                 return 0
         return 0
 
+    def _decode_file_uri(self, value: str) -> str:
+        """Decode file URI into a local path when possible."""
+        if not value.startswith("file://"):
+            return value
+
+        parsed = urlparse(value)
+        path = unquote(parsed.path)
+        # file:///C:/Users/... -> C:/Users/... on Windows
+        if (
+            sys.platform == "win32"
+            and len(path) > 2
+            and path.startswith("/")
+            and path[2] == ":"
+        ):
+            path = path[1:]
+        return path
+
     def _read_workspace_folder(self, workspace_json: Path) -> str:
         """Read and decode a workspace folder path from workspace.json."""
         if not workspace_json.exists():
@@ -153,29 +220,96 @@ class CursorAdapter:
         if not isinstance(folder, str) or not folder:
             return ""
 
-        if folder.startswith("file://"):
-            parsed = urlparse(folder)
-            path = unquote(parsed.path)
-            # file:///C:/Users/... -> C:/Users/... on Windows
-            if (
-                sys.platform == "win32"
-                and len(path) > 2
-                and path.startswith("/")
-                and path[2] == ":"
-            ):
-                path = path[1:]
-            return path
+        return self._decode_file_uri(folder)
 
-        return folder
+    def _extract_directory_from_global(self, composer: dict) -> str:
+        """Extract workspace directory from a global composer payload."""
+        context = composer.get("context")
+        if not isinstance(context, dict):
+            return ""
 
-    def _read_workspace_composers(
-        self, workspace_db: Path, on_error: ErrorCallback = None
-    ) -> list[dict]:
-        """Read composer list from a workspace state.vscdb database."""
-        if not workspace_db.exists():
-            return []
+        folder_selections = context.get("folderSelections")
+        if not isinstance(folder_selections, list):
+            return ""
 
+        for entry in folder_selections:
+            if not isinstance(entry, dict):
+                continue
+
+            for key in ("path", "fsPath", "uri", "folder"):
+                raw = entry.get(key)
+                if isinstance(raw, str) and raw:
+                    return self._decode_file_uri(raw)
+
+        return ""
+
+    def _decode_transcript_project_key(self, project_key: str) -> str:
+        """Decode ~/.cursor/projects key into a likely absolute path."""
+        if project_key == "empty-window":
+            return ""
+
+        decoded = unquote(project_key).replace("-", "/")
+        if decoded and not decoded.startswith("/"):
+            decoded = "/" + decoded
+        return decoded
+
+    def _extract_transcript_title(
+        self,
+        transcript_file: Path,
+        on_error: ErrorCallback = None,
+    ) -> str:
+        """Extract a best-effort title from the first user text in transcript."""
+        try:
+            with open(transcript_file, "rb") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        record = orjson.loads(line)
+                    except orjson.JSONDecodeError:
+                        continue
+
+                    if record.get("role") != "user":
+                        continue
+
+                    message = record.get("message", {})
+                    content = message.get("content", "") if isinstance(message, dict) else ""
+
+                    if isinstance(content, str):
+                        text = content.strip()
+                        if text:
+                            return truncate_title(text)
+                    elif isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                text = str(part.get("text", "")).strip()
+                                if text:
+                                    return truncate_title(text)
+                            elif isinstance(part, str):
+                                text = part.strip()
+                                if text:
+                                    return truncate_title(text)
+        except OSError as e:
+            self._emit_error(
+                transcript_file,
+                "OSError",
+                str(e),
+                on_error=on_error,
+            )
+
+        return ""
+
+    def _load_workspace_composers(
+        self,
+        workspace_db: Path,
+        workspace_dir: str,
+        workspace_mtime: float,
+        on_error: ErrorCallback = None,
+    ) -> dict[str, _WorkspaceComposerData]:
+        """Load composer hints from a workspace DB (old and new schema)."""
+        results: dict[str, _WorkspaceComposerData] = {}
         conn: sqlite3.Connection | None = None
+
         try:
             conn = sqlite3.connect(str(workspace_db), timeout=5)
             conn.row_factory = sqlite3.Row
@@ -185,7 +319,7 @@ class CursorAdapter:
                 "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
             ).fetchone()
             if not row:
-                return []
+                return {}
 
             parsed = self._parse_cursor_json(
                 row["value"],
@@ -193,13 +327,64 @@ class CursorAdapter:
                 on_error=on_error,
             )
             if not isinstance(parsed, dict):
-                return []
+                return {}
 
+            # Old shape: allComposers with metadata
             composers = parsed.get("allComposers", [])
-            if not isinstance(composers, list):
-                return []
+            if isinstance(composers, list):
+                for composer in composers:
+                    if not isinstance(composer, dict):
+                        continue
+                    if composer.get("isArchived") is True:
+                        continue
 
-            return [c for c in composers if isinstance(c, dict)]
+                    composer_id = composer.get("composerId", "")
+                    if not isinstance(composer_id, str) or not composer_id:
+                        continue
+
+                    title = composer.get("name", "Untitled session")
+                    if not isinstance(title, str) or not title.strip():
+                        title = "Untitled session"
+
+                    created_ms = self._coerce_millis(composer.get("createdAt"))
+                    updated_ms = self._coerce_millis(composer.get("lastUpdatedAt"))
+                    time_ms = max(created_ms, updated_ms)
+                    mtime = max(workspace_mtime, (time_ms / 1000) if time_ms else 0.0)
+
+                    current = results.get(composer_id)
+                    if current is not None and mtime <= current.mtime:
+                        continue
+
+                    results[composer_id] = _WorkspaceComposerData(
+                        title=title.strip(),
+                        created_ms=created_ms,
+                        updated_ms=updated_ms,
+                        mtime=mtime,
+                        directory=workspace_dir,
+                    )
+
+            # New shape: selected/last focused IDs only
+            for key in ("selectedComposerIds", "lastFocusedComposerIds"):
+                ids = parsed.get(key, [])
+                if not isinstance(ids, list):
+                    continue
+                for composer_id in ids:
+                    if not isinstance(composer_id, str) or not composer_id:
+                        continue
+
+                    current = results.get(composer_id)
+                    if current is not None and workspace_mtime <= current.mtime:
+                        continue
+
+                    results[composer_id] = _WorkspaceComposerData(
+                        title="Untitled session",
+                        created_ms=0,
+                        updated_ms=0,
+                        mtime=workspace_mtime,
+                        directory=workspace_dir,
+                    )
+
+            return results
         except sqlite3.Error as e:
             self._emit_error(
                 workspace_db,
@@ -207,88 +392,112 @@ class CursorAdapter:
                 str(e),
                 on_error=on_error,
             )
-            return []
+            return {}
         finally:
             if conn is not None:
                 conn.close()
 
-    @dataclass
-    class _SessionMetadata:
-        id: str
-        composer_id: str
-        title: str
-        directory: str
-        timestamp: datetime
-        mtime: float
-
-    def _scan_sessions_metadata(
+    def _scan_workspace_data(
         self, on_error: ErrorCallback = None
-    ) -> dict[str, _SessionMetadata]:
-        """Scan all workspaces and return active Cursor session metadata."""
-        sessions: dict[str, CursorAdapter._SessionMetadata] = {}
+    ) -> dict[str, _WorkspaceComposerData]:
+        """Scan workspace DBs and return composer-level hints."""
+        results: dict[str, _WorkspaceComposerData] = {}
 
-        for workspace_dir in self._iter_workspace_dirs():
-            ws_db = workspace_dir / "state.vscdb"
-            if not ws_db.exists():
+        for workspace_path in self._iter_workspace_dirs():
+            workspace_db = workspace_path / "state.vscdb"
+            if not workspace_db.exists():
                 continue
 
             try:
-                ws_mtime = ws_db.stat().st_mtime
+                workspace_mtime = workspace_db.stat().st_mtime
             except OSError:
                 continue
 
-            workspace_folder = self._read_workspace_folder(workspace_dir / "workspace.json")
-            composers = self._read_workspace_composers(ws_db, on_error=on_error)
+            workspace_dir = self._read_workspace_folder(workspace_path / "workspace.json")
+            workspace_entries = self._load_workspace_composers(
+                workspace_db,
+                workspace_dir,
+                workspace_mtime,
+                on_error=on_error,
+            )
 
-            for composer in composers:
-                if composer.get("isArchived") is True:
+            for composer_id, entry in workspace_entries.items():
+                current = results.get(composer_id)
+                if current is not None and entry.mtime <= current.mtime:
                     continue
+                results[composer_id] = entry
 
-                composer_id = composer.get("composerId", "")
-                if not isinstance(composer_id, str) or not composer_id:
-                    continue
+        return results
 
-                title = composer.get("name", "Untitled session")
-                if not isinstance(title, str) or not title.strip():
-                    title = "Untitled session"
-
-                created_ms = self._coerce_millis(composer.get("createdAt"))
-                updated_ms = self._coerce_millis(composer.get("lastUpdatedAt"))
-                time_ms = max(created_ms, updated_ms)
-
-                timestamp = (
-                    datetime.fromtimestamp(time_ms / 1000)
-                    if time_ms > 0
-                    else datetime.fromtimestamp(ws_mtime)
-                )
-                mtime = max(ws_mtime, (time_ms / 1000) if time_ms > 0 else 0.0)
-
-                session_id = self._session_id(composer_id)
-                existing = sessions.get(session_id)
-                if existing is not None:
-                    if mtime <= existing.mtime:
-                        continue
-
-                sessions[session_id] = self._SessionMetadata(
-                    id=session_id,
-                    composer_id=composer_id,
-                    title=title.strip(),
-                    directory=workspace_folder,
-                    timestamp=timestamp,
-                    mtime=mtime,
-                )
-
-        return sessions
-
-    def _connect_global_db(self, on_error: ErrorCallback = None) -> sqlite3.Connection | None:
-        """Open Cursor global state database."""
+    def _scan_global_data(
+        self, on_error: ErrorCallback = None
+    ) -> dict[str, _GlobalComposerData]:
+        """Scan global composerData records from cursorDiskKV."""
+        results: dict[str, _GlobalComposerData] = {}
         if not self._global_db_path.exists():
-            return None
+            return results
 
+        try:
+            db_mtime = self._global_db_path.stat().st_mtime
+        except OSError:
+            db_mtime = 0.0
+
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(str(self._global_db_path), timeout=5)
             conn.row_factory = sqlite3.Row
-            return conn
+            cursor = conn.cursor()
+
+            rows = cursor.execute(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
+            ).fetchall()
+
+            for row in rows:
+                key = row["key"]
+                value = row["value"]
+                if not isinstance(key, str) or not key.startswith("composerData:"):
+                    continue
+                if not isinstance(value, str):
+                    continue
+
+                parsed = self._parse_cursor_json(
+                    value,
+                    f"{self._global_db_path}:{key}",
+                    on_error=on_error,
+                )
+                if not isinstance(parsed, dict):
+                    continue
+                if parsed.get("isArchived") is True:
+                    continue
+
+                composer_id = parsed.get("composerId")
+                if not isinstance(composer_id, str) or not composer_id:
+                    composer_id = key.split(":", 1)[1]
+
+                title = parsed.get("name", "Untitled session")
+                if not isinstance(title, str) or not title.strip():
+                    title = "Untitled session"
+
+                created_ms = self._coerce_millis(parsed.get("createdAt"))
+                updated_ms = self._coerce_millis(parsed.get("lastUpdatedAt"))
+                time_ms = max(created_ms, updated_ms)
+                mtime = max(db_mtime, (time_ms / 1000) if time_ms else 0.0)
+
+                directory = self._extract_directory_from_global(parsed)
+
+                current = results.get(composer_id)
+                if current is not None and mtime <= current.mtime:
+                    continue
+
+                results[composer_id] = _GlobalComposerData(
+                    title=title.strip(),
+                    created_ms=created_ms,
+                    updated_ms=updated_ms,
+                    mtime=mtime,
+                    directory=directory,
+                )
+
+            return results
         except sqlite3.Error as e:
             self._emit_error(
                 self._global_db_path,
@@ -296,48 +505,237 @@ class CursorAdapter:
                 str(e),
                 on_error=on_error,
             )
-            return None
+            return {}
+        finally:
+            if conn is not None:
+                conn.close()
 
-    def _clean_text(self, text: object) -> str:
-        """Normalize text payloads from bubbles."""
-        if not isinstance(text, str):
-            return ""
-        return text.strip()
+    def _scan_transcript_data(
+        self, on_error: ErrorCallback = None
+    ) -> dict[str, _TranscriptData]:
+        """Scan ~/.cursor/projects transcript files for session content."""
+        results: dict[str, _TranscriptData] = {}
 
-    def _append_bubble_content(
-        self, lines: list[str], bubble: dict, bubble_type: int
+        for transcript_file in self._iter_transcript_files():
+            composer_id = transcript_file.stem
+            if not composer_id:
+                continue
+
+            # Ensure path shape: <id>/<id>.jsonl
+            if transcript_file.parent.name != composer_id:
+                continue
+
+            project_dir = transcript_file.parent.parent.parent
+            if project_dir.name == "agent-transcripts":
+                continue
+
+            try:
+                mtime = transcript_file.stat().st_mtime
+            except OSError:
+                continue
+
+            directory = self._decode_transcript_project_key(project_dir.name)
+            title_hint = self._extract_transcript_title(transcript_file, on_error=on_error)
+
+            current = results.get(composer_id)
+            if current is not None and mtime <= current.mtime:
+                continue
+
+            results[composer_id] = _TranscriptData(
+                file_path=transcript_file,
+                mtime=mtime,
+                directory=directory,
+                title_hint=title_hint,
+            )
+
+        return results
+
+    def _scan_sessions_metadata(
+        self, on_error: ErrorCallback = None
+    ) -> dict[str, _SessionMetadata]:
+        """Scan all Cursor sources and build merged session metadata."""
+        workspace_data = self._scan_workspace_data(on_error=on_error)
+        global_data = self._scan_global_data(on_error=on_error)
+        transcript_data = self._scan_transcript_data(on_error=on_error)
+
+        all_composer_ids = (
+            set(workspace_data.keys())
+            | set(global_data.keys())
+            | set(transcript_data.keys())
+        )
+        sessions: dict[str, _SessionMetadata] = {}
+
+        for composer_id in all_composer_ids:
+            ws = workspace_data.get(composer_id)
+            gl = global_data.get(composer_id)
+            ts = transcript_data.get(composer_id)
+
+            title = "Untitled session"
+            if gl is not None and gl.title and gl.title != "Untitled session":
+                title = gl.title
+            elif ws is not None and ws.title and ws.title != "Untitled session":
+                title = ws.title
+            elif ts is not None and ts.title_hint:
+                title = ts.title_hint
+
+            directory = ""
+            if gl is not None and gl.directory:
+                directory = gl.directory
+            elif ws is not None and ws.directory:
+                directory = ws.directory
+            elif ts is not None and ts.directory:
+                directory = ts.directory
+
+            created_ms = 0
+            updated_ms = 0
+            if gl is not None:
+                created_ms = max(created_ms, gl.created_ms)
+                updated_ms = max(updated_ms, gl.updated_ms)
+            if ws is not None:
+                created_ms = max(created_ms, ws.created_ms)
+                updated_ms = max(updated_ms, ws.updated_ms)
+
+            max_mtime = 0.0
+            if gl is not None:
+                max_mtime = max(max_mtime, gl.mtime)
+            if ws is not None:
+                max_mtime = max(max_mtime, ws.mtime)
+            if ts is not None:
+                max_mtime = max(max_mtime, ts.mtime)
+
+            time_ms = max(created_ms, updated_ms)
+            if time_ms > 0:
+                timestamp = datetime.fromtimestamp(time_ms / 1000)
+                max_mtime = max(max_mtime, time_ms / 1000)
+            elif max_mtime > 0:
+                timestamp = datetime.fromtimestamp(max_mtime)
+            else:
+                timestamp = datetime.now()
+                max_mtime = timestamp.timestamp()
+
+            session_id = self._session_id(composer_id)
+            sessions[session_id] = _SessionMetadata(
+                id=session_id,
+                composer_id=composer_id,
+                title=title,
+                directory=directory,
+                timestamp=timestamp,
+                mtime=max_mtime,
+                transcript_file=ts.file_path if ts is not None else None,
+            )
+
+        return sessions
+
+    def _append_transcript_part(
+        self,
+        lines: list[str],
+        role: str,
+        part: object,
     ) -> bool:
-        """Append bubble content and return whether a turn was added."""
-        text = self._clean_text(bubble.get("text"))
+        """Append text from a transcript content part."""
+        role_prefix = "» " if role == "user" else "  "
 
-        if bubble_type == 1:
+        if isinstance(part, str):
+            text = part.strip()
             if text:
-                lines.append(f"» {text}")
+                lines.append(f"{role_prefix}{text}")
                 return True
             return False
 
-        added = False
+        if not isinstance(part, dict):
+            return False
 
-        tool_data = bubble.get("toolFormerData")
-        if isinstance(tool_data, dict):
-            tool_name = tool_data.get("name", "")
-            if isinstance(tool_name, str) and tool_name:
-                lines.append(f"  [tool {tool_name}]")
-                added = True
+        part_type = part.get("type", "")
+        if part_type == "text":
+            text = str(part.get("text", "")).strip()
+            if text:
+                lines.append(f"{role_prefix}{text}")
+                return True
+            return False
 
-        if text:
-            lines.append(f"  {text}")
-            added = True
+        if part_type == "tool_use" and role != "user":
+            name = part.get("name", "")
+            if isinstance(name, str) and name:
+                lines.append(f"  [tool {name}]")
+                return True
 
-        return added
+        if part_type == "tool_result":
+            content = part.get("content", "")
+            if isinstance(content, str) and content.strip():
+                lines.append(f"{role_prefix}{content.strip()}")
+                return True
 
-    def _load_messages_for_composer(
+        return False
+
+    def _load_transcript_messages(
+        self,
+        transcript_file: Path,
+        on_error: ErrorCallback = None,
+    ) -> tuple[list[str], int, str]:
+        """Load session content from Cursor transcript JSONL."""
+        lines: list[str] = []
+        turn_count = 0
+        first_user_text = ""
+
+        try:
+            with open(transcript_file, "rb") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+
+                    try:
+                        record = orjson.loads(line)
+                    except orjson.JSONDecodeError:
+                        continue
+
+                    role = record.get("role", "")
+                    if role not in ("user", "assistant"):
+                        continue
+
+                    message = record.get("message", {})
+                    content = message.get("content", "") if isinstance(message, dict) else ""
+
+                    had_content = False
+                    if isinstance(content, str):
+                        text = content.strip()
+                        if text:
+                            prefix = "» " if role == "user" else "  "
+                            lines.append(f"{prefix}{text}")
+                            had_content = True
+                            if role == "user" and not first_user_text:
+                                first_user_text = text
+                    elif isinstance(content, list):
+                        for part in content:
+                            if self._append_transcript_part(lines, role, part):
+                                had_content = True
+                                if (
+                                    role == "user"
+                                    and not first_user_text
+                                    and isinstance(part, dict)
+                                    and part.get("type") == "text"
+                                ):
+                                    first_user_text = str(part.get("text", "")).strip()
+
+                    if had_content:
+                        turn_count += 1
+
+            return lines, turn_count, first_user_text
+        except OSError as e:
+            self._emit_error(
+                transcript_file,
+                "OSError",
+                str(e),
+                on_error=on_error,
+            )
+            return [], 0, ""
+
+    def _load_messages_from_global(
         self,
         conn: sqlite3.Connection,
         composer_id: str,
         on_error: ErrorCallback = None,
     ) -> tuple[list[str], int]:
-        """Load ordered bubble content for a Cursor composer."""
+        """Load ordered bubble content for a Cursor composer from global DB."""
         try:
             cursor = conn.cursor()
             composer_key = f"composerData:{composer_id}"
@@ -412,7 +810,10 @@ class CursorAdapter:
                     else:
                         bubble_type = 2
 
-                if self._append_bubble_content(lines, bubble, bubble_type):
+                text = bubble.get("text", "")
+                if isinstance(text, str) and text.strip():
+                    prefix = "» " if bubble_type == 1 else "  "
+                    lines.append(f"{prefix}{text.strip()}")
                     turn_count += 1
 
             return lines, turn_count
@@ -425,23 +826,51 @@ class CursorAdapter:
             )
             return [], 0
 
+    def _connect_global_db(self, on_error: ErrorCallback = None) -> sqlite3.Connection | None:
+        """Open Cursor global state database."""
+        if not self._global_db_path.exists():
+            return None
+
+        try:
+            conn = sqlite3.connect(str(self._global_db_path), timeout=5)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.Error as e:
+            self._emit_error(
+                self._global_db_path,
+                "sqlite3.Error",
+                str(e),
+                on_error=on_error,
+            )
+            return None
+
     def _build_session(
         self,
         metadata: _SessionMetadata,
         global_conn: sqlite3.Connection | None,
         on_error: ErrorCallback = None,
     ) -> Session:
-        """Build a Session from scanned metadata and global DB messages."""
+        """Build a Session from merged metadata and available content sources."""
         title = metadata.title
         lines: list[str] = []
         turn_count = 0
+        first_user_text = ""
 
-        if global_conn is not None:
-            lines, turn_count = self._load_messages_for_composer(
+        if metadata.transcript_file is not None:
+            lines, turn_count, first_user_text = self._load_transcript_messages(
+                metadata.transcript_file,
+                on_error=on_error,
+            )
+
+        if not lines and global_conn is not None:
+            lines, turn_count = self._load_messages_from_global(
                 global_conn,
                 metadata.composer_id,
                 on_error=on_error,
             )
+
+        if title == "Untitled session" and first_user_text:
+            title = first_user_text
 
         content = "\n\n".join(lines) if lines else title
 
@@ -504,11 +933,10 @@ class CursorAdapter:
 
         try:
             for session_id, data in metadata.items():
-                mtime = data.mtime
                 known_entry = known.get(session_id)
-                if known_entry is None or mtime > known_entry[0] + 0.001:
+                if known_entry is None or data.mtime > known_entry[0] + 0.001:
                     session = self._build_session(data, conn, on_error=on_error)
-                    session.mtime = mtime
+                    session.mtime = data.mtime
                     new_or_modified.append(session)
                     if on_session:
                         on_session(session)
@@ -525,11 +953,11 @@ class CursorAdapter:
         return ["cursor"]
 
     def get_raw_stats(self) -> RawAdapterStats:
-        """Get raw statistics from Cursor state databases."""
+        """Get raw statistics from Cursor data sources."""
         if not self.is_available():
             return RawAdapterStats(
                 agent=self.name,
-                data_dir=str(self._user_dir),
+                data_dir=f"{self._user_dir} + {self._projects_dir}",
                 available=False,
                 file_count=0,
                 total_bytes=0,
@@ -554,9 +982,16 @@ class CursorAdapter:
             except OSError:
                 pass
 
+        for transcript_file in self._iter_transcript_files():
+            try:
+                file_count += 1
+                total_bytes += transcript_file.stat().st_size
+            except OSError:
+                pass
+
         return RawAdapterStats(
             agent=self.name,
-            data_dir=str(self._user_dir),
+            data_dir=f"{self._user_dir} + {self._projects_dir}",
             available=True,
             file_count=file_count,
             total_bytes=total_bytes,
