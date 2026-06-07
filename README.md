@@ -28,7 +28,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Direct Resume**: Select, Enter, you're back in your session
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
 - **Update Notifications**: Get notified when a new version is available
-- **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, and more
+- **Multi-Agent Support**: Works with Claude Code, Codex, Cursor, Copilot, OpenCode, Vibe, Crush, and more
 
 ## Installation
 
@@ -68,6 +68,7 @@ fr "authentication bug"
 # Filter by agent
 fr -a claude
 fr -a codex
+fr -a cursor
 
 # Filter by directory
 fr -d myproject
@@ -131,6 +132,7 @@ Resume sessions with auto-approve / skip-permissions flags:
 | --------------- | -------------------------------------------- | ------------- |
 | Claude          | `--dangerously-skip-permissions`             | No            |
 | Codex           | `--dangerously-bypass-approvals-and-sandbox` | Yes           |
+| Cursor          | _(workspace open)_                            | —             |
 | Copilot CLI     | `--yolo`                                     | No            |
 | Vibe            | `--auto-approve`                             | Yes           |
 | OpenCode        | _(config-based)_                             | —             |
@@ -152,8 +154,8 @@ Arguments:
   QUERY                    Search query (optional)
 
 Options:
-  -a, --agent [claude|codex|copilot-cli|copilot-vscode|crush|opencode|vibe]
-                          Filter by agent
+  -a, --agent [claude|codex|copilot-cli|copilot-vscode|cursor|crush|opencode|vibe]
+                           Filter by agent
   -d, --directory TEXT    Filter by directory (substring match)
   --no-tui                Output list to stdout instead of TUI
   --list                  Just list sessions, don't resume
