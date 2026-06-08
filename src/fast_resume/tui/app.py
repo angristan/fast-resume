@@ -19,6 +19,7 @@ from .. import __version__
 from ..adapters.base import ParseError, Session
 from ..config import LOG_FILE
 from ..search import SessionSearch
+from ..update import update_instruction
 from .filter_bar import FILTER_KEYS, FilterBar
 from .modal import YoloModeModal
 from .preview import SessionPreview
@@ -324,7 +325,7 @@ class FastResumeApp(App):
                 self._available_update = latest
                 self.call_from_thread(
                     self.notify,
-                    f"{__version__} → {latest}\nRun [bold]uv tool upgrade fast-resume[/bold] to update",
+                    f"{__version__} → {latest}\n{update_instruction(markup=True)}",
                     title="Update available",
                     timeout=5,
                 )

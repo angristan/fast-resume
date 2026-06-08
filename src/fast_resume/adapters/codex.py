@@ -17,8 +17,17 @@ class CodexAdapter(BaseSessionAdapter):
     badge = AGENTS["codex"]["badge"]
     supports_yolo = True
 
-    def __init__(self, sessions_dir: Path | None = None) -> None:
+    def __init__(
+        self, sessions_dir: Path | None = None, session_index_file: Path | None = None
+    ) -> None:
         self._sessions_dir = sessions_dir if sessions_dir is not None else CODEX_DIR
+        self._session_index_file = (
+            session_index_file
+            if session_index_file is not None
+            else self._sessions_dir.parent / "session_index.jsonl"
+        )
+        self._session_index_mtime: float | None = None
+        self._session_index: dict[str, tuple[str, float]] = {}
 
     def find_sessions(self) -> list[Session]:
         """Find all Codex CLI sessions."""
@@ -127,8 +136,10 @@ class CodexAdapter(BaseSessionAdapter):
             if not user_prompts:
                 return None
 
-            # Generate title from first actual user prompt (80-char hard truncate)
-            title = truncate_title(user_prompts[0], max_length=80, word_break=False)
+            # Prefer Codex's renamed thread name when available, otherwise fall
+            # back to the first actual user prompt (80-char hard truncate).
+            title_source = self._get_thread_name(session_id) or user_prompts[0]
+            title = truncate_title(title_source, max_length=80, word_break=False)
 
             full_content = "\n\n".join(messages)
 
@@ -169,6 +180,70 @@ class CodexAdapter(BaseSessionAdapter):
                 on_error(error)
             return None
 
+    def _get_session_index_mtime(self) -> float:
+        """Return the mtime of Codex's session index, or 0 when unavailable."""
+        try:
+            return self._session_index_file.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _parse_index_timestamp(self, value: str) -> float:
+        """Parse Codex session_index updated_at timestamp to a unix timestamp."""
+        if not value:
+            return self._get_session_index_mtime()
+
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return self._get_session_index_mtime()
+
+    def _load_session_index(self) -> dict[str, tuple[str, float]]:
+        """Load Codex thread names from ~/.codex/session_index.jsonl."""
+        index_mtime = self._get_session_index_mtime()
+        if self._session_index_mtime == index_mtime:
+            return self._session_index
+
+        session_index: dict[str, tuple[str, float]] = {}
+        if index_mtime:
+            try:
+                with open(self._session_index_file, "rb") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            data = orjson.loads(line)
+                        except orjson.JSONDecodeError:
+                            continue
+
+                        session_id = data.get("id", "")
+                        thread_name = data.get("thread_name", "")
+                        if not isinstance(session_id, str) or not session_id:
+                            continue
+                        if not isinstance(thread_name, str) or not thread_name.strip():
+                            continue
+
+                        updated_at = data.get("updated_at", "")
+                        updated_mtime = (
+                            self._parse_index_timestamp(updated_at)
+                            if isinstance(updated_at, str)
+                            else index_mtime
+                        )
+                        session_index[session_id] = (
+                            thread_name.strip(),
+                            updated_mtime,
+                        )
+            except OSError:
+                session_index = {}
+
+        self._session_index_mtime = index_mtime
+        self._session_index = session_index
+        return self._session_index
+
+    def _get_thread_name(self, session_id: str) -> str:
+        """Return the Codex thread name for a session ID, if available."""
+        entry = self._load_session_index().get(session_id)
+        return entry[0] if entry else ""
+
     def _get_session_id_from_file(self, session_file: Path) -> str:
         """Extract session ID from file content or filename."""
         # Try to get ID from session_meta in file content first
@@ -199,6 +274,7 @@ class CodexAdapter(BaseSessionAdapter):
     def _scan_session_files(self) -> dict[str, tuple[Path, float]]:
         """Scan all Codex CLI session files."""
         current_files: dict[str, tuple[Path, float]] = {}
+        session_index = self._load_session_index()
 
         for session_file in self._sessions_dir.rglob("*.jsonl"):
             try:
@@ -206,6 +282,9 @@ class CodexAdapter(BaseSessionAdapter):
             except OSError:
                 continue
             session_id = self._get_session_id_from_file(session_file)
+            index_entry = session_index.get(session_id)
+            if index_entry:
+                mtime = max(mtime, index_entry[1])
             current_files[session_id] = (session_file, mtime)
 
         return current_files
