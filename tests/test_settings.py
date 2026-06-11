@@ -35,3 +35,49 @@ class TestSettings:
         path = temp_dir / "nested" / "dir" / "settings.json"
         save_settings({"preview_height": 9}, path=path)
         assert load_settings(path=path)["preview_height"] == 9
+
+
+class TestLegacyMigration:
+    """Tests for migrating settings.json from the old cache-dir location."""
+
+    def _patch_paths(self, monkeypatch, temp_dir):
+        import fast_resume.settings as settings_mod
+
+        new = temp_dir / "config" / "settings.json"
+        legacy = temp_dir / "cache" / "settings.json"
+        monkeypatch.setattr(settings_mod, "SETTINGS_FILE", new)
+        monkeypatch.setattr(settings_mod, "LEGACY_SETTINGS_FILE", legacy)
+        return new, legacy
+
+    def test_legacy_file_is_moved_to_config_dir(self, temp_dir, monkeypatch):
+        from fast_resume.settings import _migrate_legacy_settings
+
+        new, legacy = self._patch_paths(monkeypatch, temp_dir)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('{"preview_height": 25}')
+
+        _migrate_legacy_settings()
+
+        assert not legacy.exists()
+        assert load_settings(path=new)["preview_height"] == 25
+
+    def test_existing_config_file_is_not_overwritten(self, temp_dir, monkeypatch):
+        from fast_resume.settings import _migrate_legacy_settings
+
+        new, legacy = self._patch_paths(monkeypatch, temp_dir)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('{"preview_height": 25}')
+        new.parent.mkdir(parents=True)
+        new.write_text('{"preview_height": 30}')
+
+        _migrate_legacy_settings()
+
+        assert load_settings(path=new)["preview_height"] == 30
+        assert legacy.exists()
+
+    def test_no_legacy_file_is_a_noop(self, temp_dir, monkeypatch):
+        from fast_resume.settings import _migrate_legacy_settings
+
+        new, legacy = self._patch_paths(monkeypatch, temp_dir)
+        _migrate_legacy_settings()
+        assert not new.exists()

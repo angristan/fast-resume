@@ -25,6 +25,7 @@ COPILOT_DIR = Path.home() / ".copilot" / "session-state"
 
 # Storage location
 CACHE_DIR = Path.home() / ".cache" / "fast-resume"
+CONFIG_DIR = Path.home() / ".config" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
 SCHEMA_VERSION = (
