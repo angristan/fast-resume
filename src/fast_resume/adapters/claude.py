@@ -50,6 +50,7 @@ class ClaudeAdapter(BaseSessionAdapter):
         """Parse a Claude Code session file."""
         try:
             first_user_message = ""
+            ai_title = ""
             directory = ""
             timestamp = datetime.fromtimestamp(session_file.stat().st_mtime)
             messages: list[str] = []
@@ -67,6 +68,12 @@ class ClaudeAdapter(BaseSessionAdapter):
                         continue
 
                     msg_type = data.get("type", "")
+
+                    # Claude Code's auto-generated session title (shown in its
+                    # own Resume UI). It gets rewritten as the session evolves,
+                    # so keep the latest non-empty one.
+                    if msg_type == "ai-title" and data.get("aiTitle"):
+                        ai_title = data["aiTitle"]
 
                     # Get directory from user message
                     if msg_type == "user" and not directory:
@@ -139,9 +146,12 @@ class ClaudeAdapter(BaseSessionAdapter):
             if not first_user_message:
                 return None
 
-            # Prefer Claude's session-list title when available. This is where
-            # /rename stores the display name; older sessions may not have one.
-            title_source = self._get_index_title(session_file) or first_user_message
+            # Prefer Claude's own list title when available: a /rename display
+            # name (sessions-index.json), then Claude's auto-generated aiTitle
+            # (the title shown in its Resume UI), then the first user message.
+            title_source = (
+                self._get_index_title(session_file) or ai_title or first_user_message
+            )
             title = truncate_title(title_source)
 
             # Skip sessions with no actual conversation content

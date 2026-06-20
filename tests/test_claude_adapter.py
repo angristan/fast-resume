@@ -151,6 +151,117 @@ class TestClaudeAdapter:
         assert session.title == "Renamed Claude thread"
         assert "Original first prompt" in session.content
 
+    def test_parse_session_prefers_ai_title(self, adapter, temp_dir):
+        """Test that Claude's auto-generated ai-title is used as the title."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-ai-title.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Help me fix this bug in the login system"},
+            },
+            {
+                "type": "ai-title",
+                "aiTitle": "Fix login token validation",
+                "sessionId": "session-ai-title",
+            },
+            {
+                "type": "assistant",
+                "message": {"content": "On it."},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Fix login token validation"
+        assert "Help me fix this bug" in session.content
+
+    def test_parse_session_uses_latest_ai_title(self, adapter, temp_dir):
+        """Test that the most recent ai-title wins when it is rewritten."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-ai-latest.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Start working on something"},
+            },
+            {
+                "type": "ai-title",
+                "aiTitle": "First guess at the topic",
+                "sessionId": "session-ai-latest",
+            },
+            {
+                "type": "ai-title",
+                "aiTitle": "What the session became",
+                "sessionId": "session-ai-latest",
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "What the session became"
+
+    def test_parse_session_rename_overrides_ai_title(self, temp_dir):
+        """Test that a /rename title takes precedence over the auto ai-title."""
+        project_dir = temp_dir / "projects" / "project-abc123"
+        project_dir.mkdir(parents=True)
+        session_file = project_dir / "session-rename-ai.jsonl"
+
+        data = [
+            {
+                "type": "user",
+                "cwd": "/home/user/project",
+                "message": {"content": "Original first prompt for this session"},
+            },
+            {
+                "type": "ai-title",
+                "aiTitle": "Auto generated title",
+                "sessionId": "session-rename-ai",
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        with open(project_dir / "sessions-index.json", "w") as f:
+            json.dump(
+                {
+                    "version": 1,
+                    "entries": [
+                        {
+                            "sessionId": "session-rename-ai",
+                            "summary": "Renamed Claude thread",
+                            "modified": "2026-06-03T16:11:02.882Z",
+                            "fileMtime": 1780503062882,
+                        }
+                    ],
+                },
+                f,
+            )
+
+        adapter = ClaudeAdapter(sessions_dir=temp_dir / "projects")
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.title == "Renamed Claude thread"
+
     def test_parse_session_with_list_content(self, adapter, temp_dir):
         """Test parsing session with list-style content (multi-part messages)."""
         project_dir = temp_dir / "projects" / "project-abc123"
