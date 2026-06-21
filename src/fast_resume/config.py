@@ -28,5 +28,5 @@ CACHE_DIR = Path.home() / ".cache" / "fast-resume"
 INDEX_DIR = CACHE_DIR / "tantivy_index"
 LOG_FILE = CACHE_DIR / "parse-errors.log"
 SCHEMA_VERSION = (
-    21  # Bump when indexed session data semantics change (21: indexed thread titles)
+    22  # Bump when indexed session data semantics change (22: Codex human turn counts)
 )
