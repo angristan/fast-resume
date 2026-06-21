@@ -424,7 +424,7 @@ impl CodexAdapter {
         thread_names: &HashMap<String, String>,
     ) -> Option<Session> {
         let file = fs::File::open(path).ok()?;
-        let mut session_id = String::new();
+        let mut session_id = codex_session_id_from_path(path).unwrap_or_default();
         let mut directory = String::new();
         let mut messages = Vec::new();
         let mut user_prompts = Vec::new();
@@ -443,8 +443,12 @@ impl CodexAdapter {
 
             match msg_type.as_str() {
                 "session_meta" => {
-                    session_id = string_at(payload, &["id"]);
-                    directory = string_at(payload, &["cwd"]);
+                    if session_id.is_empty() {
+                        session_id = string_at(payload, &["id"]);
+                    }
+                    if directory.is_empty() {
+                        directory = string_at(payload, &["cwd"]);
+                    }
                 }
                 "turn_context" => {
                     let approval = string_at(payload, &["approval_policy"]);
@@ -2471,6 +2475,44 @@ mod tests {
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].message_count, 2);
+    }
+
+    #[test]
+    fn codex_keeps_initial_session_meta_identity() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
+        let session_file = sessions_dir.join("2026/06/21/rollout-first-id.jsonl");
+        fs::write(
+            &session_file,
+            [
+                json!({"type": "session_meta", "payload": {"id": "first-id", "cwd": "/work/first"}})
+                    .to_string(),
+                json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Original prompt"}})
+                    .to_string(),
+                json!({"type": "session_meta", "payload": {"id": "replayed-id", "cwd": "/work/replayed"}})
+                    .to_string(),
+                json!({"type": "response_item", "payload": {"role": "assistant", "content": [{"text": "Answer"}]}})
+                    .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "first-id");
+        assert_eq!(sessions[0].directory, "/work/first");
+
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("codex".to_string(), "first-id".to_string()),
+            file_mtime_seconds(&session_file),
+        );
+        let scan = adapter.find_sessions_incremental(&known);
+        assert_eq!(scan.new_or_modified.len(), 0);
+        assert_eq!(scan.deleted_ids.len(), 0);
     }
 
     #[test]

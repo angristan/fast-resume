@@ -113,6 +113,32 @@ class TestCodexAdapter:
         assert "First prompt" in session.content
         assert "Second prompt" in session.content
 
+    def test_parse_session_keeps_initial_session_meta_identity(self, adapter, temp_dir):
+        """Test replayed metadata does not change the session identity."""
+        session_file = temp_dir / "session.jsonl"
+
+        data = [
+            {"type": "session_meta", "payload": {"id": "first-id", "cwd": "/first"}},
+            {
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "First prompt"},
+            },
+            {
+                "type": "session_meta",
+                "payload": {"id": "replayed-id", "cwd": "/replayed"},
+            },
+        ]
+
+        with open(session_file, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+        session = adapter._parse_session_file(session_file)
+
+        assert session is not None
+        assert session.id == "first-id"
+        assert session.directory == "/first"
+
     def test_parse_session_prefers_thread_name_from_session_index(self, temp_dir):
         """Test that renamed Codex thread names are used as session titles."""
         sessions_dir = temp_dir / "sessions"

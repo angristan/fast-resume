@@ -69,10 +69,11 @@ class CodexAdapter(BaseSessionAdapter):
                     msg_type = data.get("type", "")
                     payload = data.get("payload", {})
 
-                    # Get session metadata
                     if msg_type == "session_meta":
-                        session_id = payload.get("id", "")
-                        directory = payload.get("cwd", "")
+                        if not session_id:
+                            session_id = payload.get("id", "")
+                        if not directory:
+                            directory = payload.get("cwd", "")
 
                     # Check turn_context for yolo mode
                     if msg_type == "turn_context":
