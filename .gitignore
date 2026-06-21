@@ -40,3 +40,6 @@ htmlcov/
 
 # uv
 .python-version
+
+# Rust
+target/
