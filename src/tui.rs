@@ -52,6 +52,12 @@ pub enum ImageProtocol {
 }
 
 enum ScanMessage {
+    Progress {
+        elapsed: Duration,
+        new_or_modified: usize,
+        deleted: usize,
+        total: usize,
+    },
     Finished {
         elapsed: Duration,
         new_or_modified: usize,
@@ -294,13 +300,16 @@ pub fn run_tui(
     let (scan_tx, scan_rx) = mpsc::channel();
     thread::spawn(move || {
         let start = Instant::now();
+        let progress_tx = scan_tx.clone();
         let refreshed = SessionIndex::open_default().and_then(|index| {
-            if index.total_len()? == 0 {
-                let sessions = SessionIndex::scan_all_sessions();
-                index.rebuild(sessions)
-            } else {
-                index.refresh_incremental()
-            }
+            index.refresh_incremental_streaming(100, |summary| {
+                let _ = progress_tx.send(ScanMessage::Progress {
+                    elapsed: start.elapsed(),
+                    new_or_modified: summary.new_or_modified,
+                    deleted: summary.deleted,
+                    total: summary.sessions,
+                });
+            })
         });
         let (new_or_modified, deleted, total) = refreshed
             .map(|summary| (summary.new_or_modified, summary.deleted, summary.sessions))
@@ -329,6 +338,19 @@ fn run_loop(
     loop {
         while let Ok(message) = scan_rx.try_recv() {
             match message {
+                ScanMessage::Progress {
+                    elapsed,
+                    new_or_modified,
+                    deleted,
+                    total,
+                } => {
+                    let _ = state.engine.reload();
+                    state.status = format!(
+                        "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                    state.refresh_search();
+                }
                 ScanMessage::Finished {
                     elapsed,
                     new_or_modified,

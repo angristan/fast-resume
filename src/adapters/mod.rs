@@ -16,6 +16,7 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 pub const MTIME_TOLERANCE: f64 = 0.001;
 
 pub type KnownSessions = HashMap<(String, String), f64>;
+pub type SessionCallback<'a> = dyn FnMut(Session) + Send + 'a;
 
 #[derive(Debug, Clone, Default)]
 pub struct IncrementalScan {
@@ -44,6 +45,17 @@ pub trait Adapter: Send {
             new_or_modified,
             deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
         }
+    }
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        let scan = self.find_sessions_incremental(known);
+        for session in &scan.new_or_modified {
+            on_session(session.clone());
+        }
+        scan
     }
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String>;
     fn raw_stats(&self) -> RawAdapterStats;
@@ -86,6 +98,37 @@ where
         }
         if let Some(mut session) = parse(&path) {
             session.mtime = mtime;
+            new_or_modified.push(session);
+        }
+    }
+
+    IncrementalScan {
+        agent,
+        new_or_modified,
+        deleted_ids: deleted_ids_for_agent(known, agent, &current_ids),
+    }
+}
+
+fn incremental_from_files_streaming<F>(
+    agent: &'static str,
+    known: &KnownSessions,
+    current_files: HashMap<String, (PathBuf, f64)>,
+    mut parse: F,
+    on_session: &mut SessionCallback<'_>,
+) -> IncrementalScan
+where
+    F: FnMut(&Path) -> Option<Session>,
+{
+    let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+    let mut new_or_modified = Vec::new();
+
+    for (session_id, (path, mtime)) in current_files {
+        if !session_needs_update(known, agent, &session_id, mtime) {
+            continue;
+        }
+        if let Some(mut session) = parse(&path) {
+            session.mtime = mtime;
+            on_session(session.clone());
             new_or_modified.push(session);
         }
     }
@@ -321,6 +364,20 @@ impl Adapter for ClaudeAdapter {
         incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
             self.parse_session(path)
         })
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        incremental_from_files_streaming(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session(path),
+            on_session,
+        )
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
@@ -583,6 +640,35 @@ impl Adapter for CodexAdapter {
         }
     }
 
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        let thread_names = self.load_thread_names();
+        let current_files = self.scan_session_files();
+        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut new_or_modified = Vec::new();
+
+        for (session_id, (path, mtime)) in current_files {
+            if !session_needs_update(known, self.name(), &session_id, mtime) {
+                continue;
+            }
+
+            if let Some(mut session) = self.parse_session(&path, &thread_names) {
+                session.mtime = mtime;
+                on_session(session.clone());
+                new_or_modified.push(session);
+            }
+        }
+
+        IncrementalScan {
+            agent: self.name(),
+            new_or_modified,
+            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
+        }
+    }
+
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
         let mut cmd = vec!["codex".to_string()];
         if yolo {
@@ -635,6 +721,20 @@ impl Adapter for CopilotCliAdapter {
         incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
             self.parse_session(path)
         })
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        incremental_from_files_streaming(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session(path),
+            on_session,
+        )
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
@@ -839,6 +939,40 @@ impl Adapter for CopilotVsCodeAdapter {
         }
     }
 
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        let mut current_files = HashMap::new();
+        for (path, workspace) in self.session_files() {
+            let Some(session_id) = vscode_session_id(&path) else {
+                continue;
+            };
+            let mtime = file_mtime_seconds(&path);
+            current_files.insert(session_id, (path, mtime, workspace));
+        }
+
+        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut new_or_modified = Vec::new();
+        for (session_id, (path, mtime, workspace)) in current_files {
+            if !session_needs_update(known, self.name(), &session_id, mtime) {
+                continue;
+            }
+            if let Some(mut session) = self.parse_session(&path, &workspace) {
+                session.mtime = mtime;
+                on_session(session.clone());
+                new_or_modified.push(session);
+            }
+        }
+
+        IncrementalScan {
+            agent: self.name(),
+            new_or_modified,
+            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
+        }
+    }
+
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
         if session.directory.is_empty() {
             vec!["code".to_string()]
@@ -1028,6 +1162,20 @@ impl Adapter for VibeAdapter {
         incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
             self.parse_session(path)
         })
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        incremental_from_files_streaming(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session(path),
+            on_session,
+        )
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
@@ -1257,6 +1405,18 @@ impl Adapter for OpenCodeAdapter {
             return load_opencode_db_incremental(self.name(), &self.db_path, known);
         }
         load_opencode_legacy_incremental(self.name(), &self.legacy_dir, known)
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        let scan = self.find_sessions_incremental(known);
+        for session in &scan.new_or_modified {
+            on_session(session.clone());
+        }
+        scan
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {

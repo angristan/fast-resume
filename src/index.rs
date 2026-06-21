@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
@@ -16,7 +18,7 @@ use tantivy::schema::{
 };
 use tantivy::{DocAddress, Index, IndexWriter, Order, Score, Term, doc};
 
-use crate::adapters::{IncrementalScan, KnownSessions, all_adapters};
+use crate::adapters::{KnownSessions, all_adapters};
 use crate::config::{INDEX_SCHEMA_VERSION, index_dir};
 use crate::model::{Session, sort_and_dedupe_sessions};
 use crate::query::{DateOp, Filter, parse_query};
@@ -34,6 +36,11 @@ pub struct RefreshSummary {
     pub sessions: usize,
     pub new_or_modified: usize,
     pub deleted: usize,
+}
+
+enum AdapterEvent {
+    Session(Session),
+    Finished { deleted_ids: Vec<String> },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,12 +126,99 @@ impl SessionIndex {
     }
 
     pub fn refresh_incremental(&self) -> Result<RefreshSummary> {
+        self.refresh_incremental_streaming(100, |_| {})
+    }
+
+    pub fn refresh_incremental_streaming<F>(
+        &self,
+        batch_size: usize,
+        mut on_progress: F,
+    ) -> Result<RefreshSummary>
+    where
+        F: FnMut(RefreshSummary),
+    {
         let known = self.known_sessions()?;
-        let scans: Vec<_> = all_adapters()
-            .into_par_iter()
-            .map(|adapter| adapter.find_sessions_incremental(&known))
-            .collect();
-        self.apply_incremental(scans)
+        let (tx, rx) = mpsc::channel();
+        for adapter in all_adapters() {
+            let tx = tx.clone();
+            let known = known.clone();
+            thread::spawn(move || {
+                let scan = {
+                    let mut on_session = |session| {
+                        let _ = tx.send(AdapterEvent::Session(session));
+                    };
+                    adapter.find_sessions_incremental_streaming(&known, &mut on_session)
+                };
+                let _ = tx.send(AdapterEvent::Finished {
+                    deleted_ids: scan.deleted_ids,
+                });
+            });
+        }
+        drop(tx);
+
+        let batch_size = batch_size.max(1);
+        let mut batch = Vec::new();
+        let mut changed = 0usize;
+        let mut deleted = 0usize;
+
+        for event in rx {
+            match event {
+                AdapterEvent::Session(session) => {
+                    batch.push(session);
+                    if batch.len() >= batch_size {
+                        changed += batch.len();
+                        self.update_sessions(&batch)?;
+                        batch.clear();
+                        let summary = RefreshSummary {
+                            sessions: self.total_len()?,
+                            new_or_modified: changed,
+                            deleted,
+                        };
+                        on_progress(summary);
+                    }
+                }
+                AdapterEvent::Finished { deleted_ids } => {
+                    if !batch.is_empty() {
+                        changed += batch.len();
+                        self.update_sessions(&batch)?;
+                        batch.clear();
+                        let summary = RefreshSummary {
+                            sessions: self.total_len()?,
+                            new_or_modified: changed,
+                            deleted,
+                        };
+                        on_progress(summary);
+                    }
+                    if !deleted_ids.is_empty() {
+                        deleted += deleted_ids.len();
+                        self.delete_sessions(&deleted_ids)?;
+                        let summary = RefreshSummary {
+                            sessions: self.total_len()?,
+                            new_or_modified: changed,
+                            deleted,
+                        };
+                        on_progress(summary);
+                    }
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            changed += batch.len();
+            self.update_sessions(&batch)?;
+            let summary = RefreshSummary {
+                sessions: self.total_len()?,
+                new_or_modified: changed,
+                deleted,
+            };
+            on_progress(summary);
+        }
+
+        Ok(RefreshSummary {
+            sessions: self.total_len()?,
+            new_or_modified: changed,
+            deleted,
+        })
     }
 
     pub fn scan_all_sessions() -> Vec<Session> {
@@ -293,24 +387,6 @@ impl SessionIndex {
         stats.top_directories = dirs;
 
         Ok(stats)
-    }
-
-    fn apply_incremental(&self, scans: Vec<IncrementalScan>) -> Result<RefreshSummary> {
-        let mut deleted = 0usize;
-        let mut changed = Vec::new();
-        for scan in scans {
-            deleted += scan.deleted_ids.len();
-            self.delete_sessions(&scan.deleted_ids)?;
-            changed.extend(scan.new_or_modified);
-        }
-        if !changed.is_empty() {
-            self.update_sessions(&changed)?;
-        }
-        Ok(RefreshSummary {
-            sessions: self.total_len()?,
-            new_or_modified: changed.len(),
-            deleted,
-        })
     }
 
     fn update_sessions(&self, sessions: &[Session]) -> Result<()> {
