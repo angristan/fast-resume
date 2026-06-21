@@ -31,7 +31,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::adapters::adapter_for;
 use crate::config::{AGENT_ORDER, AGENTS, VERSION};
-use crate::index::SessionIndex;
+use crate::index::{INDEX_REFRESH_BATCH_SIZE, SessionIndex};
 use crate::model::Session;
 use crate::search::SearchEngine;
 
@@ -302,7 +302,7 @@ pub fn run_tui(
         let start = Instant::now();
         let progress_tx = scan_tx.clone();
         let refreshed = SessionIndex::open_default().and_then(|index| {
-            index.refresh_incremental_streaming(100, |summary| {
+            index.refresh_incremental_streaming(INDEX_REFRESH_BATCH_SIZE, |summary| {
                 let _ = progress_tx.send(ScanMessage::Progress {
                     elapsed: start.elapsed(),
                     new_or_modified: summary.new_or_modified,
@@ -336,36 +336,16 @@ fn run_loop(
     scan_rx: Receiver<ScanMessage>,
 ) -> Result<TuiExit> {
     loop {
+        let mut latest_scan_message = None;
         while let Ok(message) = scan_rx.try_recv() {
-            match message {
-                ScanMessage::Progress {
-                    elapsed,
-                    new_or_modified,
-                    deleted,
-                    total,
-                } => {
-                    let _ = state.engine.reload();
-                    state.status = format!(
-                        "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
-                        elapsed.as_secs_f64() * 1000.0
-                    );
-                    state.refresh_search();
-                }
-                ScanMessage::Finished {
-                    elapsed,
-                    new_or_modified,
-                    deleted,
-                    total,
-                } => {
-                    let _ = state.engine.reload();
-                    state.scanning = false;
-                    state.status = format!(
-                        "refresh complete: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
-                        elapsed.as_secs_f64() * 1000.0
-                    );
-                    state.refresh_search();
-                }
+            let finished = matches!(message, ScanMessage::Finished { .. });
+            latest_scan_message = Some(message);
+            if finished {
+                break;
             }
+        }
+        if let Some(message) = latest_scan_message {
+            handle_scan_message(state, message);
         }
 
         terminal.draw(|frame| draw(frame, state))?;
@@ -376,6 +356,38 @@ fn run_loop(
                     return Ok(exit);
                 }
             }
+        }
+    }
+}
+
+fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
+    match message {
+        ScanMessage::Progress {
+            elapsed,
+            new_or_modified,
+            deleted,
+            total,
+        } => {
+            let _ = state.engine.reload();
+            state.status = format!(
+                "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
+                elapsed.as_secs_f64() * 1000.0
+            );
+            state.refresh_search();
+        }
+        ScanMessage::Finished {
+            elapsed,
+            new_or_modified,
+            deleted,
+            total,
+        } => {
+            let _ = state.engine.reload();
+            state.scanning = false;
+            state.status = format!(
+                "refresh complete: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
+                elapsed.as_secs_f64() * 1000.0
+            );
+            state.refresh_search();
         }
     }
 }
