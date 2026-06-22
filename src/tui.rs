@@ -595,13 +595,128 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(block, area);
 
     let prompt = Span::styled(" / ", Style::new().fg(Color::Rgb(80, 220, 170)).bold());
-    let query = Span::raw(state.query.as_str());
-    frame.render_widget(Paragraph::new(Line::from(vec![prompt, query])), inner);
+    let mut spans = vec![prompt];
+    spans.extend(search_query_spans(&state.query));
+    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
     let cursor_x = inner.x + 3 + display_width_until(&state.query, state.cursor) as u16;
     if cursor_x < inner.right() {
         frame.set_cursor_position((cursor_x, inner.y));
     }
+}
+
+fn search_query_spans(query: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut token_start = None;
+
+    for (idx, ch) in query.char_indices() {
+        if ch.is_whitespace() {
+            if let Some(start) = token_start.take() {
+                push_search_token(&mut spans, &query[start..idx]);
+            }
+            spans.push(Span::raw(ch.to_string()));
+        } else if token_start.is_none() {
+            token_start = Some(idx);
+        }
+    }
+
+    if let Some(start) = token_start {
+        push_search_token(&mut spans, &query[start..]);
+    }
+
+    spans
+}
+
+fn push_search_token(spans: &mut Vec<Span<'static>>, token: &str) {
+    let (neg, rest) = token
+        .strip_prefix('-')
+        .map(|rest| (Some("-"), rest))
+        .unwrap_or((None, token));
+    let Some(keyword) = ["agent:", "dir:", "date:"]
+        .iter()
+        .find(|keyword| rest.starts_with(**keyword))
+    else {
+        spans.push(Span::raw(token.to_string()));
+        return;
+    };
+    let value = &rest[keyword.len()..];
+    if value.is_empty() {
+        spans.push(Span::raw(token.to_string()));
+        return;
+    }
+
+    let valid = valid_search_filter_value(keyword, value);
+    if let Some(neg) = neg {
+        spans.push(Span::styled(
+            neg.to_string(),
+            Style::new().fg(Color::Red).bold(),
+        ));
+    }
+    spans.push(Span::styled(
+        keyword.to_string(),
+        if valid {
+            Style::new().fg(Color::Cyan).bold()
+        } else {
+            Style::new().fg(Color::Red).bold()
+        },
+    ));
+    if !valid {
+        spans.push(Span::styled(
+            value.to_string(),
+            Style::new()
+                .fg(Color::Red)
+                .add_modifier(Modifier::CROSSED_OUT),
+        ));
+    } else if let Some(value) = value.strip_prefix('!') {
+        spans.push(Span::styled(
+            "!".to_string(),
+            Style::new().fg(Color::Red).bold(),
+        ));
+        spans.push(Span::styled(
+            value.to_string(),
+            Style::new().fg(Color::Green),
+        ));
+    } else {
+        spans.push(Span::styled(
+            value.to_string(),
+            Style::new().fg(Color::Green),
+        ));
+    }
+}
+
+fn valid_search_filter_value(keyword: &str, value: &str) -> bool {
+    let value = value.trim_start_matches('!');
+    let values: Vec<_> = value
+        .split(',')
+        .map(|part| part.trim().trim_start_matches('!'))
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    match keyword {
+        "agent:" => values
+            .iter()
+            .all(|value| AGENTS.contains_key(value.to_ascii_lowercase().as_str())),
+        "date:" => values.iter().all(|value| valid_search_date_value(value)),
+        "dir:" => true,
+        _ => true,
+    }
+}
+
+fn valid_search_date_value(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    if matches!(value.as_str(), "today" | "yesterday" | "week" | "month") {
+        return true;
+    }
+    let rest = value
+        .strip_prefix('<')
+        .or_else(|| value.strip_prefix('>'))
+        .unwrap_or(&value);
+    let digit_count = rest.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digit_count == 0 {
+        return false;
+    }
+    let unit = &rest[digit_count..];
+    matches!(unit, "m" | "h" | "d" | "w" | "mo" | "y")
 }
 
 fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -1377,5 +1492,30 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('k'), KeyModifiers::CONTROL)).unwrap();
         assert_eq!(state.selected, 0);
         assert!(state.query.is_empty());
+    }
+
+    #[test]
+    fn search_query_spans_highlight_keywords_like_python_tui() {
+        let spans = search_query_spans("api -agent:claude date:nope dir:src agent:!codex");
+        let rendered = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(rendered, "api -agent:claude date:nope dir:src agent:!codex");
+        assert_eq!(spans[2].content.as_ref(), "-");
+        assert!(spans[2].style.fg == Some(Color::Red));
+        assert_eq!(spans[3].content.as_ref(), "agent:");
+        assert!(spans[3].style.fg == Some(Color::Cyan));
+        assert_eq!(spans[4].content.as_ref(), "claude");
+        assert!(spans[4].style.fg == Some(Color::Green));
+        assert_eq!(spans[6].content.as_ref(), "date:");
+        assert!(spans[6].style.fg == Some(Color::Red));
+        assert_eq!(spans[7].content.as_ref(), "nope");
+        assert!(spans[7].style.add_modifier.contains(Modifier::CROSSED_OUT));
+        assert_eq!(spans[13].content.as_ref(), "!");
+        assert!(spans[13].style.fg == Some(Color::Red));
+        assert_eq!(spans[14].content.as_ref(), "codex");
+        assert!(spans[14].style.fg == Some(Color::Green));
     }
 }
