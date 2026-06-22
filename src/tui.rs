@@ -335,6 +335,7 @@ fn run_loop(
     state: &mut AppState,
     scan_rx: Receiver<ScanMessage>,
 ) -> Result<TuiExit> {
+    let mut needs_draw = true;
     loop {
         let mut latest_scan_message = None;
         while let Ok(message) = scan_rx.try_recv() {
@@ -346,15 +347,20 @@ fn run_loop(
         }
         if let Some(message) = latest_scan_message {
             handle_scan_message(state, message);
+            needs_draw = true;
         }
 
-        terminal.draw(|frame| draw(frame, state))?;
+        if needs_draw {
+            terminal.draw(|frame| draw(frame, state))?;
+            needs_draw = false;
+        }
 
         if event::poll(Duration::from_millis(24))? {
             if let Event::Key(key) = event::read()? {
                 if let Some(exit) = handle_key(state, key)? {
                     return Ok(exit);
                 }
+                needs_draw = true;
             }
         }
     }
