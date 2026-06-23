@@ -14,7 +14,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use image::ImageReader;
+use image::{ImageReader, imageops::FilterType};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect, Size};
@@ -209,12 +209,24 @@ impl AppState {
 
 impl AgentImages {
     fn load(protocol: ImageProtocol) -> Option<Self> {
-        let protocol_type = detect_image_protocol(protocol)?;
-        let mut picker = Picker::halfblocks();
+        let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+        let protocol_type = match protocol {
+            ImageProtocol::Auto => {
+                let queried = picker.protocol_type();
+                if queried == ProtocolType::Halfblocks {
+                    detect_image_protocol(protocol)?
+                } else {
+                    queried
+                }
+            }
+            ImageProtocol::Kitty => ProtocolType::Kitty,
+            ImageProtocol::Sixel => ProtocolType::Sixel,
+            ImageProtocol::Iterm2 => ProtocolType::Iterm2,
+        };
         picker.set_protocol_type(protocol_type);
 
         let row = load_agent_protocols(&picker, Size::new(2, 1));
-        let preview = load_agent_protocols(&picker, Size::new(10, 5));
+        let preview = load_agent_protocols(&picker, Size::new(8, 4));
         if preview.is_empty() {
             return None;
         }
@@ -275,7 +287,9 @@ fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol
         let Ok(image) = reader.decode() else {
             continue;
         };
-        if let Ok(protocol) = picker.new_protocol(image, size, Resize::Fit(None)) {
+        if let Ok(protocol) =
+            picker.new_protocol(image, size, Resize::Fit(Some(FilterType::Lanczos3)))
+        {
             protocols.insert(agent.to_string(), protocol);
         }
     }
