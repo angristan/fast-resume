@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use once_cell::sync::Lazy;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const INDEX_SCHEMA_VERSION: u32 = 22;
+pub const INDEX_SCHEMA_VERSION: u32 = 23;
 
 pub const AGENT_ORDER: [&str; 7] = [
     "claude",

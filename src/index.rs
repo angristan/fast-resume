@@ -10,11 +10,12 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use rayon::prelude::*;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{
-    AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, RegexQuery, TermQuery,
-    TermSetQuery,
+    AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, QueryParser, RangeQuery,
+    RegexQuery, TermQuery, TermSetQuery,
 };
 use tantivy::schema::{
-    FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, Value,
+    Field, IndexRecordOption, NumericOptions, STORED, Schema, TEXT, TantivyDocument,
+    TextFieldIndexing, TextOptions, Value,
 };
 use tantivy::{DocAddress, Index, IndexWriter, Order, Score, Term, doc};
 
@@ -72,6 +73,7 @@ pub struct SessionIndex {
 #[derive(Debug, Clone, Copy)]
 struct IndexFields {
     id: Field,
+    session_key: Field,
     title: Field,
     directory: Field,
     agent: Field,
@@ -195,7 +197,7 @@ impl SessionIndex {
                         )?;
                     }
                     if !deleted_ids.is_empty() {
-                        self.delete_sessions(&deleted_ids)?;
+                        self.delete_sessions(agent, &deleted_ids)?;
                         deleted += deleted_ids.len();
                         let agent = agent.to_string();
                         for id in &deleted_ids {
@@ -439,7 +441,10 @@ impl SessionIndex {
         let mut writer: IndexWriter<TantivyDocument> =
             self.index.writer_with_num_threads(1, 128_000_000)?;
         for session in sessions {
-            writer.delete_term(Term::from_field_text(self.fields.id, &session.id));
+            writer.delete_term(Term::from_field_text(
+                self.fields.session_key,
+                &session_key(&session.agent, &session.id),
+            ));
         }
         for session in sessions {
             writer.add_document(self.session_document(session))?;
@@ -448,14 +453,17 @@ impl SessionIndex {
         Ok(())
     }
 
-    fn delete_sessions(&self, ids: &[String]) -> Result<()> {
+    fn delete_sessions(&self, agent: &str, ids: &[String]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
         let mut writer: IndexWriter<TantivyDocument> =
             self.index.writer_with_num_threads(1, 64_000_000)?;
         for id in ids {
-            writer.delete_term(Term::from_field_text(self.fields.id, id));
+            writer.delete_term(Term::from_field_text(
+                self.fields.session_key,
+                &session_key(agent, id),
+            ));
         }
         writer.commit()?;
         Ok(())
@@ -464,12 +472,13 @@ impl SessionIndex {
     fn session_document(&self, session: &Session) -> TantivyDocument {
         doc!(
             self.fields.id => session.id.clone(),
+            self.fields.session_key => session_key(&session.agent, &session.id),
             self.fields.title => session.title.clone(),
             self.fields.directory => session.directory.clone(),
             self.fields.agent => session.agent.clone(),
             self.fields.content => session.content.clone(),
             self.fields.timestamp => datetime_to_seconds(session.timestamp),
-            self.fields.message_count => session.message_count as u64,
+            self.fields.message_count => session.message_count as i64,
             self.fields.mtime => session.mtime,
             self.fields.yolo => session.yolo,
         )
@@ -519,15 +528,7 @@ impl SessionIndex {
         let mut parts: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
         if !search_text.is_empty() {
-            let parser = QueryParser::for_index(
-                &self.index,
-                vec![
-                    self.fields.title,
-                    self.fields.content,
-                    self.fields.directory,
-                ],
-            );
-            parts.push((Occur::Must, parser.parse_query(search_text)?));
+            parts.push((Occur::Must, self.text_query(search_text)?));
         }
 
         if let Some(query) = self.agent_query(agent_filter) {
@@ -553,6 +554,52 @@ impl SessionIndex {
         } else {
             Box::new(BooleanQuery::new(parts))
         })
+    }
+
+    fn text_query(&self, search_text: &str) -> Result<Box<dyn Query>> {
+        let parser = QueryParser::for_index(
+            &self.index,
+            vec![
+                self.fields.title,
+                self.fields.content,
+                self.fields.directory,
+            ],
+        );
+        let exact = parser.parse_query(search_text)?;
+        let boosted_exact = BoostQuery::new(exact, 5.0);
+
+        let mut alternatives: Vec<(Occur, Box<dyn Query>)> =
+            vec![(Occur::Should, Box::new(boosted_exact))];
+        let fuzzy_parts: Vec<(Occur, Box<dyn Query>)> = search_text
+            .split_whitespace()
+            .filter(|term| !term.is_empty())
+            .map(|term| {
+                let term = term.to_lowercase();
+                let title = FuzzyTermQuery::new_prefix(
+                    Term::from_field_text(self.fields.title, &term),
+                    1,
+                    true,
+                );
+                let content = FuzzyTermQuery::new_prefix(
+                    Term::from_field_text(self.fields.content, &term),
+                    1,
+                    true,
+                );
+                (
+                    Occur::Must,
+                    Box::new(BooleanQuery::new(vec![
+                        (Occur::Should, Box::new(title)),
+                        (Occur::Should, Box::new(content)),
+                    ])) as Box<dyn Query>,
+                )
+            })
+            .collect();
+
+        if !fuzzy_parts.is_empty() {
+            alternatives.push((Occur::Should, Box::new(BooleanQuery::new(fuzzy_parts))));
+        }
+
+        Ok(Box::new(BooleanQuery::new(alternatives)))
     }
 
     fn agent_query(&self, filter: Option<Filter>) -> Option<Box<dyn Query>> {
@@ -669,6 +716,7 @@ impl IndexFields {
     fn from_schema(schema: &Schema) -> Result<Self> {
         Ok(Self {
             id: schema.get_field("id")?,
+            session_key: schema.get_field("session_key")?,
             title: schema.get_field("title")?,
             directory: schema.get_field("directory")?,
             agent: schema.get_field("agent")?,
@@ -683,16 +731,31 @@ impl IndexFields {
 
 fn build_schema() -> Schema {
     let mut schema = Schema::builder();
-    schema.add_text_field("id", STRING | STORED);
+    schema.add_text_field("id", raw_text_options());
+    schema.add_text_field("session_key", raw_text_options());
     schema.add_text_field("title", TEXT | STORED);
-    schema.add_text_field("directory", STRING | STORED);
-    schema.add_text_field("agent", STRING | STORED);
+    schema.add_text_field("directory", raw_text_options());
+    schema.add_text_field("agent", raw_text_options());
     schema.add_text_field("content", TEXT | STORED);
-    schema.add_f64_field("timestamp", INDEXED | FAST | STORED);
-    schema.add_u64_field("message_count", STORED);
+    schema.add_f64_field(
+        "timestamp",
+        NumericOptions::default()
+            .set_stored()
+            .set_indexed()
+            .set_fast(),
+    );
+    schema.add_i64_field("message_count", STORED);
     schema.add_f64_field("mtime", STORED);
     schema.add_bool_field("yolo", STORED);
     schema.build()
+}
+
+fn raw_text_options() -> TextOptions {
+    TextOptions::default().set_stored().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer("raw")
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+    )
 }
 
 fn schema_version_matches(path: &Path) -> bool {
@@ -712,6 +775,10 @@ fn datetime_to_seconds(timestamp: DateTime<Local>) -> f64 {
     timestamp.timestamp() as f64 + f64::from(timestamp.timestamp_subsec_nanos()) / 1e9
 }
 
+fn session_key(agent: &str, id: &str) -> String {
+    format!("{agent}::{id}")
+}
+
 fn text(doc: &TantivyDocument, field: Field) -> Option<&str> {
     doc.get_first(field).and_then(|value| value.as_str())
 }
@@ -720,8 +787,8 @@ fn number(doc: &TantivyDocument, field: Field) -> Option<f64> {
     doc.get_first(field).and_then(|value| value.as_f64())
 }
 
-fn integer(doc: &TantivyDocument, field: Field) -> Option<u64> {
-    doc.get_first(field).and_then(|value| value.as_u64())
+fn integer(doc: &TantivyDocument, field: Field) -> Option<i64> {
+    doc.get_first(field).and_then(|value| value.as_i64())
 }
 
 fn boolean(doc: &TantivyDocument, field: Field) -> Option<bool> {
@@ -785,5 +852,59 @@ mod tests {
             known.get(&("claude".to_string(), "a".to_string())),
             Some(&1.0)
         );
+    }
+
+    #[test]
+    fn updates_only_matching_agent_session_id() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[
+                session(
+                    "same",
+                    "claude",
+                    "Claude title",
+                    "/work/a",
+                    "claude content",
+                ),
+                session("same", "codex", "Codex title", "/work/b", "codex content"),
+            ])
+            .unwrap();
+        let mut updated = session("same", "codex", "Updated Codex", "/work/b", "codex changed");
+        updated.mtime = 2.0;
+
+        index.update_sessions(&[updated]).unwrap();
+
+        let sessions = index.all_sessions().unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(
+            sessions
+                .iter()
+                .any(|s| s.agent == "claude" && s.title == "Claude title")
+        );
+        assert!(
+            sessions
+                .iter()
+                .any(|s| s.agent == "codex" && s.title == "Updated Codex")
+        );
+    }
+
+    #[test]
+    fn fuzzy_search_handles_one_character_typo() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[session(
+                "a",
+                "claude",
+                "Authentication bug",
+                "/work/api",
+                "refresh token failure",
+            )])
+            .unwrap();
+
+        let results = index.search("authentcation", None, None, 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].session.id, "a");
     }
 }

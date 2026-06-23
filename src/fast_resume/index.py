@@ -17,6 +17,11 @@ from .query import DateFilter, DateOp, Filter
 _VERSION_FILE = ".schema_version"
 
 
+def _session_key(agent: str, session_id: str) -> str:
+    """Return the agent-qualified identity stored in the shared Tantivy schema."""
+    return f"{agent}::{session_id}"
+
+
 @dataclass
 class IndexStats:
     """Statistics about the index contents."""
@@ -66,6 +71,10 @@ class TantivyIndex:
         schema_builder = tantivy.SchemaBuilder()
         # ID field - stored and indexed with raw tokenizer for exact term matching
         schema_builder.add_text_field("id", stored=True, tokenizer_name="raw")
+        # Agent-qualified identity for safe updates when different agents reuse IDs
+        schema_builder.add_text_field(
+            "session_key", stored=True, tokenizer_name="raw"
+        )
         # Title - stored and indexed for search
         schema_builder.add_text_field("title", stored=True)
         # Directory - stored with raw tokenizer for regex substring matching
@@ -424,6 +433,7 @@ class TantivyIndex:
             writer.add_document(
                 tantivy.Document(
                     id=session.id,
+                    session_key=_session_key(session.agent, session.id),
                     title=session.title,
                     directory=session.directory,
                     agent=session.agent,
@@ -451,6 +461,7 @@ class TantivyIndex:
             writer.add_document(
                 tantivy.Document(
                     id=session.id,
+                    session_key=_session_key(session.agent, session.id),
                     title=session.title,
                     directory=session.directory,
                     agent=session.agent,
