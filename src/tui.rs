@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::env;
-use std::io::{self, Stdout};
-use std::path::{Path, PathBuf};
+use std::io::{self, Cursor, Stdout};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -280,8 +279,10 @@ fn env_contains(key: &str, needle: &str) -> bool {
 fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol> {
     let mut protocols = HashMap::new();
     for agent in AGENT_ORDER {
-        let path = agent_asset_path(agent);
-        let Ok(reader) = ImageReader::open(&path) else {
+        let Some(bytes) = agent_asset_bytes(agent) else {
+            continue;
+        };
+        let Ok(reader) = ImageReader::new(Cursor::new(bytes)).with_guessed_format() else {
             continue;
         };
         let Ok(image) = reader.decode() else {
@@ -296,12 +297,17 @@ fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol
     protocols
 }
 
-fn agent_asset_path(agent: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("fast_resume")
-        .join("assets")
-        .join(format!("{agent}.png"))
+fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
+    match agent {
+        "claude" => Some(include_bytes!("../assets/agents/claude.png")),
+        "codex" => Some(include_bytes!("../assets/agents/codex.png")),
+        "copilot-cli" => Some(include_bytes!("../assets/agents/copilot-cli.png")),
+        "copilot-vscode" => Some(include_bytes!("../assets/agents/copilot-vscode.png")),
+        "crush" => Some(include_bytes!("../assets/agents/crush.png")),
+        "opencode" => Some(include_bytes!("../assets/agents/opencode.png")),
+        "vibe" => Some(include_bytes!("../assets/agents/vibe.png")),
+        _ => None,
+    }
 }
 
 pub fn run_tui(
@@ -1509,7 +1515,7 @@ mod tests {
     }
 
     #[test]
-    fn search_query_spans_highlight_keywords_like_python_tui() {
+    fn search_query_spans_highlight_keywords_like_terminal_ui() {
         let spans = search_query_spans("api -agent:claude date:nope dir:src agent:!codex");
         let rendered = spans
             .iter()

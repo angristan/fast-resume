@@ -4,9 +4,6 @@
 
 # fast-resume
 
-[![PyPI version](https://img.shields.io/pypi/v/fast-resume)](https://pypi.org/project/fast-resume/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/fast-resume)](https://pypi.org/project/fast-resume/)
-
 Search and resume conversations across Claude Code, Codex, and more, all from a single place.
 
 ## Why fast-resume?
@@ -27,7 +24,6 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 - **Fuzzy Matching**: Typo-tolerant search with smart ranking (exact matches boosted)
 - **Direct Resume**: Select, Enter, you're back in your session
 - **Beautiful TUI**: fzf-style interface with agent icons, color-coded results, and live preview
-- **Update Notifications**: Get notified when a new version is available
 - **Multi-Agent Support**: Works with Claude Code, Codex, Copilot, OpenCode, Vibe, Crush, and more
 
 ## Installation
@@ -43,14 +39,11 @@ brew tap angristan/tap
 brew install fast-resume
 ```
 
-### uv (PyPI)
+### Cargo
 
 ```bash
-# Run directly (no install needed)
-uvx --from fast-resume fr
-
-# Or install permanently
-uv tool install fast-resume
+# Install from source
+cargo install --git https://github.com/angristan/fast-resume
 fr
 ```
 
@@ -260,7 +253,7 @@ Top Directories
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                 SessionSearch                                          │
 │                                                                                        │
-│   • Orchestrates adapters in parallel (ThreadPoolExecutor)                             │
+│   • Orchestrates adapters concurrently                                                  │
 │   • Compares file mtimes to detect changes (incremental updates)                       │
 │   • Delegates search queries to Tantivy index                                          │
 └────────────────────────────────────────────────────────────────────────────────────────┘
@@ -295,18 +288,18 @@ Each agent stores sessions differently. Adapters normalize them into a common `S
 
 **The normalized Session structure:**
 
-```python
-@dataclass
-class Session:
-    id: str              # Unique identifier (usually filename or UUID)
-    agent: str           # "claude", "codex", "copilot-cli", "copilot-vscode", "crush", "opencode", "vibe"
-    title: str           # Summary or first user message (max 100 chars)
-    directory: str       # Working directory where session was created
-    timestamp: datetime  # Last modified time
-    preview: str         # First 500 chars for preview pane
-    content: str         # Full conversation text (» user, ␣␣ assistant)
-    message_count: int   # Conversation turns (user + assistant, excludes tool results)
-    mtime: float         # File mtime for incremental update detection
+```rust
+pub struct Session {
+    pub id: String,
+    pub agent: String,
+    pub title: String,
+    pub directory: String,
+    pub timestamp: DateTime<Local>,
+    pub content: String,
+    pub message_count: usize,
+    pub mtime: f64,
+    pub yolo: bool,
+}
 ```
 
 **What gets indexed:**
@@ -335,17 +328,15 @@ This keeps the index focused on the actual conversation and avoids bloating it w
 
 **Progressive indexing** with batched commits:
 
-```python
-def handle_session(session):
-    # Buffer session for batched indexing
-    pending_sessions.append(session)
-    if len(pending_sessions) >= BATCH_SIZE:
-        self._index.update_sessions(pending_sessions)  # Batch commit
-        pending_sessions.clear()
-        on_progress()  # TUI updates
-
-# Adapters call on_session as each session is parsed
-adapter.find_sessions_incremental(known, on_session=handle_session)
+```rust
+index.refresh_incremental_streaming(BATCH_SIZE, |summary| {
+    scan_tx.send(ScanMessage::Progress {
+        new_or_modified: summary.new_or_modified,
+        deleted: summary.deleted,
+        total: summary.sessions,
+        elapsed: start.elapsed(),
+    })?;
+});
 ```
 
 Sessions appear in the TUI progressively as they're parsed and batched. OpenCode uses parallel file I/O and processes smaller sessions first for faster initial results.
@@ -354,26 +345,18 @@ Sessions appear in the TUI progressively as they're parsed and batched. OpenCode
 
 ### Search
 
-[Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene). We use it via [tantivy-py](https://github.com/quickwit-oss/tantivy-py).
+[Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene).
 
 **Hybrid search** combines exact and fuzzy matching for best results:
 
-```python
-# Exact match (boosted 5x) - uses BM25 scoring
-exact_query = index.parse_query(query, ["title", "content"])
-boosted_exact = tantivy.Query.boost_query(exact_query, 5.0)
-
-# Fuzzy match (edit distance 1) - for typo tolerance
-for term in query.split():
-    fuzzy_title = tantivy.Query.fuzzy_term_query(schema, "title", term, distance=1, prefix=True)
-    fuzzy_content = tantivy.Query.fuzzy_term_query(schema, "content", term, distance=1, prefix=True)
-    ...
-
-# Combine: exact OR fuzzy (exact scores higher due to boost)
-tantivy.Query.boolean_query([
-    (tantivy.Occur.Should, boosted_exact),
-    (tantivy.Occur.Should, fuzzy_query),
-])
+```rust
+// Exact terms are boosted, fuzzy terms provide typo tolerance.
+let exact = QueryParser::for_index(&index, vec![title, content]).parse_query(query)?;
+let fuzzy = fuzzy_term_queries(schema, query);
+let combined = BooleanQuery::new(vec![
+    (Occur::Should, Box::new(BoostQuery::new(Box::new(exact), 5.0))),
+    (Occur::Should, Box::new(fuzzy)),
+]);
 ```
 
 This ensures exact matches rank first while still finding typos like `auth midleware` → "authentication middleware".
@@ -400,34 +383,30 @@ This ensures exact matches rank first while still finding typos like `auth midle
 
 **Preview context**: When searching, the preview pane jumps to the matching portion:
 
-```python
-for term in query.lower().split():
-    pos = content.lower().find(term)
-    if pos != -1:
-        start = max(0, pos - 100)  # Show ~100 chars before match
-        preview_text = content[start:start + 1500]
-        break
+```rust
+for term in query.to_lowercase().split_whitespace() {
+    if let Some(pos) = content.to_lowercase().find(term) {
+        let start = pos.saturating_sub(100);
+        let preview = content[start..].chars().take(1500).collect::<String>();
+        break;
+    }
+}
 ```
 
-Matching terms are highlighted with Rich's `Text.stylize()`.
+Matching terms are highlighted directly in the terminal UI.
 
 ### Resume Handoff
 
 When you press Enter on a session, fast-resume hands off to the original agent:
 
-```python
-# In cli.py after TUI exits
-resume_cmd, resume_dir = run_tui(query=query, agent_filter=agent)
-
-if resume_cmd:
-    # 1. Change to the session's original working directory
-    os.chdir(resume_dir)
-
-    # 2. Replace current process with agent's resume command
-    os.execvp(resume_cmd[0], resume_cmd)
+```rust
+match run_tui(query, agent_filter, yolo, image_protocol)? {
+    TuiExit::Quit => Ok(()),
+    TuiExit::Resume { command, directory } => exec_resume(command, directory),
+}
 ```
 
-`os.execvp()` replaces the Python process entirely with the agent CLI. This means:
+`exec()` replaces the fast-resume process entirely with the agent CLI. This means:
 
 - No subprocess overhead
 - Shell history shows `claude --resume xyz`, not `fr`
@@ -450,12 +429,11 @@ Each adapter returns the appropriate command:
 
 Why fast-resume feels instant:
 
-- **Tantivy (Rust)**: Search engine written in Rust, accessed via Python bindings. Handles fuzzy queries over 10k+ sessions in <10ms
+- **Tantivy**: Native Rust full-text search over 10k+ sessions in <10ms
 - **Incremental updates**: Only re-parse files where `mtime` changed. Second launch with no changes: ~50ms total
-- **Parallel adapters**: All adapters run simultaneously in ThreadPoolExecutor. Total time = slowest adapter, not sum
+- **Parallel adapters**: Adapters run concurrently. Total time = slowest adapter, not sum
 - **Debounced search**: 50ms debounce prevents wasteful searches while typing
-- **Background workers**: Search runs in thread, UI never blocks
-- **orjson**: Rust-based JSON parsing, ~10x faster than stdlib json
+- **Background workers**: Index refresh runs off the UI thread
 - **Streaming results**: Sessions appear as each adapter completes, not after all finish
 
 Typical performance on a machine with ~500 sessions:
@@ -470,44 +448,35 @@ Typical performance on a machine with ~500 sessions:
 # Clone and setup
 git clone https://github.com/angristan/fast-resume.git
 cd fast-resume
-uv sync
 
 # Run locally
-uv run fr
+cargo run --
 
 # Install pre-commit hooks
-uv run pre-commit install
+pre-commit install
 
 # Run tests
-uv run pytest -v
+cargo test
 
 # Lint and format
-uv run ruff check .
-uv run ruff format .
+cargo fmt --check
+cargo check --all-targets --locked
 ```
 
 ### Project Structure
 
 ```
 fast-resume/
-├── src/fast_resume/
-│   ├── cli.py              # Click CLI entry point
-│   ├── config.py           # Constants, colors, paths
-│   ├── index.py            # TantivyIndex - search engine
-│   ├── search.py           # SessionSearch - adapter orchestration
-│   ├── tui.py              # Textual TUI application
-│   ├── assets/             # Agent icons (PNG)
-│   └── adapters/
-│       ├── base.py         # Session dataclass, AgentAdapter protocol
-│       ├── claude.py       # Claude Code adapter
-│       ├── codex.py        # Codex CLI adapter
-│       ├── copilot.py      # GitHub Copilot CLI adapter
-│       ├── copilot_vscode.py # VS Code Copilot Chat adapter
-│       ├── crush.py        # Crush adapter
-│       ├── opencode.py     # OpenCode adapter
-│       └── vibe.py         # Vibe adapter
-├── tests/                  # pytest test suite
-├── pyproject.toml          # Dependencies and build config
+├── src/
+│   ├── main.rs             # Clap CLI entry point
+│   ├── config.rs           # Constants, colors, paths
+│   ├── index.rs            # Tantivy index and incremental refresh
+│   ├── search.rs           # Search engine facade
+│   ├── tui.rs              # Ratatui terminal UI
+│   ├── adapters/           # Agent-specific parsers and resume commands
+│   └── model.rs            # Shared session model
+├── assets/                 # Logo and embedded agent icons
+├── Cargo.toml              # Dependencies and build config
 └── README.md
 ```
 
@@ -515,12 +484,12 @@ fast-resume/
 
 | Component           | Library                                                             |
 | ------------------- | ------------------------------------------------------------------- |
-| TUI Framework       | [Textual](https://textual.textualize.io/)                           |
-| Terminal Formatting | [Rich](https://rich.readthedocs.io/)                                |
-| CLI Framework       | [Click](https://click.palletsprojects.com/)                         |
-| Search Engine       | [Tantivy](https://github.com/quickwit-oss/tantivy) (via tantivy-py) |
-| JSON Parsing        | [orjson](https://github.com/ijl/orjson) (fast)                      |
-| Date Formatting     | [humanize](https://python-humanize.readthedocs.io/)                 |
+| TUI Framework       | [Ratatui](https://ratatui.rs/)                                      |
+| Terminal Handling   | [Crossterm](https://github.com/crossterm-rs/crossterm)              |
+| CLI Framework       | [Clap](https://docs.rs/clap/latest/clap/)                           |
+| Search Engine       | [Tantivy](https://github.com/quickwit-oss/tantivy)                  |
+| JSON Parsing        | [serde_json](https://docs.rs/serde_json/latest/serde_json/)         |
+| SQLite              | [rusqlite](https://docs.rs/rusqlite/latest/rusqlite/)               |
 
 ## Configuration
 

@@ -1,23 +1,23 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
   - repo: local
     hooks:
-      - id: ty
-        name: ty
-        entry: uv run ty check src/
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt -- --check
         language: system
         pass_filenames: false
         always_run: true
 
-      - id: pytest
-        name: pytest
-        entry: uv run pytest
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --all-targets --locked
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --locked
         language: system
         pass_filenames: false
         always_run: true

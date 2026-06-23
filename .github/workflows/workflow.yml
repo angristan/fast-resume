@@ -30,52 +30,25 @@ jobs:
         if: github.event_name == 'pull_request'
         run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
 
-  test:
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: uv sync
-
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --check
       - name: Run tests
-        run: uv run pytest -v
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Run ruff check
-        run: uvx ruff check src/ tests/
-
-      - name: Run ruff format check
-        run: uvx ruff format --check src/ tests/
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Run ty type check
-        run: uvx ty check src/
+        run: cargo test --locked
+      - name: Build
+        run: cargo build --locked
 
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [commitlint, test, lint, typecheck]
+    needs: [commitlint, rust]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     # Prevent concurrent releases from racing (would cause "tag already exists" errors)
     concurrency:
@@ -96,8 +69,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: lts/*
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
       - name: Get latest tag before release
         id: before
         run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
@@ -127,26 +98,31 @@ jobs:
         platform:
           - name: macOS (Apple Silicon)
             runner: macos-latest
+            archive: macos-arm64
           - name: Linux (x86_64)
             runner: ubuntu-latest
+            archive: linux-x86_64
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           ref: v${{ needs.release.outputs.new_release_version }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Install PyInstaller
-        run: uv pip install pyinstaller
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Build binary
-        run: uv run python build_binary.py
+        run: cargo build --release --locked
+
+      - name: Package binary
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+          PLATFORM: ${{ matrix.platform.archive }}
+        run: |
+          mkdir -p dist/fr
+          cp target/release/fr dist/fr/fr
+          chmod +x dist/fr/fr
+          ln -sf fr dist/fr/fast-resume
+          tar -czf "dist/fast-resume-${VERSION}-${PLATFORM}.tar.gz" -C dist fr
 
       - name: Verify binary runs
         run: |
