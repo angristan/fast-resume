@@ -15,6 +15,11 @@ use super::text::{
     search_query_spans, time_ago, truncate,
 };
 
+const ACCENT: Color = Color::Rgb(224, 150, 70);
+const PANEL_BORDER: Color = Color::Rgb(70, 80, 95);
+const SELECTED_BG: Color = Color::Rgb(68, 52, 34);
+const WARNING: Color = Color::Rgb(240, 180, 80);
+
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let outer = Layout::default()
@@ -42,12 +47,9 @@ pub(super) fn draw(frame: &mut Frame, state: &AppState) {
 fn draw_header(frame: &mut Frame, area: Rect, state: &AppState) {
     let scan = if state.scanning { " refreshing" } else { "" };
     let left = Line::from(vec![
-        Span::styled(
-            "fast-resume",
-            Style::new().bold().fg(Color::Rgb(80, 220, 170)),
-        ),
+        Span::styled("fast-resume", Style::new().bold().fg(ACCENT)),
         Span::raw(format!(" v{VERSION}")),
-        Span::styled(scan, Style::new().fg(Color::Rgb(240, 180, 80))),
+        Span::styled(scan, Style::new().fg(WARNING)),
     ]);
     let count = state.engine.count_for_agent(state.agent_filter.as_deref());
     let right = format!(
@@ -70,12 +72,12 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Rgb(80, 220, 170)))
+        .border_style(Style::new().fg(ACCENT))
         .title(" Search titles and messages ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let prompt = Span::styled(" / ", Style::new().fg(Color::Rgb(80, 220, 170)).bold());
+    let prompt = Span::styled(" / ", Style::new().fg(ACCENT).bold());
     let mut spans = vec![prompt];
     spans.extend(search_query_spans(&state.query));
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
@@ -195,7 +197,7 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Rgb(70, 80, 95)))
+        .border_style(Style::new().fg(PANEL_BORDER))
         .title(" Sessions ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -335,7 +337,7 @@ fn draw_result_row(
     state: &AppState,
 ) {
     let row_style = if selected {
-        Style::new().bg(Color::Rgb(36, 57, 52)).fg(Color::White)
+        Style::new().bg(SELECTED_BG).fg(Color::White)
     } else {
         Style::new()
     };
@@ -439,7 +441,7 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Rgb(70, 80, 95)))
+        .border_style(Style::new().fg(PANEL_BORDER))
         .title(" Preview ");
     let inner = block.inner(area).inner(Margin {
         vertical: 0,
@@ -518,10 +520,7 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn draw_footer(frame: &mut Frame, area: Rect) {
     let footer = Line::from(vec![
-        Span::styled(
-            " Enter ",
-            Style::new().fg(Color::Black).bg(Color::Rgb(80, 220, 170)),
-        ),
+        Span::styled(" Enter ", Style::new().fg(Color::Black).bg(ACCENT)),
         Span::raw(" resume  "),
         Span::styled(" Ctrl+Y ", Style::new().fg(Color::Black).bg(Color::Gray)),
         Span::raw(" copy  "),
@@ -541,7 +540,7 @@ fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(Color::Rgb(240, 180, 80)))
+        .border_style(Style::new().fg(WARNING))
         .title(" Yolo mode ");
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -561,13 +560,7 @@ fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
 
 fn button_span(label: &'static str, selected: bool) -> Span<'static> {
     if selected {
-        Span::styled(
-            label,
-            Style::new()
-                .fg(Color::Black)
-                .bg(Color::Rgb(240, 180, 80))
-                .bold(),
-        )
+        Span::styled(label, Style::new().fg(Color::Black).bg(WARNING).bold())
     } else {
         Span::styled(label, Style::new().fg(Color::Gray))
     }
