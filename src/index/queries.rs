@@ -60,22 +60,15 @@ fn text_query(index: &Index, fields: IndexFields, search_text: &str) -> Result<B
 
     let mut alternatives: Vec<(Occur, Box<dyn Query>)> =
         vec![(Occur::Should, Box::new(boosted_exact))];
+    // Fuzzy expansion over full message content is too expensive for per-keystroke TUI search.
     let fuzzy_parts: Vec<(Occur, Box<dyn Query>)> = search_text
         .split_whitespace()
-        .filter(|term| !term.is_empty())
+        .filter(|term| term.chars().count() >= 3)
         .map(|term| {
             let term = term.to_lowercase();
             let title =
                 FuzzyTermQuery::new_prefix(Term::from_field_text(fields.title, &term), 1, true);
-            let content =
-                FuzzyTermQuery::new_prefix(Term::from_field_text(fields.content, &term), 1, true);
-            (
-                Occur::Must,
-                Box::new(BooleanQuery::new(vec![
-                    (Occur::Should, Box::new(title)),
-                    (Occur::Should, Box::new(content)),
-                ])) as Box<dyn Query>,
-            )
+            (Occur::Must, Box::new(title) as Box<dyn Query>)
         })
         .collect();
 

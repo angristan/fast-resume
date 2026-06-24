@@ -3,7 +3,6 @@ use anyhow::Result;
 use crate::index::SessionIndex;
 use crate::model::Session;
 
-#[derive(Debug, Clone)]
 pub struct SearchEngine {
     index: SessionIndex,
 }
@@ -21,8 +20,7 @@ impl SearchEngine {
     }
 
     pub fn reload(&mut self) -> Result<()> {
-        self.index = SessionIndex::open_default()?;
-        Ok(())
+        self.index.reload()
     }
 
     pub fn all_sessions(&self) -> Vec<Session> {

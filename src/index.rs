@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{AllQuery, TermQuery};
 use tantivy::schema::{IndexRecordOption, TantivyDocument};
-use tantivy::{DocAddress, Index, IndexWriter, Order, Score, Term};
+use tantivy::{DocAddress, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, Term};
 
 use crate::adapters::KnownSessions;
 use crate::config::index_dir;
@@ -34,9 +34,9 @@ pub struct RefreshSummary {
     pub deleted: usize,
 }
 
-#[derive(Debug, Clone)]
 pub struct SessionIndex {
     index: Index,
+    reader: IndexReader,
     path: PathBuf,
     fields: schema::IndexFields,
 }
@@ -66,8 +66,13 @@ impl SessionIndex {
         };
 
         let fields = schema::IndexFields::from_schema(&index.schema())?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
         Ok(Self {
             index,
+            reader,
             path,
             fields,
         })
@@ -81,6 +86,7 @@ impl SessionIndex {
             writer.add_document(document::session_document(self.fields, session))?;
         }
         writer.commit()?;
+        self.reader.reload()?;
         Ok(RefreshSummary {
             sessions: sessions.len(),
             new_or_modified: sessions.len(),
@@ -105,6 +111,11 @@ impl SessionIndex {
 
     pub fn scan_all_sessions() -> Vec<Session> {
         crate::refresh::scan_all_sessions()
+    }
+
+    pub fn reload(&self) -> Result<()> {
+        self.reader.reload()?;
+        Ok(())
     }
 
     pub fn known_sessions(&self) -> Result<KnownSessions> {
@@ -236,6 +247,7 @@ impl SessionIndex {
             writer.add_document(document::session_document(self.fields, session))?;
         }
         writer.commit()?;
+        self.reader.reload()?;
         Ok(())
     }
 
@@ -252,13 +264,12 @@ impl SessionIndex {
             ));
         }
         writer.commit()?;
+        self.reader.reload()?;
         Ok(())
     }
 
     fn searcher(&self) -> Result<tantivy::Searcher> {
-        let reader = self.index.reader()?;
-        reader.reload()?;
-        Ok(reader.searcher())
+        Ok(self.reader.searcher())
     }
 
     fn search_all_addresses(
