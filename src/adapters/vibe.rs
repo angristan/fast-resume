@@ -1,0 +1,274 @@
+use std::collections::HashMap;
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use crate::config;
+use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
+
+use super::shared::{
+    content_texts, incremental_from_files, incremental_from_files_streaming, parse_datetime,
+    raw_stats_for_tree, string_at,
+};
+use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
+
+#[derive(Debug, Clone)]
+pub struct VibeAdapter {
+    sessions_dir: PathBuf,
+}
+
+impl Default for VibeAdapter {
+    fn default() -> Self {
+        Self {
+            sessions_dir: config::vibe_dir(),
+        }
+    }
+}
+
+impl Adapter for VibeAdapter {
+    fn name(&self) -> &'static str {
+        "vibe"
+    }
+
+    fn supports_yolo(&self) -> bool {
+        true
+    }
+
+    fn find_sessions(&self) -> Vec<Session> {
+        if !self.sessions_dir.exists() {
+            return Vec::new();
+        }
+        let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_dir()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| name.starts_with("session_"))
+            })
+            .filter_map(|path| self.parse_session(&path))
+            .collect()
+    }
+
+    fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
+        incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
+            self.parse_session(path)
+        })
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        incremental_from_files_streaming(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session(path),
+            on_session,
+        )
+    }
+
+    fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
+        let mut cmd = vec!["vibe".to_string()];
+        if yolo {
+            cmd.extend(["--agent".to_string(), "auto-approve".to_string()]);
+        }
+        cmd.extend(["--resume".to_string(), session.id.clone()]);
+        cmd
+    }
+
+    fn raw_stats(&self) -> RawAdapterStats {
+        raw_stats_for_tree(self.name(), &self.sessions_dir, "jsonl")
+    }
+}
+
+impl VibeAdapter {
+    fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
+        let mut current_files = HashMap::new();
+        let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
+            return current_files;
+        };
+
+        for entry in entries.filter_map(Result::ok) {
+            let session_dir = entry.path();
+            if !session_dir.is_dir()
+                || !session_dir
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("session_"))
+            {
+                continue;
+            }
+            let metadata_file = session_dir.join("meta.json");
+            let Ok(metadata) =
+                serde_json::from_slice::<Value>(&fs::read(&metadata_file).unwrap_or_default())
+            else {
+                continue;
+            };
+            let session_id = {
+                let id = string_at(&metadata, &["session_id"]);
+                if id.is_empty() {
+                    session_dir
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default()
+                        .to_string()
+                } else {
+                    id
+                }
+            };
+            current_files.insert(
+                session_id,
+                (session_dir, file_mtime_seconds(&metadata_file)),
+            );
+        }
+
+        current_files
+    }
+
+    fn parse_session(&self, session_dir: &Path) -> Option<Session> {
+        let metadata_file = session_dir.join("meta.json");
+        let messages_file = session_dir.join("messages.jsonl");
+        let metadata: Value = serde_json::from_slice(&fs::read(&metadata_file).ok()?).ok()?;
+
+        let session_id = {
+            let id = string_at(&metadata, &["session_id"]);
+            if id.is_empty() {
+                session_dir.file_name()?.to_string_lossy().to_string()
+            } else {
+                id
+            }
+        };
+        let directory = string_at(&metadata, &["environment", "working_directory"]);
+        let yolo = metadata
+            .pointer("/config/auto_approve")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || metadata
+                .get("auto_approve")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let timestamp = parse_datetime(&string_at(&metadata, &["start_time"]))
+            .unwrap_or_else(|| file_timestamp(&metadata_file));
+        let mut title = string_at(&metadata, &["title"]);
+
+        let mut messages = Vec::new();
+        let mut first_user = String::new();
+        if messages_file.exists() {
+            let file = fs::File::open(&messages_file).ok()?;
+            for line in BufReader::new(file).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                let role = string_at(&msg, &["role"]);
+                if role == "system" {
+                    continue;
+                }
+                let role_prefix = if role == "user" { "» " } else { "  " };
+                if let Some(content) = msg.get("content") {
+                    for text in content_texts(content) {
+                        if role == "user" && first_user.is_empty() {
+                            first_user = text.clone();
+                        }
+                        messages.push(format!("{role_prefix}{text}"));
+                    }
+                }
+            }
+        }
+
+        if title.is_empty() {
+            title = if first_user.is_empty() {
+                "Vibe session".to_string()
+            } else {
+                truncate_title(&first_user, 80, false)
+            };
+        }
+
+        let mut session = Session::new(
+            session_id,
+            self.name(),
+            title,
+            directory,
+            timestamp,
+            messages.join("\n\n"),
+            messages.len(),
+        );
+        session.mtime = file_mtime_seconds(&metadata_file);
+        session.yolo = yolo;
+        Some(session)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use serde_json::{Value, json};
+    use tempfile::tempdir;
+
+    use crate::adapters::Adapter;
+
+    use super::*;
+
+    fn write_jsonl(path: &Path, rows: &[Value]) {
+        fs::write(
+            path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn parses_session_and_auto_approve_resume_command() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = sessions_dir.join("session_alpha");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("meta.json"),
+            json!({
+                "session_id": "vibe-1",
+                "environment": {"working_directory": "/work/vibe"},
+                "config": {"auto_approve": true},
+                "start_time": "2026-01-01T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("messages.jsonl"),
+            &[
+                json!({"role": "user", "content": "Please build the feature"}),
+                json!({"role": "assistant", "content": [{"text": "Done"}]}),
+            ],
+        );
+
+        let adapter = VibeAdapter { sessions_dir };
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "vibe-1");
+        assert_eq!(sessions[0].title, "Please build the feature");
+        assert_eq!(sessions[0].directory, "/work/vibe");
+        assert!(sessions[0].yolo);
+        assert_eq!(
+            adapter.resume_command(&sessions[0], true),
+            vec!["vibe", "--agent", "auto-approve", "--resume", "vibe-1"]
+        );
+    }
+}
