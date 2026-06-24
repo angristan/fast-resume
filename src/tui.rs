@@ -102,11 +102,18 @@ fn run_loop(
         }
 
         if event::poll(Duration::from_millis(24))? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(exit) = handle_key(state, key)? {
-                    return Ok(exit);
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(exit) = handle_key(state, key)? {
+                        return Ok(exit);
+                    }
+                    needs_draw = true;
                 }
-                needs_draw = true;
+                Event::Resize(_, _) => {
+                    terminal.autoresize()?;
+                    needs_draw = true;
+                }
+                _ => {}
             }
         }
     }
