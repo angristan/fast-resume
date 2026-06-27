@@ -39,8 +39,12 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
         (KeyCode::Right, _) => state.cursor = (state.cursor + 1).min(state.query.chars().count()),
         (KeyCode::Home, _) => state.cursor = 0,
         (KeyCode::End, _) => state.cursor = state.query.chars().count(),
-        (KeyCode::Char('+'), _) => state.preview_scroll = state.preview_scroll.saturating_sub(3),
-        (KeyCode::Char('-'), _) => state.preview_scroll = state.preview_scroll.saturating_add(3),
+        (KeyCode::Char('+'), modifiers) if modifiers.contains(KeyModifiers::ALT) => {
+            state.preview_scroll = state.preview_scroll.saturating_sub(3);
+        }
+        (KeyCode::Char('-'), modifiers) if modifiers.contains(KeyModifiers::ALT) => {
+            state.preview_scroll = state.preview_scroll.saturating_add(3);
+        }
         (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
             if ch != '\n' && ch != '\r' {
                 state.insert_char(ch);

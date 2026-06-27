@@ -224,6 +224,17 @@ mod tests {
     }
 
     #[test]
+    fn plus_and_minus_type_into_search() {
+        let mut state = test_state(Vec::new());
+
+        handle_key(&mut state, key(KeyCode::Char('-'), KeyModifiers::NONE)).unwrap();
+        handle_key(&mut state, key(KeyCode::Char('+'), KeyModifiers::SHIFT)).unwrap();
+
+        assert_eq!(state.query, "-+");
+        assert_eq!(state.cursor, 2);
+    }
+
+    #[test]
     fn ctrl_j_and_ctrl_k_keep_navigation_shortcuts() {
         let mut state = test_state(vec![session("a"), session("b")]);
 
@@ -233,6 +244,23 @@ mod tests {
 
         handle_key(&mut state, key(KeyCode::Char('k'), KeyModifiers::CONTROL)).unwrap();
         assert_eq!(state.selected, 0);
+        assert!(state.query.is_empty());
+    }
+
+    #[test]
+    fn alt_plus_and_minus_scroll_preview() {
+        let mut state = test_state(Vec::new());
+        state.preview_scroll = 3;
+
+        handle_key(
+            &mut state,
+            key(KeyCode::Char('+'), KeyModifiers::ALT | KeyModifiers::SHIFT),
+        )
+        .unwrap();
+        assert_eq!(state.preview_scroll, 0);
+
+        handle_key(&mut state, key(KeyCode::Char('-'), KeyModifiers::ALT)).unwrap();
+        assert_eq!(state.preview_scroll, 3);
         assert!(state.query.is_empty());
     }
 

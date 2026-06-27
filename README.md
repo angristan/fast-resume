@@ -161,24 +161,22 @@ Options:
 
 ### Navigation
 
-| Key                     | Action                             |
-| ----------------------- | ---------------------------------- |
-| `↑` / `↓`               | Move selection up/down             |
-| `j` / `k`               | Move selection up/down (vim-style) |
-| `Page Up` / `Page Down` | Move by 10 rows                    |
-| `Enter`                 | Resume selected session            |
-| `/`                     | Focus search input                 |
+| Key                     | Action                  |
+| ----------------------- | ----------------------- |
+| `↑` / `↓`               | Move selection up/down  |
+| `Ctrl+J` / `Ctrl+K`     | Move selection up/down  |
+| `Page Up` / `Page Down` | Move by 10 rows         |
+| `Enter`                 | Resume selected session |
 
 ### Preview & Actions
 
-| Key       | Action                                |
-| --------- | ------------------------------------- |
-| `Ctrl+\`` | Toggle preview pane                   |
-| `+` / `-` | Resize preview pane                   |
-| `Tab`     | Accept autocomplete suggestion        |
-| `c`       | Copy full resume command to clipboard |
-| `Ctrl+P`  | Open command palette                  |
-| `q`/`Esc` | Quit                                  |
+| Key                 | Action                               |
+| ------------------- | ------------------------------------ |
+| `Ctrl+P`            | Toggle preview pane                  |
+| `Alt`+`+` / `Alt`+`-` | Scroll preview pane                  |
+| `Tab` / `Shift+Tab` | Cycle agent filter                   |
+| `Ctrl+Y`            | Copy full resume command to clipboard |
+| `Esc` / `Ctrl+C`    | Quit                                 |
 
 ### Yolo Mode Modal
 
