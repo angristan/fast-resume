@@ -166,6 +166,16 @@ impl AppState {
         self.preview_scroll = 0;
     }
 
+    pub(super) fn scroll_preview(&mut self, delta: isize) {
+        if delta < 0 {
+            self.preview_scroll = self
+                .preview_scroll
+                .saturating_sub(delta.unsigned_abs() as u16);
+        } else {
+            self.preview_scroll = self.preview_scroll.saturating_add(delta as u16);
+        }
+    }
+
     pub(super) fn cycle_agent(&mut self, reverse: bool) {
         let current = self
             .agent_filter

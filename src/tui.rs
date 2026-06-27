@@ -4,13 +4,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use crate::index::{INDEX_REFRESH_BATCH_SIZE, SessionIndex};
 use crate::model::Session;
@@ -25,6 +28,7 @@ mod text;
 
 use images::AgentImages;
 use input::handle_key;
+use layout::ScrollTarget;
 use render::draw;
 use state::{AppState, ScanMessage, SearchRequest, handle_scan_message};
 
@@ -123,6 +127,13 @@ fn run_loop(
                     terminal.autoresize()?;
                     needs_draw = true;
                 }
+                Event::Mouse(mouse) => {
+                    let size = terminal.size()?;
+                    let area = Rect::new(0, 0, size.width, size.height);
+                    if handle_mouse(state, mouse, area) {
+                        needs_draw = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -155,17 +166,43 @@ fn spawn_search(engine: SearchEngine, request: SearchRequest, tx: Sender<SearchR
     });
 }
 
+const MOUSE_SCROLL_LINES: isize = 3;
+
+fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
+    let delta = match mouse.kind {
+        MouseEventKind::ScrollUp => -MOUSE_SCROLL_LINES,
+        MouseEventKind::ScrollDown => MOUSE_SCROLL_LINES,
+        _ => return false,
+    };
+
+    match layout::scroll_target(area, state.show_preview, mouse.column, mouse.row) {
+        Some(ScrollTarget::Results) => {
+            state.move_selection(delta);
+            true
+        }
+        Some(ScrollTarget::Preview) => {
+            state.scroll_preview(delta);
+            true
+        }
+        None => false,
+    }
+}
+
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -173,7 +210,8 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
 #[cfg(test)]
 mod tests {
     use chrono::Local;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
     use tempfile::tempdir;
 
     use crate::index::SessionIndex;
@@ -185,6 +223,15 @@ mod tests {
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
     }
 
     fn session(id: &str) -> Session {
@@ -263,6 +310,48 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('-'), KeyModifiers::ALT)).unwrap();
         assert_eq!(state.preview_scroll, 3);
         assert!(state.query.is_empty());
+    }
+
+    #[test]
+    fn mouse_wheel_over_results_moves_selection() {
+        let mut state = test_state((0..10).map(|idx| session(&idx.to_string())).collect());
+
+        assert!(super::handle_mouse(
+            &mut state,
+            mouse(MouseEventKind::ScrollDown, 10, 6),
+            Rect::new(0, 0, 120, 40),
+        ));
+
+        assert_eq!(state.selected, 3);
+        assert_eq!(state.preview_scroll, 0);
+    }
+
+    #[test]
+    fn mouse_wheel_over_preview_scrolls_preview() {
+        let mut state = test_state(vec![session("a")]);
+
+        assert!(super::handle_mouse(
+            &mut state,
+            mouse(MouseEventKind::ScrollDown, 100, 6),
+            Rect::new(0, 0, 120, 40),
+        ));
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.preview_scroll, 3);
+    }
+
+    #[test]
+    fn mouse_wheel_outside_main_area_is_ignored() {
+        let mut state = test_state(vec![session("a")]);
+
+        assert!(!super::handle_mouse(
+            &mut state,
+            mouse(MouseEventKind::ScrollDown, 10, 1),
+            Rect::new(0, 0, 120, 40),
+        ));
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.preview_scroll, 0);
     }
 
     #[test]
