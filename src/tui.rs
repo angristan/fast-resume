@@ -22,6 +22,7 @@ use crate::search::SearchEngine;
 mod images;
 mod input;
 mod layout;
+mod preview;
 mod render;
 mod state;
 mod text;

@@ -10,10 +10,10 @@ use crate::config::{AGENT_ORDER, AGENTS, VERSION};
 use crate::model::Session;
 
 use super::layout::{self, MainLayout};
+use super::preview::render_preview_lines;
 use super::state::{AppState, YoloModal};
 use super::text::{
-    age_style, display_width_until, line_width, preview_snippet, render_preview_line,
-    search_query_spans, time_ago, truncate,
+    age_style, display_width_until, line_width, search_query_spans, time_ago, truncate,
 };
 
 const ACCENT: Color = Color::Rgb(224, 150, 70);
@@ -487,10 +487,11 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         Vec::new()
     };
 
-    let snippet = preview_snippet(session, &state.query);
-    for line in snippet.lines().take(220) {
-        lines.push(render_preview_line(line, &state.query));
-    }
+    lines.extend(
+        render_preview_lines(session, &state.query)
+            .into_iter()
+            .take(220),
+    );
 
     frame.render_widget(
         Paragraph::new(Text::from(lines))

@@ -4,7 +4,6 @@ use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::AGENTS;
-use crate::model::Session;
 
 pub(super) fn char_to_byte_idx(value: &str, char_idx: usize) -> usize {
     value
@@ -192,104 +191,6 @@ pub(super) fn age_style(timestamp: DateTime<Local>) -> Style {
         (200.0 - s * 100.0, 100.0, 50.0 + s * 50.0)
     };
     Style::new().fg(Color::Rgb(r as u8, g as u8, b as u8))
-}
-
-pub(super) fn preview_snippet(session: &Session, query: &str) -> String {
-    if query.trim().is_empty() {
-        return truncate_chars(&session.content, 6_000);
-    }
-
-    let content_lc = session.content.to_ascii_lowercase();
-    let mut best = None;
-    for term in query
-        .split_whitespace()
-        .map(|term| term.to_ascii_lowercase())
-    {
-        if let Some(pos) = content_lc.find(&term) {
-            best = Some(best.map_or(pos, |current: usize| current.min(pos)));
-        }
-    }
-
-    if let Some(pos) = best {
-        let start = session.content[..pos]
-            .char_indices()
-            .rev()
-            .nth(220)
-            .map(|(idx, _)| idx)
-            .unwrap_or(0);
-        let end = session.content[pos..]
-            .char_indices()
-            .nth(5_000)
-            .map(|(idx, _)| pos + idx)
-            .unwrap_or(session.content.len());
-        let mut snippet = String::new();
-        if start > 0 {
-            snippet.push_str("...\n");
-        }
-        snippet.push_str(&session.content[start..end]);
-        if end < session.content.len() {
-            snippet.push_str("\n...");
-        }
-        snippet
-    } else {
-        truncate_chars(&session.content, 6_000)
-    }
-}
-
-pub(super) fn render_preview_line(line: &str, query: &str) -> Line<'static> {
-    let style = if line.starts_with("» ") {
-        Style::new().fg(Color::Rgb(120, 210, 255)).bold()
-    } else if line.starts_with("  ") {
-        Style::new().fg(Color::White)
-    } else if line.starts_with("...") {
-        Style::new().fg(Color::DarkGray)
-    } else {
-        Style::new().fg(Color::Gray)
-    };
-
-    if query.trim().is_empty() {
-        return Line::from(Span::styled(line.to_string(), style));
-    }
-
-    let terms: Vec<_> = query
-        .split_whitespace()
-        .map(|term| term.to_ascii_lowercase())
-        .collect();
-    let lower = line.to_ascii_lowercase();
-    let mut spans = Vec::new();
-    let mut idx = 0usize;
-    while idx < line.len() {
-        let next = terms
-            .iter()
-            .filter_map(|term| lower[idx..].find(term).map(|pos| (idx + pos, term.len())))
-            .min_by_key(|(pos, _)| *pos);
-        let Some((hit, len)) = next else {
-            spans.push(Span::styled(line[idx..].to_string(), style));
-            break;
-        };
-        if hit > idx {
-            spans.push(Span::styled(line[idx..hit].to_string(), style));
-        }
-        let end = (hit + len).min(line.len());
-        spans.push(Span::styled(
-            line[hit..end].to_string(),
-            Style::new()
-                .fg(Color::Black)
-                .bg(Color::Rgb(250, 220, 110))
-                .bold(),
-        ));
-        idx = end;
-    }
-    Line::from(spans)
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let mut out: String = value.chars().take(max).collect();
-    out.push_str("\n...");
-    out
 }
 
 pub(super) fn shell_join(parts: &[String]) -> String {
