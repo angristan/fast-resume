@@ -18,6 +18,7 @@ use crate::search::SearchEngine;
 
 mod images;
 mod input;
+mod layout;
 mod render;
 mod state;
 mod text;

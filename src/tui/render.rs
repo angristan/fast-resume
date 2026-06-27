@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::{AGENT_ORDER, AGENTS, VERSION};
 use crate::model::Session;
 
+use super::layout::{self, MainLayout};
 use super::state::{AppState, YoloModal};
 use super::text::{
     age_style, display_width_until, line_width, preview_snippet, render_preview_line,
@@ -22,22 +23,13 @@ const WARNING: Color = Color::Rgb(240, 180, 80);
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    let layout = layout::app(area, state.show_preview);
 
-    draw_header(frame, outer[0], state);
-    draw_search(frame, outer[1], state);
-    draw_filters(frame, outer[2], state);
-    draw_main(frame, outer[3], state);
-    draw_footer(frame, outer[4]);
+    draw_header(frame, layout.header, state);
+    draw_search(frame, layout.search, state);
+    draw_filters(frame, layout.filters, state);
+    draw_main(frame, layout.main, state);
+    draw_footer(frame, layout.footer);
 
     if let Some(modal) = &state.modal {
         draw_yolo_modal(frame, area, modal);
@@ -171,25 +163,10 @@ fn draw_filter_tab(
     x.saturating_add(tab_width)
 }
 
-fn draw_main(frame: &mut Frame, area: Rect, state: &AppState) {
-    if state.show_preview {
-        if area.width >= 116 {
-            let chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
-                .split(area);
-            draw_results(frame, chunks[0], state);
-            draw_preview(frame, chunks[1], state);
-        } else {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(8), Constraint::Length(12)])
-                .split(area);
-            draw_results(frame, chunks[0], state);
-            draw_preview(frame, chunks[1], state);
-        }
-    } else {
-        draw_results(frame, area, state);
+fn draw_main(frame: &mut Frame, layout: MainLayout, state: &AppState) {
+    draw_results(frame, layout.results(), state);
+    if let Some(preview) = layout.preview() {
+        draw_preview(frame, preview, state);
     }
 }
 
