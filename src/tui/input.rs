@@ -31,7 +31,11 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
         (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::CONTROL) => state.move_selection(1),
         (KeyCode::PageUp, _) => state.move_selection(-10),
         (KeyCode::PageDown, _) => state.move_selection(10),
-        (KeyCode::Tab, _) => state.cycle_agent(false),
+        (KeyCode::Tab, _) => {
+            if !state.accept_suggestion() {
+                state.cycle_agent(false);
+            }
+        }
         (KeyCode::BackTab, _) => state.cycle_agent(true),
         (KeyCode::Backspace, _) => state.backspace(),
         (KeyCode::Delete, _) => state.delete(),

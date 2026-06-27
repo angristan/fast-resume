@@ -43,7 +43,8 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppState) {
         Span::raw(format!(" v{VERSION}")),
         Span::styled(scan, Style::new().fg(WARNING)),
     ]);
-    let count = state.engine.count_for_agent(state.agent_filter.as_deref());
+    let count_agent_filter = state.count_agent_filter();
+    let count = state.engine.count_for_agent(count_agent_filter.as_deref());
     let right = format!(
         "{} shown / {} indexed   {:.1}ms",
         state.visible.len(),
@@ -72,6 +73,9 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
     let prompt = Span::styled(" / ", Style::new().fg(ACCENT).bold());
     let mut spans = vec![prompt];
     spans.extend(search_query_spans(&state.query));
+    if let Some(suffix) = state.suggestion_suffix() {
+        spans.push(Span::styled(suffix, Style::new().fg(Color::DarkGray)));
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
     let cursor_x = inner.x + 3 + display_width_until(&state.query, state.cursor) as u16;
@@ -85,19 +89,20 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
+    let active_agents = state.active_agent_filters();
     let mut x = area.x;
     x = draw_filter_tab(
         frame,
         area,
         x,
         "All",
-        state.agent_filter.is_none(),
+        state.all_agent_filter_active(),
         Color::White,
         None,
     );
     for agent in AGENT_ORDER {
         let config = AGENTS.get(agent).expect("known agent");
-        let active = state.agent_filter.as_deref() == Some(agent);
+        let active = active_agents.iter().any(|active| active == agent);
         let icon = state
             .images
             .as_ref()

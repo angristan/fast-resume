@@ -260,6 +260,12 @@ mod tests {
         )
     }
 
+    fn type_query(state: &mut AppState, query: &str) {
+        for ch in query.chars() {
+            handle_key(state, key(KeyCode::Char(ch), KeyModifiers::NONE)).unwrap();
+        }
+    }
+
     #[test]
     fn plain_j_and_k_type_into_search() {
         let mut state = test_state(Vec::new());
@@ -310,6 +316,101 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('-'), KeyModifiers::ALT)).unwrap();
         assert_eq!(state.preview_scroll, 3);
         assert!(state.query.is_empty());
+    }
+
+    #[test]
+    fn tab_accepts_agent_suggestion_before_cycling_filter() {
+        let mut state = test_state(Vec::new());
+
+        type_query(&mut state, "agent:c");
+        assert_eq!(state.suggestion_suffix().as_deref(), Some("laude"));
+
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+
+        assert_eq!(state.query, "agent:claude");
+        assert_eq!(state.cursor, "agent:claude".chars().count());
+        assert_eq!(state.active_agent_filter().as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn tab_accepts_date_suggestion() {
+        let mut state = test_state(Vec::new());
+
+        type_query(&mut state, "date:y");
+
+        assert_eq!(state.suggestion_suffix().as_deref(), Some("esterday"));
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+
+        assert_eq!(state.query, "date:yesterday");
+    }
+
+    #[test]
+    fn tab_cycles_filter_into_query_when_there_is_no_suggestion() {
+        let mut state = test_state(Vec::new());
+
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+
+        assert_eq!(state.query, "agent:claude");
+        assert_eq!(state.active_agent_filter().as_deref(), Some("claude"));
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.query, "agent:claude");
+        assert_eq!(request.agent_filter, None);
+    }
+
+    #[test]
+    fn deleting_cycled_filter_keyword_clears_filter() {
+        let mut state = test_state(Vec::new());
+
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+        for _ in 0.."agent:claude".chars().count() {
+            handle_key(&mut state, key(KeyCode::Backspace, KeyModifiers::NONE)).unwrap();
+        }
+
+        assert!(state.query.is_empty());
+        assert_eq!(state.active_agent_filter(), None);
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.agent_filter, None);
+    }
+
+    #[test]
+    fn reverse_filter_cycle_removes_agent_keyword_for_all() {
+        let mut state = test_state(Vec::new());
+
+        type_query(&mut state, "api agent:claude");
+        handle_key(&mut state, key(KeyCode::BackTab, KeyModifiers::SHIFT)).unwrap();
+
+        assert_eq!(state.query, "api");
+        assert_eq!(state.active_agent_filter(), None);
+    }
+
+    #[test]
+    fn typed_agent_keyword_syncs_filter_without_overriding_query_filter() {
+        let mut state = test_state(Vec::new());
+
+        type_query(&mut state, "agent:claude,codex");
+
+        assert_eq!(state.active_agent_filter(), None);
+        assert_eq!(
+            state.active_agent_filters(),
+            vec!["claude".to_string(), "codex".to_string()]
+        );
+        assert!(!state.all_agent_filter_active());
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.query, "agent:claude,codex");
+        assert_eq!(request.agent_filter, None);
+    }
+
+    #[test]
+    fn negated_agent_keyword_does_not_activate_all_filter() {
+        let mut state = test_state(Vec::new());
+
+        type_query(&mut state, "-agent:claude");
+
+        assert!(state.active_agent_filters().is_empty());
+        assert!(!state.all_agent_filter_active());
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.query, "-agent:claude");
+        assert_eq!(request.agent_filter, None);
     }
 
     #[test]

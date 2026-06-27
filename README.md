@@ -175,7 +175,7 @@ Options:
 | `Ctrl+P`            | Toggle preview pane                  |
 | `Alt`+`+` / `Alt`+`-` | Scroll preview pane                  |
 | Mouse wheel         | Scroll list or preview under pointer |
-| `Tab` / `Shift+Tab` | Cycle agent filter                   |
+| `Tab` / `Shift+Tab` | Accept suggestion or cycle agent filter |
 | `Ctrl+Y`            | Copy full resume command to clipboard |
 | `Esc` / `Ctrl+C`    | Quit                                 |
 
