@@ -305,7 +305,7 @@ impl SessionIndex {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
+    use chrono::{Datelike, Local, Timelike};
     use tempfile::tempdir;
 
     use super::*;
@@ -401,5 +401,31 @@ mod tests {
         let results = index.search("authentcation", None, None, 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].session.id, "a");
+    }
+
+    #[test]
+    fn stats_include_content_bytes_and_activity_buckets() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        let session = session(
+            "a",
+            "codex",
+            "Stats test",
+            "/work/api",
+            "content bytes are counted",
+        );
+        let weekday = session.timestamp.weekday().to_string();
+        let hour = session.timestamp.hour();
+        let content_len = session.content.len() as u64;
+        index.update_sessions(&[session]).unwrap();
+
+        let stats = index.stats().unwrap();
+
+        assert_eq!(
+            stats.content_bytes_by_agent.get("codex"),
+            Some(&content_len)
+        );
+        assert_eq!(stats.sessions_by_weekday.get(&weekday), Some(&1));
+        assert_eq!(stats.sessions_by_hour.get(&hour), Some(&1));
     }
 }

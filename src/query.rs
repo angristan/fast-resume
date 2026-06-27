@@ -85,7 +85,7 @@ pub fn parse_query(query: &str) -> ParsedQuery {
             .unwrap_or_default();
 
         match keyword {
-            "agent" => agent = Some(parse_filter_value(value, negated)),
+            "agent" => agent = Some(parse_agent_filter_value(value, negated)),
             "dir" => directory = Some(parse_filter_value(value, negated)),
             "date" => date = parse_date_value(value, negated),
             _ => {}
@@ -101,6 +101,21 @@ pub fn parse_query(query: &str) -> ParsedQuery {
         directory,
         date,
     }
+}
+
+fn parse_agent_filter_value(value: &str, negated: bool) -> Filter {
+    let mut filter = parse_filter_value(value, negated);
+    filter.include = filter
+        .include
+        .into_iter()
+        .map(|agent| agent.to_ascii_lowercase())
+        .collect();
+    filter.exclude = filter
+        .exclude
+        .into_iter()
+        .map(|agent| agent.to_ascii_lowercase())
+        .collect();
+    filter
 }
 
 fn parse_filter_value(value: &str, negated: bool) -> Filter {
@@ -225,6 +240,15 @@ mod tests {
         assert_eq!(agent.exclude, vec!["codex"]);
         let dir = parsed.directory.unwrap();
         assert_eq!(dir.exclude, vec!["test"]);
+        assert_eq!(parsed.text, "api");
+    }
+
+    #[test]
+    fn normalizes_agent_filter_values() {
+        let parsed = parse_query("agent:Claude,!CoDex api");
+        let agent = parsed.agent.unwrap();
+        assert_eq!(agent.include, vec!["claude"]);
+        assert_eq!(agent.exclude, vec!["codex"]);
         assert_eq!(parsed.text, "api");
     }
 

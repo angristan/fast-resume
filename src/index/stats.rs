@@ -11,6 +11,7 @@ pub struct IndexStats {
     pub total_messages: usize,
     pub sessions_by_agent: BTreeMap<String, usize>,
     pub messages_by_agent: BTreeMap<String, usize>,
+    pub content_bytes_by_agent: BTreeMap<String, u64>,
     pub top_directories: Vec<(String, usize, usize)>,
     pub oldest: Option<DateTime<Local>>,
     pub newest: Option<DateTime<Local>>,
@@ -39,6 +40,10 @@ pub(super) fn build(sessions: Vec<Session>, path: &Path) -> IndexStats {
             .messages_by_agent
             .entry(session.agent.clone())
             .or_default() += session.message_count;
+        *stats
+            .content_bytes_by_agent
+            .entry(session.agent.clone())
+            .or_default() += session.content.len() as u64;
 
         let dir = if session.directory.is_empty() {
             "n/a".to_string()

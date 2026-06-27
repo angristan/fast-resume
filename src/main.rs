@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
+use fast_resume::adapters::all_adapters;
 use fast_resume::config::{VERSION, index_dir, is_agent};
 use fast_resume::index::SessionIndex;
 use fast_resume::search::SearchEngine;
@@ -94,7 +95,11 @@ fn main() -> Result<()> {
 
     if args.stats {
         let index = refreshed_index()?;
-        print_stats(&index.stats()?);
+        let raw_stats: Vec<_> = all_adapters()
+            .into_iter()
+            .map(|adapter| adapter.raw_stats())
+            .collect();
+        print_stats(&index.stats()?, &raw_stats);
         return Ok(());
     }
 

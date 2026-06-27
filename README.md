@@ -205,17 +205,15 @@ Index Statistics
 
 Data by Agent
 
-┌────────────────┬───────┬──────────┬──────────┬──────────┬──────────┬─────────────┐
-│ Agent          │ Files │     Disk │ Sessions │ Messages │  Content │ Data Dir    │
-├────────────────┼───────┼──────────┼──────────┼──────────┼──────────┼─────────────┤
-│ claude         │   477 │ 312.9 MB │      377 │   10,415 │   3.1 MB │ ~/.claude/… │
-│ copilot-vscode │   191 │ 146.0 MB │      189 │      954 │   1.4 MB │ ~/Library/… │
-│ codex          │   107 │  23.6 MB │       89 │      321 │ 890.6 kB │ ~/.codex/…  │
-│ opencode       │  9275 │  46.3 MB │       72 │    1,912 │ 597.7 kB │ ~/.local/…  │
-│ vibe           │    12 │ 858.2 kB │       12 │      138 │ 380.0 kB │ ~/.vibe/…   │
-│ crush          │     3 │   1.0 MB │        7 │       44 │  15.2 kB │ ~/.local/…  │
-│ copilot-cli    │     5 │ 417.1 kB │        5 │       15 │   6.9 kB │ ~/.copilot… │
-└────────────────┴───────┴──────────┴──────────┴──────────┴──────────┴─────────────┘
+Agent              Files       Disk   Sessions   Messages    Content  Data Dir
+---------------------------------------------------------------------------------------------
+claude               477   312.9 MB        377      10415     3.1 MB  ~/.claude/projects
+copilot-vscode       191   146.0 MB        189        954     1.4 MB  ~/Library/Application Sup...
+codex                107    23.6 MB         89        321   890.6 KB  ~/.codex/sessions
+opencode            9275    46.3 MB         72       1912   597.7 KB  ~/.local/share/opencode
+vibe                  12   858.2 KB         12        138   380.0 KB  ~/.vibe/logs/session
+crush                  3     1.0 MB          7         44    15.2 KB  ~/.local/share/crush
+copilot-cli            5   417.1 KB          5         15     6.9 KB  ~/.copilot/session-state
 
 Activity by Day
 
@@ -234,14 +232,12 @@ Activity by Hour
 
 Top Directories
 
-┌───────────────────────┬──────────┬──────────┐
-│ Directory             │ Sessions │ Messages │
-├───────────────────────┼──────────┼──────────┤
-│ ~/git/openvpn-install │      234 │    5,597 │
-│ ~/lab/larafeed        │      158 │    2,590 │
-│ ~/lab/fast-resume     │       81 │    2,027 │
-│ ...                   │          │          │
-└───────────────────────┴──────────┴──────────┘
+Directory                                                 Sessions  Messages
+------------------------------------------------------------------------------
+~/git/openvpn-install                                          234      5597
+~/lab/larafeed                                                 158      2590
+~/lab/fast-resume                                               81      2027
+...
 ```
 
 ## How It Works
@@ -363,15 +359,17 @@ This ensures exact matches rank first while still finding typos like `auth midle
 **Query lifecycle:**
 
 ```
-┌─────────────┐   50ms    ┌─────────────┐  background  ┌─────────────┐
-│  Keystroke  │ ────────► │  Debounce   │ ───────────► │   Worker    │
-└─────────────┘  timer    └─────────────┘   thread     └──────┬──────┘
+┌─────────────┐ immediate ┌─────────────┐  background  ┌─────────────┐
+│  Keystroke  │ ────────► │   Render    │ ───────────► │   Worker    │
+└─────────────┘  input    └─────────────┘   search     └──────┬──────┘
                                                               │
                           ┌─────────────┐              ┌──────▼──────┐
-                          │   Render    │ ◄─────────── │   Tantivy   │
-                          │   Table     │   results    │    Query    │
+                          │ Apply latest│ ◄─────────── │   Tantivy   │
+                          │ generation  │   results    │    Query    │
                           └─────────────┘              └─────────────┘
 ```
+
+Typing stays decoupled from search work: every edit updates the input immediately, starts a background search, and ignores stale results when a newer query has already been typed.
 
 ### TUI
 
@@ -431,7 +429,7 @@ Why fast-resume feels instant:
 - **Tantivy**: Native Rust full-text search over 10k+ sessions in <10ms
 - **Incremental updates**: Only re-parse files where `mtime` changed. Second launch with no changes: ~50ms total
 - **Parallel adapters**: Adapters run concurrently. Total time = slowest adapter, not sum
-- **Debounced search**: 50ms debounce prevents wasteful searches while typing
+- **Immediate search**: keystrokes redraw immediately while background search results are cancelled by generation
 - **Background workers**: Index refresh runs off the UI thread
 - **Streaming results**: Sessions appear as each adapter completes, not after all finish
 

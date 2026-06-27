@@ -55,7 +55,7 @@ pub(super) fn build(
 fn text_query(index: &Index, fields: IndexFields, search_text: &str) -> Result<Box<dyn Query>> {
     let parser =
         QueryParser::for_index(index, vec![fields.title, fields.content, fields.directory]);
-    let exact = parser.parse_query(search_text)?;
+    let (exact, _) = parser.parse_query_lenient(search_text);
     let boosted_exact = BoostQuery::new(exact, 5.0);
 
     let mut alternatives: Vec<(Occur, Box<dyn Query>)> =

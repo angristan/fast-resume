@@ -94,4 +94,43 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "a");
     }
+
+    #[test]
+    fn normalizes_typed_agent_filter_case() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .rebuild(vec![
+                session("a", "claude", "Auth bug", "/work/api", "token"),
+                session("b", "codex", "Other", "/work/frontend", "button"),
+            ])
+            .unwrap();
+        let engine = SearchEngine::from_index(index);
+
+        let results = engine.search("agent:CoDeX button", None, None, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "b");
+    }
+
+    #[test]
+    fn malformed_text_query_still_returns_lenient_matches() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .rebuild(vec![session(
+                "a",
+                "codex",
+                "Fast resume search",
+                "/work/fast-resume",
+                "fast resume should keep matching while a quote is half typed",
+            )])
+            .unwrap();
+        let engine = SearchEngine::from_index(index);
+
+        let results = engine.search("\"fast", None, None, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "a");
+    }
 }
