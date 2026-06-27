@@ -53,6 +53,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
 }
 
 fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<TuiExit>> {
+    state.ensure_current_search();
     let Some(session) = state.selected_session().cloned() else {
         return Ok(None);
     };

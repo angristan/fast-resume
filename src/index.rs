@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tantivy::collector::{Count, TopDocs};
@@ -34,9 +35,10 @@ pub struct RefreshSummary {
     pub deleted: usize,
 }
 
+#[derive(Clone)]
 pub struct SessionIndex {
     index: Index,
-    reader: IndexReader,
+    reader: Arc<IndexReader>,
     path: PathBuf,
     fields: schema::IndexFields,
 }
@@ -72,7 +74,7 @@ impl SessionIndex {
             .try_into()?;
         Ok(Self {
             index,
-            reader,
+            reader: Arc::new(reader),
             path,
             fields,
         })

@@ -1,5 +1,5 @@
 use std::io::{self, Stdout};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::index::{INDEX_REFRESH_BATCH_SIZE, SessionIndex};
+use crate::model::Session;
 use crate::search::SearchEngine;
 
 mod images;
@@ -24,7 +25,7 @@ mod text;
 use images::AgentImages;
 use input::handle_key;
 use render::draw;
-use state::{AppState, ScanMessage, handle_scan_message};
+use state::{AppState, ScanMessage, SearchRequest, handle_scan_message};
 
 pub use images::ImageProtocol;
 
@@ -81,6 +82,7 @@ fn run_loop(
     state: &mut AppState,
     scan_rx: Receiver<ScanMessage>,
 ) -> Result<TuiExit> {
+    let (search_tx, search_rx) = mpsc::channel::<SearchResult>();
     let mut needs_draw = true;
     loop {
         let mut latest_scan_message = None;
@@ -96,6 +98,12 @@ fn run_loop(
             needs_draw = true;
         }
 
+        while let Ok(result) = search_rx.try_recv() {
+            if state.apply_search_result(result.generation, result.visible, result.elapsed_ms) {
+                needs_draw = true;
+            }
+        }
+
         if needs_draw {
             terminal.draw(|frame| draw(frame, state))?;
             needs_draw = false;
@@ -107,6 +115,7 @@ fn run_loop(
                     if let Some(exit) = handle_key(state, key)? {
                         return Ok(exit);
                     }
+                    start_search_if_requested(state, &search_tx);
                     needs_draw = true;
                 }
                 Event::Resize(_, _) => {
@@ -117,6 +126,32 @@ fn run_loop(
             }
         }
     }
+}
+
+struct SearchResult {
+    generation: u64,
+    visible: Vec<Session>,
+    elapsed_ms: f64,
+}
+
+fn start_search_if_requested(state: &mut AppState, tx: &Sender<SearchResult>) {
+    let Some(request) = state.take_search_request() else {
+        return;
+    };
+    spawn_search(state.engine.clone(), request, tx.clone());
+}
+
+fn spawn_search(engine: SearchEngine, request: SearchRequest, tx: Sender<SearchResult>) {
+    thread::spawn(move || {
+        let start = Instant::now();
+        let visible = engine.search(&request.query, request.agent_filter.as_deref(), None, 100);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let _ = tx.send(SearchResult {
+            generation: request.generation,
+            visible,
+            elapsed_ms,
+        });
+    });
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
@@ -199,5 +234,49 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('k'), KeyModifiers::CONTROL)).unwrap();
         assert_eq!(state.selected, 0);
         assert!(state.query.is_empty());
+    }
+
+    #[test]
+    fn typing_requests_search_without_blocking_visible_results() {
+        let mut state = test_state(vec![session("a")]);
+
+        handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
+
+        assert_eq!(state.query, "z");
+        assert_eq!(state.visible.len(), 1);
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.query, "z");
+        assert_eq!(request.agent_filter, None);
+        assert!(state.take_search_request().is_none());
+    }
+
+    #[test]
+    fn stale_search_results_are_ignored() {
+        let mut state = test_state(vec![session("a")]);
+
+        handle_key(&mut state, key(KeyCode::Char('a'), KeyModifiers::NONE)).unwrap();
+        let stale = state.take_search_request().unwrap();
+        handle_key(&mut state, key(KeyCode::Char('b'), KeyModifiers::NONE)).unwrap();
+        let latest = state.take_search_request().unwrap();
+
+        assert!(!state.apply_search_result(stale.generation, Vec::new(), 10.0));
+        assert_eq!(state.visible.len(), 1);
+        assert!(state.apply_search_result(latest.generation, Vec::new(), 1.0));
+        assert!(state.visible.is_empty());
+    }
+
+    #[test]
+    fn actions_force_current_search_before_using_selection() {
+        let mut state = test_state(vec![session("a")]);
+
+        handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
+        let stale = state.take_search_request().unwrap();
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+
+        assert!(exit.is_none());
+        assert!(state.visible.is_empty());
+        assert!(state.modal.is_none());
+        assert!(!state.apply_search_result(stale.generation, vec![session("stale")], 10.0));
+        assert!(state.visible.is_empty());
     }
 }

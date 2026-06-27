@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::index::SessionIndex;
 use crate::model::Session;
 
+#[derive(Clone)]
 pub struct SearchEngine {
     index: SessionIndex,
 }

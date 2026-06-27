@@ -22,6 +22,12 @@ pub(super) enum ScanMessage {
     },
 }
 
+pub(super) struct SearchRequest {
+    pub(super) generation: u64,
+    pub(super) query: String,
+    pub(super) agent_filter: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) enum PendingAction {
     Resume,
@@ -49,6 +55,9 @@ pub(super) struct AppState {
     pub(super) show_preview: bool,
     pub(super) modal: Option<YoloModal>,
     pub(super) images: Option<AgentImages>,
+    search_generation: u64,
+    applied_search_generation: u64,
+    search_requested: bool,
 }
 
 impl AppState {
@@ -74,12 +83,18 @@ impl AppState {
             show_preview: true,
             modal: None,
             images,
+            search_generation: 0,
+            applied_search_generation: 0,
+            search_requested: false,
         };
         state.refresh_search();
         state
     }
 
     pub(super) fn refresh_search(&mut self) {
+        self.search_requested = false;
+        self.search_generation = self.search_generation.saturating_add(1);
+        self.applied_search_generation = self.search_generation;
         let start = Instant::now();
         self.visible = self
             .engine
@@ -91,6 +106,50 @@ impl AppState {
             self.selected = self.selected.min(self.visible.len() - 1);
         }
         self.preview_scroll = 0;
+    }
+
+    pub(super) fn request_search(&mut self) {
+        self.search_requested = true;
+    }
+
+    pub(super) fn take_search_request(&mut self) -> Option<SearchRequest> {
+        if !self.search_requested {
+            return None;
+        }
+        self.search_requested = false;
+        self.search_generation = self.search_generation.saturating_add(1);
+        Some(SearchRequest {
+            generation: self.search_generation,
+            query: self.query.clone(),
+            agent_filter: self.agent_filter.clone(),
+        })
+    }
+
+    pub(super) fn apply_search_result(
+        &mut self,
+        generation: u64,
+        visible: Vec<Session>,
+        elapsed_ms: f64,
+    ) -> bool {
+        if generation != self.search_generation {
+            return false;
+        }
+        self.visible = visible;
+        self.last_search_ms = elapsed_ms;
+        self.applied_search_generation = generation;
+        if self.visible.is_empty() {
+            self.selected = 0;
+        } else {
+            self.selected = self.selected.min(self.visible.len() - 1);
+        }
+        self.preview_scroll = 0;
+        true
+    }
+
+    pub(super) fn ensure_current_search(&mut self) {
+        if self.search_requested || self.applied_search_generation != self.search_generation {
+            self.refresh_search();
+        }
     }
 
     pub(super) fn selected_session(&self) -> Option<&Session> {
@@ -125,14 +184,14 @@ impl AppState {
         } else {
             Some(AGENT_ORDER[next - 1].to_string())
         };
-        self.refresh_search();
+        self.request_search();
     }
 
     pub(super) fn insert_char(&mut self, ch: char) {
         let byte_idx = char_to_byte_idx(&self.query, self.cursor);
         self.query.insert(byte_idx, ch);
         self.cursor += 1;
-        self.refresh_search();
+        self.request_search();
     }
 
     pub(super) fn backspace(&mut self) {
@@ -143,7 +202,7 @@ impl AppState {
         let end = char_to_byte_idx(&self.query, self.cursor);
         self.query.replace_range(start..end, "");
         self.cursor -= 1;
-        self.refresh_search();
+        self.request_search();
     }
 
     pub(super) fn delete(&mut self) {
@@ -153,7 +212,7 @@ impl AppState {
         let start = char_to_byte_idx(&self.query, self.cursor);
         let end = char_to_byte_idx(&self.query, self.cursor + 1);
         self.query.replace_range(start..end, "");
-        self.refresh_search();
+        self.request_search();
     }
 }
 
