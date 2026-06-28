@@ -89,7 +89,7 @@ fn run_loop(
     state: &mut AppState,
     scan_rx: Receiver<ScanMessage>,
 ) -> Result<TuiExit> {
-    let (search_tx, search_rx) = mpsc::channel::<SearchResult>();
+    let (search_tx, search_rx) = spawn_search_worker(state.engine.clone());
     let mut needs_draw = true;
     loop {
         let mut latest_scan_message = None;
@@ -148,29 +148,51 @@ struct SearchResult {
     elapsed_ms: f64,
 }
 
-fn start_search_if_requested(state: &mut AppState, tx: &Sender<SearchResult>) {
+fn start_search_if_requested(state: &mut AppState, tx: &Sender<SearchRequest>) {
     let Some(request) = state.take_search_request() else {
         return;
     };
-    spawn_search(state.engine.clone(), request, tx.clone());
+    let _ = tx.send(request);
 }
 
-fn spawn_search(engine: SearchEngine, request: SearchRequest, tx: Sender<SearchResult>) {
+fn spawn_search_worker(engine: SearchEngine) -> (Sender<SearchRequest>, Receiver<SearchResult>) {
+    let (request_tx, request_rx) = mpsc::channel::<SearchRequest>();
+    let (result_tx, result_rx) = mpsc::channel::<SearchResult>();
     thread::spawn(move || {
-        let start = Instant::now();
-        let visible = engine.search(
-            &request.query,
-            request.agent_filter.as_deref(),
-            request.directory_filter.as_deref(),
-            100,
-        );
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let _ = tx.send(SearchResult {
-            generation: request.generation,
-            visible,
-            elapsed_ms,
-        });
+        while let Ok(request) = request_rx.recv() {
+            let result = run_search(&engine, latest_search_request(&request_rx, request));
+            if result_tx.send(result).is_err() {
+                break;
+            }
+        }
     });
+    (request_tx, result_rx)
+}
+
+fn latest_search_request(
+    request_rx: &Receiver<SearchRequest>,
+    mut request: SearchRequest,
+) -> SearchRequest {
+    while let Ok(latest) = request_rx.try_recv() {
+        request = latest;
+    }
+    request
+}
+
+fn run_search(engine: &SearchEngine, request: SearchRequest) -> SearchResult {
+    let start = Instant::now();
+    let visible = engine.search(
+        &request.query,
+        request.agent_filter.as_deref(),
+        request.directory_filter.as_deref(),
+        100,
+    );
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    SearchResult {
+        generation: request.generation,
+        visible,
+        elapsed_ms,
+    }
 }
 
 const MOUSE_SCROLL_LINES: isize = 3;
@@ -226,7 +248,7 @@ mod tests {
     use crate::search::SearchEngine;
 
     use super::input::handle_key;
-    use super::state::AppState;
+    use super::state::{AppState, SearchRequest};
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
@@ -238,6 +260,15 @@ mod tests {
             column,
             row,
             modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn search_request(generation: u64, query: &str) -> SearchRequest {
+        SearchRequest {
+            generation,
+            query: query.to_string(),
+            agent_filter: None,
+            directory_filter: None,
         }
     }
 
@@ -259,6 +290,18 @@ mod tests {
 
     fn test_state(sessions: Vec<Session>) -> AppState {
         test_state_with_directory_filter(sessions, None)
+    }
+
+    #[test]
+    fn pending_search_requests_coalesce_to_latest() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(search_request(2, "second")).unwrap();
+        tx.send(search_request(3, "third")).unwrap();
+
+        let latest = super::latest_search_request(&rx, search_request(1, "first"));
+
+        assert_eq!(latest.generation, 3);
+        assert_eq!(latest.query, "third");
     }
 
     fn test_state_with_directory_filter(
