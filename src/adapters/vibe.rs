@@ -295,6 +295,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_fractional_naive_start_time() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = sessions_dir.join("session_alpha");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("meta.json"),
+            json!({
+                "session_id": "vibe-1",
+                "environment": {"working_directory": "/work/vibe"},
+                "start_time": "2025-01-10T14:00:00.123456"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("messages.jsonl"),
+            &[json!({"role": "user", "content": "Fractional timestamp"})],
+        );
+
+        let adapter = VibeAdapter { sessions_dir };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0]
+                .timestamp
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string(),
+            "2025-01-10T14:00:00.123456"
+        );
+    }
+
+    #[test]
     fn incremental_refresh_uses_messages_mtime() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");

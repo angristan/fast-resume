@@ -195,12 +195,7 @@ pub(super) fn parse_timestamp_seconds(value: &str) -> Option<f64> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9)
         .ok()
-        .or_else(|| {
-            NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
-                .ok()
-                .and_then(|dt| Local.from_local_datetime(&dt).single())
-                .map(datetime_to_seconds)
-        })
+        .or_else(|| parse_naive_local_datetime(value).map(datetime_to_seconds))
 }
 
 pub(super) fn datetime_to_seconds(timestamp: DateTime<Local>) -> f64 {
@@ -214,11 +209,14 @@ pub(super) fn parse_datetime(value: &str) -> Option<DateTime<Local>> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Local))
         .ok()
-        .or_else(|| {
-            NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
-                .ok()
-                .and_then(|dt| Local.from_local_datetime(&dt).single())
-        })
+        .or_else(|| parse_naive_local_datetime(value))
+}
+
+fn parse_naive_local_datetime(value: &str) -> Option<DateTime<Local>> {
+    ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S"]
+        .iter()
+        .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
+        .and_then(|dt| Local.from_local_datetime(&dt).single())
 }
 
 pub(super) fn timestamp_from_ms(value: Option<i64>) -> Option<DateTime<Local>> {
