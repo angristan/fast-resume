@@ -20,6 +20,7 @@ const ACCENT: Color = Color::Rgb(224, 150, 70);
 const PANEL_BORDER: Color = Color::Rgb(70, 80, 95);
 const SELECTED_BG: Color = Color::Rgb(68, 52, 34);
 const WARNING: Color = Color::Rgb(240, 180, 80);
+const SEARCH_PLACEHOLDER: &str = "Search titles & messages. Try agent:claude or date:today";
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
@@ -66,15 +67,25 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(ACCENT))
-        .title(" Search titles and messages ");
+        .title(" Search ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let prompt = Span::styled(" / ", Style::new().fg(ACCENT).bold());
     let mut spans = vec![prompt];
-    spans.extend(search_query_spans(&state.query));
-    if let Some(suffix) = state.suggestion_suffix() {
-        spans.push(Span::styled(suffix, Style::new().fg(Color::DarkGray)));
+    if state.query.is_empty() {
+        let width = inner.width.saturating_sub(3) as usize;
+        if width > 0 {
+            spans.push(Span::styled(
+                truncate(SEARCH_PLACEHOLDER, width),
+                Style::new().fg(Color::DarkGray).italic(),
+            ));
+        }
+    } else {
+        spans.extend(search_query_spans(&state.query));
+        if let Some(suffix) = state.suggestion_suffix() {
+            spans.push(Span::styled(suffix, Style::new().fg(Color::DarkGray)));
+        }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
