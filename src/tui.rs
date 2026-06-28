@@ -213,6 +213,10 @@ fn run_search(engine: &mut SearchEngine, request: SearchRequest) -> SearchResult
 const MOUSE_SCROLL_LINES: isize = 3;
 
 fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
+    if state.modal.is_some() {
+        return false;
+    }
+
     let delta = match mouse.kind {
         MouseEventKind::ScrollUp => -MOUSE_SCROLL_LINES,
         MouseEventKind::ScrollDown => MOUSE_SCROLL_LINES,
@@ -581,6 +585,22 @@ mod tests {
         assert!(!super::handle_mouse(
             &mut state,
             mouse(MouseEventKind::ScrollDown, 10, 1),
+            Rect::new(0, 0, 120, 40),
+        ));
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.preview_scroll, 0);
+    }
+
+    #[test]
+    fn mouse_wheel_is_ignored_while_modal_is_open() {
+        let mut state = test_state((0..10).map(|idx| session(&idx.to_string())).collect());
+        handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+        assert!(state.modal.is_some());
+
+        assert!(!super::handle_mouse(
+            &mut state,
+            mouse(MouseEventKind::ScrollDown, 10, 6),
             Rect::new(0, 0, 120, 40),
         ));
 
