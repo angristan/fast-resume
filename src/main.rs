@@ -65,10 +65,6 @@ struct Args {
     /// Force a terminal image protocol for --images.
     #[arg(long, value_enum, default_value_t = ImageProtocolArg::Auto)]
     image_protocol: ImageProtocolArg,
-
-    /// Accepted for CLI compatibility; update distribution checks are ignored in the Rust rewrite.
-    #[arg(long)]
-    no_version_check: bool,
 }
 
 fn main() -> Result<()> {
