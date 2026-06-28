@@ -336,7 +336,7 @@ Most adapters keep the index focused on actual conversation text. Crush also ind
 
 1. Load known sessions from Tantivy index with their `mtime` values
 2. Scan session files, compare mtimes against known values
-3. Only parse files where `current_mtime > known_mtime + 0.001`
+3. Only parse files where `abs(current_mtime - known_mtime) > 0.001`
 4. Detect deleted sessions (in index but not on disk)
 5. Apply changes atomically: delete removed, upsert modified
 
