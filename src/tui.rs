@@ -547,4 +547,30 @@ mod tests {
         assert!(!state.apply_search_result(stale.generation, vec![session("stale")], 10.0));
         assert!(state.visible.is_empty());
     }
+
+    #[test]
+    fn yolo_modal_confirms_original_session_after_selection_changes() {
+        let mut state = test_state(vec![session("a"), session("b")]);
+        let original_id = state.selected_session().unwrap().id.clone();
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+        assert!(exit.is_none());
+        assert_eq!(state.modal.as_ref().unwrap().session.id, original_id);
+
+        state.selected = if state.selected == 0 { 1 } else { 0 };
+        let exit = handle_key(&mut state, key(KeyCode::Char('y'), KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        match exit {
+            super::TuiExit::Resume { command, directory } => {
+                assert_eq!(
+                    command.last().map(String::as_str),
+                    Some(original_id.as_str())
+                );
+                assert_eq!(directory, "/tmp/fast-resume");
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
 }

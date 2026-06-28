@@ -41,6 +41,7 @@ pub(super) enum PendingAction {
 #[derive(Debug, Clone)]
 pub(super) struct YoloModal {
     pub(super) action: PendingAction,
+    pub(super) session: Session,
     pub(super) selected: bool,
 }
 

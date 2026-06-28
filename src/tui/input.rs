@@ -77,11 +77,12 @@ fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<Tu
         .as_ref()
         .is_some_and(|adapter| adapter.supports_yolo());
     if state.yolo || session.yolo || !supports_yolo {
-        return finish_action(state, action, state.yolo || session.yolo);
+        return finish_action(state, action, state.yolo || session.yolo, session);
     }
 
     state.modal = Some(YoloModal {
         action,
+        session,
         selected: false,
     });
     Ok(None)
@@ -99,19 +100,22 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExi
         }
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             let action = modal.action;
+            let session = modal.session.clone();
             state.modal = None;
-            return finish_action(state, action, true);
+            return finish_action(state, action, true, session);
         }
         KeyCode::Char('n') | KeyCode::Char('N') => {
             let action = modal.action;
+            let session = modal.session.clone();
             state.modal = None;
-            return finish_action(state, action, false);
+            return finish_action(state, action, false, session);
         }
         KeyCode::Enter => {
             let yolo = modal.selected;
             let action = modal.action;
+            let session = modal.session.clone();
             state.modal = None;
-            return finish_action(state, action, yolo);
+            return finish_action(state, action, yolo, session);
         }
         _ => {}
     }
@@ -123,10 +127,8 @@ fn finish_action(
     state: &mut AppState,
     action: PendingAction,
     yolo: bool,
+    session: crate::model::Session,
 ) -> Result<Option<TuiExit>> {
-    let Some(session) = state.selected_session().cloned() else {
-        return Ok(None);
-    };
     let Some(adapter) = adapter_for(&session.agent) else {
         state.status = "No resume command available for selected session".to_string();
         return Ok(None);
