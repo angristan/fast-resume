@@ -11,7 +11,7 @@ use crate::model::Session;
 
 use super::layout::{self, MainLayout};
 use super::preview::render_preview_lines;
-use super::state::{AppState, YoloModal};
+use super::state::{AppState, PendingAction, YoloModal};
 use super::text::{
     age_style, display_width_until, line_width, search_query_spans, time_ago, truncate,
 };
@@ -612,7 +612,7 @@ fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
     frame.render_widget(block, popup);
 
     let text = vec![
-        Line::from("Resume with auto-approve / skip-permissions flags?"),
+        Line::from(yolo_modal_prompt(modal.action)),
         Line::raw(""),
         Line::from(vec![
             button_span(" No ", !modal.selected),
@@ -622,6 +622,13 @@ fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
         .alignment(Alignment::Center),
     ];
     frame.render_widget(Paragraph::new(text).alignment(Alignment::Center), inner);
+}
+
+fn yolo_modal_prompt(action: PendingAction) -> &'static str {
+    match action {
+        PendingAction::Resume => "Resume with auto-approve / skip-permissions flags?",
+        PendingAction::Copy => "Copy command with auto-approve / skip-permissions flags?",
+    }
 }
 
 fn button_span(label: &'static str, selected: bool) -> Span<'static> {
@@ -660,6 +667,18 @@ mod tests {
 
         assert!(rendered.starts_with("clipboard"));
         assert!(!rendered.contains("Enter"));
+    }
+
+    #[test]
+    fn yolo_modal_prompt_matches_pending_action() {
+        assert_eq!(
+            yolo_modal_prompt(PendingAction::Resume),
+            "Resume with auto-approve / skip-permissions flags?"
+        );
+        assert_eq!(
+            yolo_modal_prompt(PendingAction::Copy),
+            "Copy command with auto-approve / skip-permissions flags?"
+        );
     }
 
     #[test]
