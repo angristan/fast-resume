@@ -213,24 +213,14 @@ fn load_opencode_db_incremental(
     known: &KnownSessions,
 ) -> IncrementalScan {
     let Ok(conn) = Connection::open(db_path) else {
-        return IncrementalScan {
-            agent,
-            new_or_modified: Vec::new(),
-            deleted_ids: deleted_ids_for_agent(known, agent, &HashSet::new()),
-        };
+        return opencode_db_error_scan(agent);
     };
 
     let mut stmt = match conn
         .prepare("SELECT id, title, directory, time_created, time_updated FROM session")
     {
         Ok(stmt) => stmt,
-        Err(_) => {
-            return IncrementalScan {
-                agent,
-                new_or_modified: Vec::new(),
-                deleted_ids: deleted_ids_for_agent(known, agent, &HashSet::new()),
-            };
-        }
+        Err(_) => return opencode_db_error_scan(agent),
     };
 
     let rows = match stmt.query_map([], |row| {
@@ -243,20 +233,16 @@ fn load_opencode_db_incremental(
         ))
     }) {
         Ok(rows) => rows,
-        Err(_) => {
-            return IncrementalScan {
-                agent,
-                new_or_modified: Vec::new(),
-                deleted_ids: deleted_ids_for_agent(known, agent, &HashSet::new()),
-            };
-        }
+        Err(_) => return opencode_db_error_scan(agent),
     };
 
     let mut current_ids = HashSet::new();
     let mut sessions_to_fetch = Vec::new();
     let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
-    for row in rows.filter_map(Result::ok) {
-        let (id, title, directory, time_created, time_updated) = row;
+    for row in rows {
+        let Ok((id, title, directory, time_created, time_updated)) = row else {
+            return opencode_db_error_scan(agent);
+        };
         current_ids.insert(id.clone());
         let timestamp_ms = time_created
             .max(time_updated)
@@ -370,6 +356,14 @@ fn load_opencode_db_incremental(
         agent,
         new_or_modified,
         deleted_ids,
+    }
+}
+
+fn opencode_db_error_scan(agent: &'static str) -> IncrementalScan {
+    IncrementalScan {
+        agent,
+        new_or_modified: Vec::new(),
+        deleted_ids: Vec::new(),
     }
 }
 
@@ -904,5 +898,38 @@ mod tests {
         let unchanged = adapter.find_sessions_incremental(&refreshed_known);
         assert!(unchanged.new_or_modified.is_empty());
         assert!(unchanged.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn sqlite_incremental_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        fs::create_dir(&db_path).unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir: data_dir.clone(),
+            db_path: db_path.clone(),
+            legacy_dir: temp.path().join("legacy"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "opencode-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+
+        fs::remove_dir(&db_path).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch("CREATE TABLE not_session (id TEXT PRIMARY KEY);")
+            .unwrap();
+        drop(conn);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }
