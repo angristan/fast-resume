@@ -113,7 +113,7 @@ fn main() -> Result<()> {
         Some(args.image_protocol.into())
     };
 
-    match run_tui(query, args.agent, args.yolo, image_protocol)? {
+    match run_tui(query, args.agent, args.directory, args.yolo, image_protocol)? {
         TuiExit::Quit => Ok(()),
         TuiExit::Resume { command, directory } => exec_resume(command, directory),
     }

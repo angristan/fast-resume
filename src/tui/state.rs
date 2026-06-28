@@ -29,6 +29,7 @@ pub(super) struct SearchRequest {
     pub(super) generation: u64,
     pub(super) query: String,
     pub(super) agent_filter: Option<String>,
+    pub(super) directory_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +52,7 @@ pub(super) struct AppState {
     pub(super) selected: usize,
     pub(super) preview_scroll: u16,
     pub(super) agent_filter: Option<String>,
+    pub(super) directory_filter: Option<String>,
     pub(super) yolo: bool,
     pub(super) scanning: bool,
     pub(super) status: String,
@@ -67,6 +69,7 @@ impl AppState {
     pub(super) fn new(
         query: String,
         agent_filter: Option<String>,
+        directory_filter: Option<String>,
         yolo: bool,
         engine: SearchEngine,
         images: Option<AgentImages>,
@@ -79,6 +82,7 @@ impl AppState {
             selected: 0,
             preview_scroll: 0,
             agent_filter,
+            directory_filter,
             yolo,
             scanning: true,
             status: "loading Tantivy index; refreshing session stores".to_string(),
@@ -100,9 +104,13 @@ impl AppState {
         self.applied_search_generation = self.search_generation;
         let start = Instant::now();
         let agent_filter = self.effective_agent_filter();
-        self.visible = self
-            .engine
-            .search(&self.query, agent_filter.as_deref(), None, 100);
+        let directory_filter = self.effective_directory_filter();
+        self.visible = self.engine.search(
+            &self.query,
+            agent_filter.as_deref(),
+            directory_filter.as_deref(),
+            100,
+        );
         self.last_search_ms = start.elapsed().as_secs_f64() * 1000.0;
         if self.visible.is_empty() {
             self.selected = 0;
@@ -126,6 +134,7 @@ impl AppState {
             generation: self.search_generation,
             query: self.query.clone(),
             agent_filter: self.effective_agent_filter(),
+            directory_filter: self.effective_directory_filter(),
         })
     }
 
@@ -292,6 +301,14 @@ impl AppState {
         }
     }
 
+    fn effective_directory_filter(&self) -> Option<String> {
+        if query_has_directory_filter(&self.query) {
+            None
+        } else {
+            self.directory_filter.clone()
+        }
+    }
+
     fn clear_explicit_filter_if_query_has_agent(&mut self) {
         if query_has_agent_filter(&self.query) {
             self.agent_filter = None;
@@ -338,6 +355,10 @@ fn normalize_agent(agent: String) -> Option<String> {
 
 fn query_has_agent_filter(query: &str) -> bool {
     parse_query(query).agent.is_some()
+}
+
+fn query_has_directory_filter(query: &str) -> bool {
+    parse_query(query).directory.is_some()
 }
 
 fn update_agent_in_query(query: &str, agent: Option<&str>) -> String {

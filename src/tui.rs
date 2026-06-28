@@ -46,6 +46,7 @@ pub enum TuiExit {
 pub fn run_tui(
     query: String,
     agent_filter: Option<String>,
+    directory_filter: Option<String>,
     yolo: bool,
     image_protocol: Option<ImageProtocol>,
 ) -> Result<TuiExit> {
@@ -77,7 +78,7 @@ pub fn run_tui(
 
     let mut terminal = setup_terminal()?;
     let images = image_protocol.and_then(AgentImages::load);
-    let mut state = AppState::new(query, agent_filter, yolo, engine, images);
+    let mut state = AppState::new(query, agent_filter, directory_filter, yolo, engine, images);
     let result = run_loop(&mut terminal, &mut state, scan_rx);
     restore_terminal(&mut terminal)?;
     result
@@ -157,7 +158,12 @@ fn start_search_if_requested(state: &mut AppState, tx: &Sender<SearchResult>) {
 fn spawn_search(engine: SearchEngine, request: SearchRequest, tx: Sender<SearchResult>) {
     thread::spawn(move || {
         let start = Instant::now();
-        let visible = engine.search(&request.query, request.agent_filter.as_deref(), None, 100);
+        let visible = engine.search(
+            &request.query,
+            request.agent_filter.as_deref(),
+            request.directory_filter.as_deref(),
+            100,
+        );
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         let _ = tx.send(SearchResult {
             generation: request.generation,
@@ -236,11 +242,15 @@ mod tests {
     }
 
     fn session(id: &str) -> Session {
+        session_in(id, "/tmp/fast-resume")
+    }
+
+    fn session_in(id: &str, directory: &str) -> Session {
         Session::new(
             id,
             "codex",
             format!("Session {id}"),
-            "/tmp/fast-resume",
+            directory,
             Local::now(),
             "message",
             1,
@@ -248,6 +258,13 @@ mod tests {
     }
 
     fn test_state(sessions: Vec<Session>) -> AppState {
+        test_state_with_directory_filter(sessions, None)
+    }
+
+    fn test_state_with_directory_filter(
+        sessions: Vec<Session>,
+        directory_filter: Option<String>,
+    ) -> AppState {
         let temp = tempdir().unwrap();
         let path = temp.keep();
         let index = SessionIndex::open(path.join("index")).unwrap();
@@ -255,6 +272,7 @@ mod tests {
         AppState::new(
             String::new(),
             None,
+            directory_filter,
             false,
             SearchEngine::from_index(index),
             None,
@@ -356,6 +374,7 @@ mod tests {
         let request = state.take_search_request().unwrap();
         assert_eq!(request.query, "agent:claude");
         assert_eq!(request.agent_filter, None);
+        assert_eq!(request.directory_filter, None);
     }
 
     #[test]
@@ -371,6 +390,7 @@ mod tests {
         assert_eq!(state.active_agent_filter(), None);
         let request = state.take_search_request().unwrap();
         assert_eq!(request.agent_filter, None);
+        assert_eq!(request.directory_filter, None);
     }
 
     #[test]
@@ -399,6 +419,7 @@ mod tests {
         let request = state.take_search_request().unwrap();
         assert_eq!(request.query, "agent:claude,codex");
         assert_eq!(request.agent_filter, None);
+        assert_eq!(request.directory_filter, None);
     }
 
     #[test]
@@ -412,6 +433,32 @@ mod tests {
         let request = state.take_search_request().unwrap();
         assert_eq!(request.query, "-agent:claude");
         assert_eq!(request.agent_filter, None);
+        assert_eq!(request.directory_filter, None);
+    }
+
+    #[test]
+    fn cli_directory_filter_limits_tui_search_until_query_overrides_it() {
+        let mut state = test_state_with_directory_filter(
+            vec![
+                session_in("backend", "/work/backend"),
+                session_in("frontend", "/work/frontend"),
+            ],
+            Some("backend".to_string()),
+        );
+
+        assert_eq!(state.visible.len(), 1);
+        assert_eq!(state.visible[0].id, "backend");
+
+        handle_key(&mut state, key(KeyCode::Char('a'), KeyModifiers::NONE)).unwrap();
+        let request = state.take_search_request().unwrap();
+        assert_eq!(request.directory_filter.as_deref(), Some("backend"));
+
+        state.query = "dir:frontend".to_string();
+        state.cursor = state.query.chars().count();
+        state.refresh_search();
+
+        assert_eq!(state.visible.len(), 1);
+        assert_eq!(state.visible[0].id, "frontend");
     }
 
     #[test]
@@ -467,6 +514,7 @@ mod tests {
         let request = state.take_search_request().unwrap();
         assert_eq!(request.query, "z");
         assert_eq!(request.agent_filter, None);
+        assert_eq!(request.directory_filter, None);
         assert!(state.take_search_request().is_none());
     }
 
