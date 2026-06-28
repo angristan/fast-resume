@@ -91,11 +91,16 @@ fn main() -> Result<()> {
 
     if args.stats {
         let index = refreshed_index()?;
+        let stats = index.stats()?;
+        if stats.total_sessions == 0 {
+            println!("No sessions indexed.");
+            return Ok(());
+        }
         let raw_stats: Vec<_> = all_adapters()
             .into_iter()
             .map(|adapter| adapter.raw_stats())
             .collect();
-        print_stats(&index.stats()?, &raw_stats);
+        print_stats(&stats, &raw_stats);
         return Ok(());
     }
 

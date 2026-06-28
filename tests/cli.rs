@@ -121,6 +121,17 @@ fn list_removes_stale_sessions_on_incremental_refresh() {
 }
 
 #[test]
+fn stats_reports_empty_index_friendly_message() {
+    let temp = TempDir::new().unwrap();
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--stats"]));
+
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("No sessions indexed."));
+    assert!(!stdout.contains("Index Statistics"));
+}
+
+#[test]
 fn list_footer_counts_filtered_matches() {
     let temp = TempDir::new().unwrap();
     write_codex_session(
