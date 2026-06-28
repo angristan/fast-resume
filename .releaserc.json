@@ -12,7 +12,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' Cargo.toml && sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' pyproject.toml && cargo generate-lockfile"
+        "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' Cargo.toml pyproject.toml && sed -i '/^name = \"fast-resume\"$/,/^dependencies = \\[$/ s/^version = .*/version = \"${nextRelease.version}\"/' Cargo.lock"
       }
     ],
     [
