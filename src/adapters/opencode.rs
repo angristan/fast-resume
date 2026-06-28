@@ -275,19 +275,24 @@ fn load_opencode_db_incremental(
         let query = format!(
             "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
         );
-        let Ok(mut stmt) = conn.prepare(&query) else {
-            continue;
+        let mut stmt = match conn.prepare(&query) {
+            Ok(stmt) => stmt,
+            Err(_) => return opencode_db_error_scan(agent),
         };
-        let Ok(rows) = stmt.query_map(params_from_iter(chunk.iter()), |row| {
+        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
             ))
-        }) else {
-            continue;
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return opencode_db_error_scan(agent),
         };
-        for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
+        for row in rows {
+            let Ok((msg_id, session_id, role)) = row else {
+                return opencode_db_error_scan(agent);
+            };
             messages_by_session
                 .entry(session_id)
                 .or_default()
@@ -301,18 +306,23 @@ fn load_opencode_db_incremental(
         let query = format!(
             "SELECT message_id, json_extract(data, '$.text') FROM part WHERE session_id IN ({placeholders}) AND json_extract(data, '$.type') = 'text' ORDER BY time_created ASC"
         );
-        let Ok(mut stmt) = conn.prepare(&query) else {
-            continue;
+        let mut stmt = match conn.prepare(&query) {
+            Ok(stmt) => stmt,
+            Err(_) => return opencode_db_error_scan(agent),
         };
-        let Ok(rows) = stmt.query_map(params_from_iter(chunk.iter()), |row| {
+        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             ))
-        }) else {
-            continue;
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return opencode_db_error_scan(agent),
         };
-        for (message_id, text) in rows.filter_map(Result::ok) {
+        for row in rows {
+            let Ok((message_id, text)) = row else {
+                return opencode_db_error_scan(agent);
+            };
             if !text.is_empty() {
                 parts_by_message.entry(message_id).or_default().push(text);
             }
@@ -926,6 +936,63 @@ mod tests {
         conn.execute_batch("CREATE TABLE not_session (id TEXT PRIMARY KEY);")
             .unwrap();
         drop(conn);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn sqlite_content_fetch_errors_do_not_replace_known_sessions() {
+        let temp = tempdir().unwrap();
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                time_updated INTEGER,
+                data TEXT
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT,
+                session_id TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            INSERT INTO session
+                (id, title, directory, time_created, time_updated)
+                VALUES ('opencode-1', 'OpenCode thread', '/work/opencode', 1720000000000, 1720000000000);
+            INSERT INTO message
+                (id, session_id, time_created, time_updated, data)
+                VALUES ('msg-1', 'opencode-1', 1720000000001, 1720000000500, '{"role":"user"}');
+            INSERT INTO part
+                (id, message_id, session_id, time_created, time_updated)
+                VALUES ('part-1', 'msg-1', 'opencode-1', 1720000000002, 1720000000600);
+            "#,
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir,
+            db_path,
+            legacy_dir: temp.path().join("legacy"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "opencode-1".to_string()), 1.0);
 
         let scan = adapter.find_sessions_incremental(&known);
 
