@@ -1,4 +1,5 @@
 use std::env;
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::Instant;
@@ -189,14 +190,109 @@ fn truncate_for_terminal(value: &str, width: usize) -> String {
 }
 
 fn exec_resume(command: Vec<String>, directory: String) -> Result<()> {
+    let mut backend = ProcessExecBackend;
+    exec_resume_with(&mut backend, command, directory)
+}
+
+trait ExecBackend {
+    fn set_current_dir(&mut self, directory: &str) -> io::Result<()>;
+    fn exec(&mut self, command: &[String]) -> io::Error;
+}
+
+struct ProcessExecBackend;
+
+impl ExecBackend for ProcessExecBackend {
+    fn set_current_dir(&mut self, directory: &str) -> io::Result<()> {
+        env::set_current_dir(directory)
+    }
+
+    fn exec(&mut self, command: &[String]) -> io::Error {
+        Command::new(&command[0]).args(&command[1..]).exec()
+    }
+}
+
+fn exec_resume_with(
+    backend: &mut impl ExecBackend,
+    command: Vec<String>,
+    directory: String,
+) -> Result<()> {
     if command.is_empty() {
         bail!("selected session has no resume command");
     }
     if !directory.is_empty() {
-        env::set_current_dir(&directory)
+        backend
+            .set_current_dir(&directory)
             .with_context(|| format!("failed to change directory to {directory}"))?;
     }
 
-    let err = Command::new(&command[0]).args(&command[1..]).exec();
+    let err = backend.exec(&command);
     Err(err).with_context(|| format!("failed to exec {}", command[0]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingExec {
+        directories: Vec<String>,
+        commands: Vec<Vec<String>>,
+    }
+
+    impl ExecBackend for RecordingExec {
+        fn set_current_dir(&mut self, directory: &str) -> io::Result<()> {
+            self.directories.push(directory.to_string());
+            Ok(())
+        }
+
+        fn exec(&mut self, command: &[String]) -> io::Error {
+            self.commands.push(command.to_vec());
+            io::Error::new(io::ErrorKind::NotFound, "missing command")
+        }
+    }
+
+    #[test]
+    fn exec_resume_hands_off_directory_and_command() {
+        let mut backend = RecordingExec::default();
+
+        let error = exec_resume_with(
+            &mut backend,
+            vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                "session-1".to_string(),
+            ],
+            "/repo/backend".to_string(),
+        )
+        .unwrap_err();
+
+        assert_eq!(backend.directories, vec!["/repo/backend"]);
+        assert_eq!(
+            backend.commands,
+            vec![vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                "session-1".to_string()
+            ]]
+        );
+        assert!(error.to_string().contains("failed to exec codex"));
+    }
+
+    #[test]
+    fn exec_resume_skips_empty_directory_and_rejects_empty_command() {
+        let mut backend = RecordingExec::default();
+
+        let error =
+            exec_resume_with(&mut backend, vec!["code".to_string()], String::new()).unwrap_err();
+
+        assert!(backend.directories.is_empty());
+        assert_eq!(backend.commands, vec![vec!["code".to_string()]]);
+        assert!(error.to_string().contains("failed to exec code"));
+
+        let mut backend = RecordingExec::default();
+        let error = exec_resume_with(&mut backend, Vec::new(), "/repo".to_string()).unwrap_err();
+        assert!(backend.directories.is_empty());
+        assert!(backend.commands.is_empty());
+        assert!(error.to_string().contains("no resume command"));
+    }
 }
