@@ -20,7 +20,7 @@ const ACCENT: Color = Color::Rgb(224, 150, 70);
 const PANEL_BORDER: Color = Color::Rgb(70, 80, 95);
 const SELECTED_BG: Color = Color::Rgb(68, 52, 34);
 const WARNING: Color = Color::Rgb(240, 180, 80);
-const SEARCH_PLACEHOLDER: &str = "Search titles & messages. Try agent:claude or date:today";
+const SEARCH_PLACEHOLDER: &str = "Search titles, messages, paths. Try agent:claude";
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();

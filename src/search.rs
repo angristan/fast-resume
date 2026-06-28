@@ -128,6 +128,24 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_search_matches_directory_substrings() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .rebuild(vec![
+                session("a", "claude", "Unrelated", "/work/backend", "alpha"),
+                session("b", "codex", "Other", "/work/frontend", "button"),
+            ])
+            .unwrap();
+        let engine = SearchEngine::from_index(index);
+
+        let results = engine.search("backend", None, None, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "a");
+    }
+
+    #[test]
     fn normalizes_typed_agent_filter_case() {
         let temp = tempdir().unwrap();
         let index = SessionIndex::open(temp.path().join("index")).unwrap();

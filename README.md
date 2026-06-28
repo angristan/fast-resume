@@ -19,7 +19,7 @@ That's why I built `fast-resume`: a command-line tool that aggregates all your c
 ## Features
 
 - **Unified Search**: One search box to find sessions across all your coding agents
-- **Full-Text Search**: Search not just titles, but the entire conversation content (user messages and assistant responses)
+- **Full-Text Search**: Search titles, directories, and the entire conversation content (user messages and assistant responses)
 - **Very fast**: Built on the Rust-powered Tantivy search engine for blazing-fast indexing and searching
 - **Fuzzy Matching**: Typo-tolerant search with smart ranking (exact matches boosted)
 - **Direct Resume**: Select, Enter, you're back in your session
@@ -361,7 +361,7 @@ Sessions appear in the TUI as adapters emit changed sessions and batches are com
 
 [Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene).
 
-**Hybrid search** combines boosted exact search with fuzzy fallback over titles and message content:
+**Hybrid search** combines boosted exact search over titles and message content, single-token directory/path matching, and fuzzy fallback over titles and message content:
 
 ```rust
 let parser = QueryParser::for_index(&index, vec![title, content, directory]);
@@ -375,7 +375,7 @@ let combined = BooleanQuery::new(vec![
 ]);
 ```
 
-This ensures exact matches rank first while still finding typos in titles or messages, like `auth midleware` → "authentication middleware".
+This ensures exact matches rank first, keeps quick path searches like `backend`, and still finds typos in titles or messages, like `auth midleware` → "authentication middleware".
 
 **Query lifecycle:**
 

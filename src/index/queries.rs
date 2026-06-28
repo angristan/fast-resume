@@ -80,8 +80,23 @@ fn text_query(index: &Index, fields: IndexFields, search_text: &str) -> Result<B
     if !fuzzy_parts.is_empty() {
         alternatives.push((Occur::Should, Box::new(BooleanQuery::new(fuzzy_parts))));
     }
+    if let Some(directory_query) = directory_text_query(fields, search_text)? {
+        alternatives.push((Occur::Should, directory_query));
+    }
 
     Ok(Box::new(BooleanQuery::new(alternatives)))
+}
+
+fn directory_text_query(fields: IndexFields, search_text: &str) -> Result<Option<Box<dyn Query>>> {
+    let search_text = search_text.trim();
+    if search_text.chars().count() < 3 || search_text.split_whitespace().count() != 1 {
+        return Ok(None);
+    }
+    let pattern = format!("(?i).*{}.*", regex::escape(search_text));
+    Ok(Some(Box::new(RegexQuery::from_pattern(
+        &pattern,
+        fields.directory,
+    )?)))
 }
 
 fn agent_query(fields: IndexFields, filter: Option<Filter>) -> Option<Box<dyn Query>> {
