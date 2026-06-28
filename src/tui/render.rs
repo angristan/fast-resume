@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui_image::{Image as TuiImage, protocol::Protocol};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::{AGENT_ORDER, AGENTS, VERSION};
 use crate::model::Session;
@@ -72,27 +72,71 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(block, area);
 
     let prompt = Span::styled(" / ", Style::new().fg(ACCENT).bold());
+    let input_width = inner.width.saturating_sub(3) as usize;
     let mut spans = vec![prompt];
     if state.query.is_empty() {
-        let width = inner.width.saturating_sub(3) as usize;
-        if width > 0 {
+        if input_width > 0 {
             spans.push(Span::styled(
-                truncate(SEARCH_PLACEHOLDER, width),
+                truncate(SEARCH_PLACEHOLDER, input_width),
                 Style::new().fg(Color::DarkGray).italic(),
             ));
         }
     } else {
-        spans.extend(search_query_spans(&state.query));
-        if let Some(suffix) = state.suggestion_suffix() {
-            spans.push(Span::styled(suffix, Style::new().fg(Color::DarkGray)));
+        let (visible_query, visible_cursor) =
+            search_input_view(&state.query, state.cursor, input_width);
+        spans.extend(search_query_spans(&visible_query));
+        if visible_cursor == visible_query.chars().count() {
+            if let Some(suffix) = state.suggestion_suffix() {
+                let remaining = input_width.saturating_sub(visible_query.width());
+                if remaining > 0 {
+                    spans.push(Span::styled(
+                        truncate(&suffix, remaining),
+                        Style::new().fg(Color::DarkGray),
+                    ));
+                }
+            }
         }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
-    let cursor_x = inner.x + 3 + display_width_until(&state.query, state.cursor) as u16;
+    let cursor_x =
+        inner.x + 3 + search_input_view(&state.query, state.cursor, input_width).1 as u16;
     if cursor_x < inner.right() {
         frame.set_cursor_position((cursor_x, inner.y));
     }
+}
+
+fn search_input_view(query: &str, cursor: usize, width: usize) -> (String, usize) {
+    if width == 0 {
+        return (String::new(), 0);
+    }
+
+    let cursor_col = display_width_until(query, cursor);
+    let start_col = cursor_col.saturating_sub(width.saturating_sub(1));
+    let mut current_col = 0usize;
+    let mut start_char = 0usize;
+    for (idx, ch) in query.chars().enumerate() {
+        let next_col = current_col + ch.width().unwrap_or(0);
+        if next_col > start_col {
+            start_char = idx;
+            break;
+        }
+        current_col = next_col;
+        start_char = idx + 1;
+    }
+
+    let actual_start_col = display_width_until(query, start_char);
+    let cursor_in_view = cursor_col.saturating_sub(actual_start_col);
+    let mut out = String::new();
+    for ch in query.chars().skip(start_char) {
+        let ch_width = ch.width().unwrap_or(0);
+        if out.width() + ch_width > width {
+            break;
+        }
+        out.push(ch);
+    }
+
+    (out, cursor_in_view.min(width.saturating_sub(1)))
 }
 
 fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -616,6 +660,22 @@ mod tests {
 
         assert!(rendered.starts_with("clipboard"));
         assert!(!rendered.contains("Enter"));
+    }
+
+    #[test]
+    fn search_input_view_keeps_end_cursor_visible() {
+        let (visible, cursor) = search_input_view("0123456789abcdef", 16, 6);
+
+        assert_eq!(visible, "bcdef");
+        assert_eq!(cursor, 5);
+    }
+
+    #[test]
+    fn search_input_view_keeps_middle_cursor_visible() {
+        let (visible, cursor) = search_input_view("0123456789abcdef", 10, 6);
+
+        assert_eq!(visible, "56789a");
+        assert_eq!(cursor, 5);
     }
 }
 
