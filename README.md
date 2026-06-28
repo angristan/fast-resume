@@ -50,11 +50,13 @@ uv tool install fast-resume
 fr
 ```
 
+PyPI publishes Rust binary wheels for macOS and Linux on arm64/x86_64. No source distribution is published yet; unsupported platforms should use Cargo or Homebrew.
+
 ### Cargo
 
 ```bash
 # Install from source
-cargo install --git https://github.com/angristan/fast-resume
+cargo install --locked --git https://github.com/angristan/fast-resume
 fr
 ```
 
@@ -136,7 +138,7 @@ Resume sessions with auto-approve / skip-permissions flags:
 | Claude          | `--dangerously-skip-permissions`             | No            |
 | Codex           | `--dangerously-bypass-approvals-and-sandbox` | Yes           |
 | Copilot CLI     | `--yolo`                                     | No            |
-| Vibe            | `--auto-approve`                             | Yes           |
+| Vibe            | `--agent auto-approve`                       | Yes           |
 | OpenCode        | _(config-based)_                             | —             |
 | Crush           | `--yolo`                                     | No            |
 | VS Code Copilot | _(n/a)_                                      | —             |
@@ -257,7 +259,7 @@ Directory                                                 Sessions  Messages
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 SessionSearch                                          │
+│                                 fast-resume                                            │
 │                                                                                        │
 │   • Orchestrates adapters concurrently                                                  │
 │   • Compares file mtimes to detect changes (incremental updates)                       │
@@ -269,13 +271,13 @@ Directory                                                 Sessions  Messages
 ┌──────────────────┐    ┌───────────────────────────────────────────────────────────────────────────────┐
 │  TantivyIndex    │    │                                 Adapters                                       │
 │                  │    │  ┌────────┐ ┌───────┐ ┌───────┐ ┌─────────┐ ┌───────┐ ┌────────┐ ┌────┐        │
-│ • Fuzzy search   │◄───│  │ Claude │ │ Codex │ │Copilot│ │ Copilot │ │ Crush │ │OpenCode│ │Vibe│        │
+│ • Search queries │◄───│  │ Claude │ │ Codex │ │Copilot│ │ Copilot │ │ Crush │ │OpenCode│ │Vibe│        │
 │ • mtime tracking │    │  │        │ │       │ │  CLI  │ │ VS Code │ │       │ │        │ │    │        │
 │                  │    │  └───┬────┘ └───┬───┘ └───┬───┘ └────┬────┘ └───┬───┘ └───┬────┘ └─┬──┘        │
 │ ~/.cache/        │    │      │          │         │          │          │         │        │           │
 │   fast-resume/   │    └──────┼──────────┼─────────┼──────────┼──────────┼─────────┼────────┼───────────┘
 └──────────────────┘           ▼          ▼         ▼          ▼          ▼         ▼        ▼
-                          ~/.claude/ ~/.codex/ ~/.copilot/  VS Code/   crush.db opencode/ ~/.vibe/
+                          ~/.claude/ ~/.codex/ ~/.copilot/  VS Code/   crush.db opencode.db ~/.vibe/
 ```
 
 ### Session Parsing
@@ -289,8 +291,8 @@ Each agent stores sessions differently. Adapters normalize them into a common `S
 | Copilot CLI    | JSONL in `~/.copilot/session-state/*.jsonl`          | Line-by-line parsing, extract `user.message` and `assistant.message` types                  |
 | Copilot VSCode | JSON in VS Code's `workspaceStorage/*/chatSessions/` | Parse `requests` array with message text and response values                                |
 | Crush          | SQLite DB at `<project>/crush.db`                    | Query `sessions` and `messages` tables directly, parse JSON `parts` column                  |
-| OpenCode       | Split JSON in `~/.local/share/opencode/storage/`     | Lazy-load `message/` and `part/` per session for progressive indexing                       |
-| Vibe           | JSON in `~/.vibe/logs/session/session_*.json`        | Parse `messages` array with role-based content                                              |
+| OpenCode       | SQLite at `~/.local/share/opencode/opencode.db`      | Query `session`, `message`, and text `part` rows directly; falls back to legacy split JSON   |
+| Vibe           | Directories in `~/.vibe/logs/session/session_*/`     | Parse `meta.json` plus `messages.jsonl` role-based content                                  |
 
 **The normalized Session structure:**
 
@@ -315,12 +317,12 @@ pub struct Session {
 
 **What's excluded from indexing:**
 
-- Tool results (file contents, command outputs, API responses)
-- Tool use/calls (function invocations)
+- Large tool results (file contents, command outputs, API responses)
+- Most tool use/calls (function invocations)
 - Meta messages (system prompts, context summaries)
 - Local command outputs (slash commands like `/context`)
 
-This keeps the index focused on the actual conversation and avoids bloating it with large tool outputs that are rarely useful for search.
+Most adapters keep the index focused on actual conversation text. Crush also indexes short tool-call/result summaries when they are stored as message parts, while still avoiding large tool output blobs.
 
 ### Indexing
 
@@ -345,23 +347,27 @@ index.refresh_incremental_streaming(BATCH_SIZE, |summary| {
 });
 ```
 
-Sessions appear in the TUI progressively as they're parsed and batched. OpenCode uses parallel file I/O and processes smaller sessions first for faster initial results.
+Sessions appear in the TUI as adapters emit changed sessions and batches are committed. Database-backed adapters may publish after the relevant query finishes; file-backed adapters can stream earlier during parsing.
 
-**Schema versioning**: A `.schema_version` file tracks the index schema. If it doesn't match the code's `SCHEMA_VERSION` constant, the entire index is deleted and rebuilt. This prevents deserialization errors after upgrades.
+**Schema versioning**: A `.schema_version` file tracks the index schema. If it doesn't match the code's `INDEX_SCHEMA_VERSION` constant, the entire index is deleted and rebuilt. This prevents deserialization errors after upgrades.
 
 ### Search
 
 [Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene).
 
-**Hybrid search** combines exact and fuzzy matching for best results:
+**Hybrid search** combines boosted exact search with a cheap title-only fuzzy fallback:
 
 ```rust
-// Exact terms are boosted, fuzzy terms provide typo tolerance.
-let exact = QueryParser::for_index(&index, vec![title, content]).parse_query(query)?;
-let fuzzy = fuzzy_term_queries(schema, query);
+let parser = QueryParser::for_index(&index, vec![title, content, directory]);
+let (exact, _) = parser.parse_query_lenient(search_text);
+let boosted_exact = BoostQuery::new(exact, 5.0);
+
+// Fuzzy expansion over full content is too expensive while typing,
+// so typo tolerance is limited to title terms with 3+ characters.
+let fuzzy_title = title_fuzzy_prefix_queries(search_text);
 let combined = BooleanQuery::new(vec![
-    (Occur::Should, Box::new(BoostQuery::new(Box::new(exact), 5.0))),
-    (Occur::Should, Box::new(fuzzy)),
+    (Occur::Should, Box::new(boosted_exact)),
+    (Occur::Should, Box::new(fuzzy_title)),
 ]);
 ```
 
@@ -384,10 +390,10 @@ Typing stays decoupled from search work: every edit updates the input immediatel
 
 ### TUI
 
-**Streaming results**: Sessions appear as each adapter completes, not after all finish.
+**Streaming results**: the TUI opens from the current index, starts refresh in the background, and applies result batches as adapters report progress.
 
-- **Fast path**: Index up-to-date → load synchronously, no spinner
-- **Slow path**: Changes detected → spinner, stream results via `on_progress()` callback
+- **Warm path**: existing index is searchable immediately while refresh runs
+- **Refresh path**: changed/deleted sessions are committed in batches via `on_progress()` callbacks
 
 **Preview context**: When searching, the preview pane jumps to the matching portion:
 
@@ -408,7 +414,7 @@ Matching terms are highlighted directly in the terminal UI.
 When you press Enter on a session, fast-resume hands off to the original agent:
 
 ```rust
-match run_tui(query, agent_filter, yolo, image_protocol)? {
+match run_tui(query, agent_filter, directory_filter, yolo, image_protocol)? {
     TuiExit::Quit => Ok(()),
     TuiExit::Resume { command, directory } => exec_resume(command, directory),
 }
@@ -430,25 +436,25 @@ Each adapter returns the appropriate command:
 | Copilot CLI    | `copilot --resume <id>`         | `copilot --yolo --resume <id>`                                 |
 | Copilot VSCode | `code <directory>`              | _(no change)_                                                  |
 | OpenCode       | `opencode <dir> --session <id>` | _(no change)_                                                  |
-| Vibe           | `vibe --resume <id>`            | `vibe --auto-approve --resume <id>`                            |
+| Vibe           | `vibe --resume <id>`            | `vibe --agent auto-approve --resume <id>`                      |
 | Crush          | `crush --session <id>`          | `crush --yolo --session <id>`                                  |
 
 ### Performance
 
-Why fast-resume feels instant:
+Why fast-resume feels fast:
 
-- **Tantivy**: Native Rust full-text search over 10k+ sessions in <10ms
-- **Incremental updates**: Only re-parse files where `mtime` changed. Second launch with no changes: ~50ms total
+- **Tantivy**: Native Rust full-text search keeps query latency low once sessions are indexed
+- **Incremental updates**: Only re-parse files where `mtime` changed, and delete sessions that disappeared on disk
 - **Parallel adapters**: Adapters run concurrently. Total time = slowest adapter, not sum
 - **Immediate search**: keystrokes redraw immediately while background search results are cancelled by generation
 - **Background workers**: Index refresh runs off the UI thread
-- **Streaming results**: Sessions appear as each adapter completes, not after all finish
+- **Streaming results**: Changed sessions can appear as batches are committed
 
-Typical performance on a machine with ~500 sessions:
+Typical behavior depends on adapter data size:
 
-- Cold start (empty index): ~2s
-- Warm start (no changes): ~50ms
-- Search query: <10ms
+- Cold start parses all available sessions and builds the Tantivy index
+- Warm launch searches the existing index immediately and refreshes changed data in the background
+- Search queries are typically milliseconds once the index reader is warm
 
 ## Development
 
