@@ -17,6 +17,28 @@ pub struct CopilotVsCodeAdapter {
     workspace_storage_dir: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+struct VscodeSessionFile {
+    path: PathBuf,
+    workspace_dir: Option<PathBuf>,
+}
+
+impl VscodeSessionFile {
+    fn session_id(&self) -> Option<String> {
+        self.path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(ToString::to_string)
+    }
+
+    fn workspace_directory(&self) -> String {
+        self.workspace_dir
+            .as_deref()
+            .map(workspace_directory)
+            .unwrap_or_default()
+    }
+}
+
 impl Default for CopilotVsCodeAdapter {
     fn default() -> Self {
         Self {
@@ -34,37 +56,12 @@ impl Adapter for CopilotVsCodeAdapter {
     fn find_sessions(&self) -> Vec<Session> {
         self.session_files()
             .into_iter()
-            .filter_map(|(path, workspace)| self.parse_session(&path, &workspace))
+            .filter_map(|file| self.parse_session(&file))
             .collect()
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let mut current_files = HashMap::new();
-        for (path, workspace) in self.session_files() {
-            let Some(session_id) = vscode_session_id(&path) else {
-                continue;
-            };
-            let mtime = file_mtime_seconds(&path);
-            current_files.insert(session_id, (path, mtime, workspace));
-        }
-
-        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
-        let mut new_or_modified = Vec::new();
-        for (session_id, (path, mtime, workspace)) in current_files {
-            if !session_needs_update(known, self.name(), &session_id, mtime) {
-                continue;
-            }
-            if let Some(mut session) = self.parse_session(&path, &workspace) {
-                session.mtime = mtime;
-                new_or_modified.push(session);
-            }
-        }
-
-        IncrementalScan {
-            agent: self.name(),
-            new_or_modified,
-            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
-        }
+        self.find_sessions_incremental_with(known, |_| {})
     }
 
     fn find_sessions_incremental_streaming(
@@ -72,33 +69,7 @@ impl Adapter for CopilotVsCodeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let mut current_files = HashMap::new();
-        for (path, workspace) in self.session_files() {
-            let Some(session_id) = vscode_session_id(&path) else {
-                continue;
-            };
-            let mtime = file_mtime_seconds(&path);
-            current_files.insert(session_id, (path, mtime, workspace));
-        }
-
-        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
-        let mut new_or_modified = Vec::new();
-        for (session_id, (path, mtime, workspace)) in current_files {
-            if !session_needs_update(known, self.name(), &session_id, mtime) {
-                continue;
-            }
-            if let Some(mut session) = self.parse_session(&path, &workspace) {
-                session.mtime = mtime;
-                on_session(session.clone());
-                new_or_modified.push(session);
-            }
-        }
-
-        IncrementalScan {
-            agent: self.name(),
-            new_or_modified,
-            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
-        }
+        self.find_sessions_incremental_with(known, |session| on_session(session))
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
@@ -118,21 +89,61 @@ impl Adapter for CopilotVsCodeAdapter {
             file_count: files.len(),
             total_bytes: files
                 .iter()
-                .filter_map(|(path, _)| path.metadata().ok().map(|m| m.len()))
+                .filter_map(|file| file.path.metadata().ok().map(|m| m.len()))
                 .sum(),
         }
     }
 }
 
 impl CopilotVsCodeAdapter {
-    fn session_files(&self) -> Vec<(PathBuf, String)> {
+    fn find_sessions_incremental_with<F>(
+        &self,
+        known: &KnownSessions,
+        mut on_session: F,
+    ) -> IncrementalScan
+    where
+        F: FnMut(Session),
+    {
+        let mut current_files = HashMap::new();
+        for file in self.session_files() {
+            let Some(session_id) = file.session_id() else {
+                continue;
+            };
+            let mtime = file_mtime_seconds(&file.path);
+            current_files.insert(session_id, (file, mtime));
+        }
+
+        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut new_or_modified = Vec::new();
+        for (session_id, (file, mtime)) in current_files {
+            if !session_needs_update(known, self.name(), &session_id, mtime) {
+                continue;
+            }
+            if let Some(mut session) = self.parse_session(&file) {
+                session.mtime = mtime;
+                on_session(session.clone());
+                new_or_modified.push(session);
+            }
+        }
+
+        IncrementalScan {
+            agent: self.name(),
+            new_or_modified,
+            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
+        }
+    }
+
+    fn session_files(&self) -> Vec<VscodeSessionFile> {
         let mut files = Vec::new();
         if self.chat_sessions_dir.exists() {
             if let Ok(read_dir) = fs::read_dir(&self.chat_sessions_dir) {
                 for entry in read_dir.filter_map(Result::ok) {
                     let path = entry.path();
                     if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                        files.push((path, String::new()));
+                        files.push(VscodeSessionFile {
+                            path,
+                            workspace_dir: None,
+                        });
                     }
                 }
             }
@@ -145,12 +156,14 @@ impl CopilotVsCodeAdapter {
                     if !chat_dir.exists() {
                         continue;
                     }
-                    let workspace = workspace_directory(&ws_dir);
                     if let Ok(chat_files) = fs::read_dir(chat_dir) {
                         for chat_file in chat_files.filter_map(Result::ok) {
                             let path = chat_file.path();
                             if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                                files.push((path, workspace.clone()));
+                                files.push(VscodeSessionFile {
+                                    path,
+                                    workspace_dir: Some(ws_dir.clone()),
+                                });
                             }
                         }
                     }
@@ -160,21 +173,16 @@ impl CopilotVsCodeAdapter {
         files
     }
 
-    fn parse_session(&self, path: &Path, workspace_directory: &str) -> Option<Session> {
-        let data: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-        let session_id = string_at(&data, &["sessionId"]);
-        let session_id = if session_id.is_empty() {
-            path.file_stem()?.to_string_lossy().to_string()
-        } else {
-            session_id
-        };
+    fn parse_session(&self, file: &VscodeSessionFile) -> Option<Session> {
+        let data: Value = serde_json::from_slice(&fs::read(&file.path).ok()?).ok()?;
+        let session_id = file.session_id()?;
         let mut title = string_at(&data, &["customTitle"]);
         let requests = data.get("requests")?.as_array()?;
         if requests.is_empty() {
             return None;
         }
 
-        let mut directory = workspace_directory.to_string();
+        let mut directory = file.workspace_directory();
         let mut messages = Vec::new();
         let mut turns = 0usize;
 
@@ -227,7 +235,7 @@ impl CopilotVsCodeAdapter {
                 .or_else(|| data.get("creationDate"))
                 .and_then(Value::as_i64),
         )
-        .unwrap_or_else(|| file_timestamp(path));
+        .unwrap_or_else(|| file_timestamp(&file.path));
 
         let mut session = Session::new(
             session_id,
@@ -238,7 +246,7 @@ impl CopilotVsCodeAdapter {
             messages.join("\n\n"),
             turns,
         );
-        session.mtime = file_mtime_seconds(path);
+        session.mtime = file_mtime_seconds(&file.path);
         Some(session)
     }
 }
@@ -262,18 +270,6 @@ fn workspace_directory(workspace_dir: &Path) -> String {
     String::new()
 }
 
-fn vscode_session_id(path: &Path) -> Option<String> {
-    let data: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    let id = string_at(&data, &["sessionId"]);
-    if id.is_empty() {
-        path.file_stem()
-            .and_then(|stem| stem.to_str())
-            .map(ToString::to_string)
-    } else {
-        Some(id)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -291,7 +287,7 @@ mod tests {
         let chat_sessions_dir = temp.path().join("chat");
         fs::create_dir_all(&chat_sessions_dir).unwrap();
         fs::write(
-            chat_sessions_dir.join("session.json"),
+            chat_sessions_dir.join("vscode-1.json"),
             json!({
                 "sessionId": "vscode-1",
                 "customTitle": "VS Code thread",
@@ -322,5 +318,28 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["code", "/work/vscode"]
         );
+    }
+
+    #[test]
+    fn unchanged_incremental_scan_uses_file_stem_without_parsing_json() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let path = chat_sessions_dir.join("vscode-1.json");
+        fs::write(&path, "{").unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("copilot-vscode".to_string(), "vscode-1".to_string()),
+            file_mtime_seconds(&path),
+        );
+
+        let scan = adapter.find_sessions_incremental(&known);
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }

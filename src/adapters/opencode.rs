@@ -133,8 +133,9 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
     drop(stmt);
 
     let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT id, session_id, data FROM message ORDER BY time_created ASC")
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message ORDER BY time_created ASC",
+    )
     {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -143,11 +144,7 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
                 row.get::<_, String>(2)?,
             ))
         }) {
-            for (msg_id, session_id, data) in rows.filter_map(Result::ok) {
-                let role = serde_json::from_str::<Value>(&data)
-                    .ok()
-                    .map(|value| string_at(&value, &["role"]))
-                    .unwrap_or_default();
+            for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
                 messages_by_session
                     .entry(session_id)
                     .or_default()
@@ -157,21 +154,19 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
     }
 
     let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT message_id, data FROM part ORDER BY time_created ASC")
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT message_id, json_extract(data, '$.text') FROM part WHERE json_extract(data, '$.type') = 'text' ORDER BY time_created ASC",
+    )
     {
         if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
         }) {
-            for (message_id, data) in rows.filter_map(Result::ok) {
-                let Ok(value) = serde_json::from_str::<Value>(&data) else {
-                    continue;
-                };
-                if string_at(&value, &["type"]) == "text" {
-                    let text = string_at(&value, &["text"]);
-                    if !text.is_empty() {
-                        parts_by_message.entry(message_id).or_default().push(text);
-                    }
+            for (message_id, text) in rows.filter_map(Result::ok) {
+                if !text.is_empty() {
+                    parts_by_message.entry(message_id).or_default().push(text);
                 }
             }
         }
@@ -289,7 +284,7 @@ fn load_opencode_db_incremental(
     for chunk in fetch_ids.chunks(900) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let query = format!(
-            "SELECT id, session_id, data FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
+            "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
         );
         let Ok(mut stmt) = conn.prepare(&query) else {
             continue;
@@ -303,11 +298,7 @@ fn load_opencode_db_incremental(
         }) else {
             continue;
         };
-        for (msg_id, session_id, data) in rows.filter_map(Result::ok) {
-            let role = serde_json::from_str::<Value>(&data)
-                .ok()
-                .map(|value| string_at(&value, &["role"]))
-                .unwrap_or_default();
+        for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
             messages_by_session
                 .entry(session_id)
                 .or_default()
@@ -319,25 +310,22 @@ fn load_opencode_db_incremental(
     for chunk in fetch_ids.chunks(900) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let query = format!(
-            "SELECT p.message_id, p.data FROM part p JOIN message m ON m.id = p.message_id WHERE m.session_id IN ({placeholders}) ORDER BY p.time_created ASC"
+            "SELECT message_id, json_extract(data, '$.text') FROM part WHERE session_id IN ({placeholders}) AND json_extract(data, '$.type') = 'text' ORDER BY time_created ASC"
         );
         let Ok(mut stmt) = conn.prepare(&query) else {
             continue;
         };
         let Ok(rows) = stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
         }) else {
             continue;
         };
-        for (message_id, data) in rows.filter_map(Result::ok) {
-            let Ok(value) = serde_json::from_str::<Value>(&data) else {
-                continue;
-            };
-            if string_at(&value, &["type"]) == "text" {
-                let text = string_at(&value, &["text"]);
-                if !text.is_empty() {
-                    parts_by_message.entry(message_id).or_default().push(text);
-                }
+        for (message_id, text) in rows.filter_map(Result::ok) {
+            if !text.is_empty() {
+                parts_by_message.entry(message_id).or_default().push(text);
             }
         }
     }
@@ -652,5 +640,68 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["opencode", "/work/opencode", "--session", "opencode-1"]
         );
+    }
+
+    #[test]
+    fn parses_sqlite_session_incrementally() {
+        let temp = tempdir().unwrap();
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            INSERT INTO session
+                (id, title, directory, time_created, time_updated)
+                VALUES ('opencode-1', 'OpenCode thread', '/work/opencode', 1720000000000, 1720000000000);
+            INSERT INTO message
+                (id, session_id, time_created, data)
+                VALUES ('msg-1', 'opencode-1', 1720000000001, '{"role":"user"}');
+            INSERT INTO part
+                (id, message_id, session_id, time_created, data)
+                VALUES ('part-1', 'msg-1', 'opencode-1', 1720000000002, '{"type":"text","text":"Hello OpenCode"}');
+            "#,
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir,
+            db_path,
+            legacy_dir: temp.path().join("legacy"),
+        };
+        let scan = adapter.find_sessions_incremental(&KnownSessions::new());
+        assert_eq!(scan.new_or_modified.len(), 1);
+        let session = &scan.new_or_modified[0];
+        assert_eq!(session.id, "opencode-1");
+        assert!(session.content.contains("» Hello OpenCode"));
+
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("opencode".to_string(), "opencode-1".to_string()),
+            session.mtime,
+        );
+        let scan = adapter.find_sessions_incremental(&known);
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }

@@ -1,6 +1,8 @@
 use std::collections::HashSet;
+use std::env;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Instant;
 
 use anyhow::Result;
 use rayon::prelude::*;
@@ -18,9 +20,22 @@ enum AdapterEvent {
 }
 
 pub fn scan_all_sessions() -> Vec<Session> {
+    let trace_refresh = env::var_os("FAST_RESUME_TRACE_REFRESH").is_some();
     let sessions: Vec<_> = all_adapters()
         .into_par_iter()
-        .flat_map(|adapter| adapter.find_sessions())
+        .flat_map(|adapter| {
+            let started = Instant::now();
+            let agent = adapter.name();
+            let sessions = adapter.find_sessions();
+            if trace_refresh {
+                eprintln!(
+                    "scan {agent}: {:.3}s, sessions={}",
+                    started.elapsed().as_secs_f64(),
+                    sessions.len()
+                );
+            }
+            sessions
+        })
         .collect();
     sort_and_dedupe_sessions(sessions)
 }
@@ -39,16 +54,28 @@ where
 {
     let known = index.known_sessions()?;
     let (tx, rx) = mpsc::channel();
+    let trace_refresh = env::var_os("FAST_RESUME_TRACE_REFRESH").is_some();
     for adapter in all_adapters() {
         let tx = tx.clone();
         let known = known.clone();
+        let trace_refresh = trace_refresh;
         thread::spawn(move || {
+            let started = Instant::now();
+            let agent = adapter.name();
             let scan = {
                 let mut on_session = |session| {
                     let _ = tx.send(AdapterEvent::Session(session));
                 };
                 adapter.find_sessions_incremental_streaming(&known, &mut on_session)
             };
+            if trace_refresh {
+                eprintln!(
+                    "refresh {agent}: {:.3}s, changed={}, deleted={}",
+                    started.elapsed().as_secs_f64(),
+                    scan.new_or_modified.len(),
+                    scan.deleted_ids.len()
+                );
+            }
             let _ = tx.send(AdapterEvent::Finished {
                 agent: scan.agent,
                 deleted_ids: scan.deleted_ids,
