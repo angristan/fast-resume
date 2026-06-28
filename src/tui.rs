@@ -713,6 +713,70 @@ mod tests {
     }
 
     #[test]
+    fn repeated_refresh_messages_preserve_selected_session_identity() {
+        let base = Local::now();
+        let mut first = session("a");
+        first.timestamp = base + ChronoDuration::seconds(2);
+        let mut selected = session("b");
+        selected.timestamp = base + ChronoDuration::seconds(1);
+        let mut last = session("c");
+        last.timestamp = base;
+        let (mut state, index) =
+            test_state_and_index(vec![first.clone(), selected.clone(), last.clone()], None);
+        state.selected = 1;
+
+        let mut newer = session("newer");
+        newer.timestamp = base + ChronoDuration::seconds(3);
+        index
+            .rebuild(vec![newer, first, selected.clone(), last])
+            .unwrap();
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Progress {
+                elapsed: Duration::ZERO,
+                new_or_modified: 1,
+                deleted: 0,
+                total: 4,
+            },
+        );
+        let first_request = state.take_search_request().unwrap();
+        assert_eq!(
+            first_request.preserve_selection.as_ref(),
+            Some(&(selected.agent.clone(), selected.id.clone()))
+        );
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Finished {
+                elapsed: Duration::ZERO,
+                new_or_modified: 1,
+                deleted: 0,
+                total: 4,
+            },
+        );
+        let second_request = state.take_search_request().unwrap();
+        assert_eq!(
+            second_request.preserve_selection.as_ref(),
+            Some(&(selected.agent.clone(), selected.id.clone()))
+        );
+
+        let visible = state.engine.search(
+            &second_request.query,
+            second_request.agent_filter.as_deref(),
+            second_request.directory_filter.as_deref(),
+            100,
+        );
+        assert!(state.apply_search_result(
+            second_request.generation,
+            visible,
+            0.0,
+            second_request.preserve_selection.as_ref()
+        ));
+        assert_eq!(state.selected_session().unwrap().id, "b");
+    }
+
+    #[test]
     fn background_refresh_does_not_preserve_selection_over_typed_search() {
         let base = Local::now();
         let mut first = session("a");

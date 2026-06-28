@@ -143,7 +143,10 @@ impl AppState {
 
     pub(super) fn request_search_preserving_selection(&mut self, reload_index: bool) {
         self.search_reload_requested |= reload_index;
-        if !self.search_requested && self.applied_search_generation == self.search_generation {
+        if self.search_preserve_selection.is_none()
+            && !self.search_requested
+            && self.applied_search_generation == self.search_generation
+        {
             self.search_preserve_selection = self.selected_session_key();
         }
         self.search_requested = true;
@@ -155,7 +158,7 @@ impl AppState {
         }
         self.search_requested = false;
         self.search_generation = self.search_generation.saturating_add(1);
-        let preserve_selection = self.search_preserve_selection.take();
+        let preserve_selection = self.search_preserve_selection.clone();
         let reload_index = self.search_reload_requested;
         self.search_reload_requested = false;
         Some(SearchRequest {
@@ -182,6 +185,7 @@ impl AppState {
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
         self.update_selection_after_search(preserve_selection);
+        self.search_preserve_selection = None;
         self.preview_scroll = 0;
         if self.status == PENDING_SEARCH_STATUS {
             self.status.clear();
