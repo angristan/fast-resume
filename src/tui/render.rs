@@ -30,7 +30,7 @@ pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     draw_search(frame, layout.search, state);
     draw_filters(frame, layout.filters, state);
     draw_main(frame, layout.main, state);
-    draw_footer(frame, layout.footer);
+    draw_footer(frame, layout.footer, state);
 
     if let Some(modal) = &state.modal {
         draw_yolo_modal(frame, area, modal);
@@ -512,8 +512,12 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     );
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect) {
-    let footer = Line::from(vec![
+fn draw_footer(frame: &mut Frame, area: Rect, state: &AppState) {
+    frame.render_widget(Paragraph::new(footer_line(&state.status, area.width)), area);
+}
+
+fn shortcut_footer() -> Line<'static> {
+    Line::from(vec![
         Span::styled(" Enter ", Style::new().fg(Color::Black).bg(ACCENT)),
         Span::raw(" resume  "),
         Span::styled(" Ctrl+Y ", Style::new().fg(Color::Black).bg(Color::Gray)),
@@ -524,8 +528,32 @@ fn draw_footer(frame: &mut Frame, area: Rect) {
         Span::raw(" preview  "),
         Span::styled(" Esc ", Style::new().fg(Color::Black).bg(Color::Gray)),
         Span::raw(" quit"),
-    ]);
-    frame.render_widget(Paragraph::new(footer), area);
+    ])
+}
+
+fn footer_line(status: &str, width: u16) -> Line<'static> {
+    let shortcuts = shortcut_footer();
+    if status.trim().is_empty() {
+        return shortcuts;
+    }
+
+    let shortcut_width = line_width(&shortcuts);
+    let width = width as usize;
+    if width <= shortcut_width + 4 {
+        return Line::from(Span::styled(
+            truncate(status, width),
+            Style::new().fg(WARNING),
+        ));
+    }
+
+    let status_width = width.saturating_sub(shortcut_width + 2);
+    let status = truncate(status, status_width);
+    let mut spans = vec![
+        Span::styled(status, Style::new().fg(WARNING)),
+        Span::raw("  "),
+    ];
+    spans.extend(shortcuts.spans);
+    Line::from(spans)
 }
 
 fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
@@ -557,6 +585,37 @@ fn button_span(label: &'static str, selected: bool) -> Span<'static> {
         Span::styled(label, Style::new().fg(Color::Black).bg(WARNING).bold())
     } else {
         Span::styled(label, Style::new().fg(Color::Gray))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn footer_renders_status_when_present() {
+        let line = footer_line("copied: codex resume abc", 120);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.contains("copied: codex resume abc"));
+        assert!(rendered.contains("Enter"));
+    }
+
+    #[test]
+    fn footer_prefers_status_on_narrow_width() {
+        let line = footer_line("clipboard unavailable: codex resume abc", 18);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.starts_with("clipboard"));
+        assert!(!rendered.contains("Enter"));
     }
 }
 
