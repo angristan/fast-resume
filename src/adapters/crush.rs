@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,8 +9,11 @@ use serde_json::Value;
 use crate::config;
 use crate::model::{RawAdapterStats, Session, truncate_title};
 
-use super::Adapter;
-use super::shared::{normalize_seconds, string_at, timestamp_from_seconds};
+use super::shared::{
+    deleted_ids_for_agent, failed_incremental_scan, normalize_seconds, session_needs_update,
+    string_at, timestamp_from_seconds,
+};
+use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 #[derive(Debug, Clone)]
 pub struct CrushAdapter {
@@ -42,6 +45,18 @@ impl Adapter for CrushAdapter {
             .collect()
     }
 
+    fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
+        self.find_sessions_incremental_with(known, |_| {})
+    }
+
+    fn find_sessions_incremental_streaming(
+        &self,
+        known: &KnownSessions,
+        on_session: &mut SessionCallback<'_>,
+    ) -> IncrementalScan {
+        self.find_sessions_incremental_with(known, |session| on_session(session))
+    }
+
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
         let mut cmd = vec!["crush".to_string()];
         if yolo {
@@ -71,12 +86,55 @@ impl Adapter for CrushAdapter {
     }
 }
 
+impl CrushAdapter {
+    fn find_sessions_incremental_with<F>(
+        &self,
+        known: &KnownSessions,
+        mut on_session: F,
+    ) -> IncrementalScan
+    where
+        F: FnMut(Session),
+    {
+        let Some(projects) = crush_projects_checked(&self.projects_file) else {
+            return failed_incremental_scan(self.name());
+        };
+        let mut current_ids = HashSet::new();
+        let mut new_or_modified = Vec::new();
+
+        for (project_path, db_path) in projects {
+            let Some(sessions) = load_crush_db_checked(self.name(), &db_path, &project_path) else {
+                return failed_incremental_scan(self.name());
+            };
+            for session in sessions {
+                current_ids.insert(session.id.clone());
+                if session_needs_update(known, self.name(), &session.id, session.mtime) {
+                    on_session(session.clone());
+                    new_or_modified.push(session);
+                }
+            }
+        }
+
+        IncrementalScan {
+            agent: self.name(),
+            new_or_modified,
+            deleted_ids: deleted_ids_for_agent(known, self.name(), &current_ids),
+        }
+    }
+}
+
 fn load_crush_db(agent: &'static str, db_path: &Path, project_path: &str) -> Vec<Session> {
-    let Ok(conn) = Connection::open(db_path) else {
-        return Vec::new();
-    };
-    let mut stmt = match conn.prepare(
-        r#"
+    load_crush_db_checked(agent, db_path, project_path).unwrap_or_default()
+}
+
+fn load_crush_db_checked(
+    agent: &'static str,
+    db_path: &Path,
+    project_path: &str,
+) -> Option<Vec<Session>> {
+    let conn = Connection::open(db_path).ok()?;
+    let mut stmt = conn
+        .prepare(
+            r#"
         SELECT
             s.id, s.title, s.message_count, s.updated_at, s.created_at,
             m.role, m.parts, m.created_at as msg_created_at
@@ -85,29 +143,26 @@ fn load_crush_db(agent: &'static str, db_path: &Path, project_path: &str) -> Vec
         WHERE s.message_count > 0
         ORDER BY s.updated_at DESC, m.created_at ASC
         "#,
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
+        )
+        .ok()?;
 
     let mut data: HashMap<String, (String, i64, i64)> = HashMap::new();
     let mut messages: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    let rows = match stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return Vec::new(),
-    };
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+                row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+            ))
+        })
+        .ok()?;
 
-    for row in rows.filter_map(Result::ok) {
-        let (id, title, updated_at, created_at, role, parts) = row;
+    for row in rows {
+        let (id, title, updated_at, created_at, role, parts) = row.ok()?;
         data.entry(id.clone())
             .or_insert((title, updated_at, created_at));
         if !role.is_empty() {
@@ -152,14 +207,18 @@ fn load_crush_db(agent: &'static str, db_path: &Path, project_path: &str) -> Vec
         session.mtime = session.timestamp.timestamp() as f64;
         sessions.push(session);
     }
-    sessions
+    Some(sessions)
 }
 
 fn crush_projects(projects_file: &Path) -> Vec<(String, PathBuf)> {
-    let Ok(data) = serde_json::from_slice::<Value>(&fs::read(projects_file).unwrap_or_default())
-    else {
-        return Vec::new();
-    };
+    crush_projects_checked(projects_file).unwrap_or_default()
+}
+
+fn crush_projects_checked(projects_file: &Path) -> Option<Vec<(String, PathBuf)>> {
+    if !projects_file.exists() {
+        return Some(Vec::new());
+    }
+    let data = serde_json::from_slice::<Value>(&fs::read(projects_file).ok()?).ok()?;
     let mut projects = Vec::new();
     if let Some(items) = data.get("projects").and_then(Value::as_array) {
         for project in items {
@@ -173,7 +232,7 @@ fn crush_projects(projects_file: &Path) -> Vec<(String, PathBuf)> {
             }
         }
     }
-    projects
+    Some(projects)
 }
 
 fn crush_parts_text(parts_json: &str) -> String {
@@ -215,10 +274,13 @@ fn crush_parts_text(parts_json: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use chrono::Local;
     use serde_json::json;
+    use tempfile::tempdir;
 
-    use crate::adapters::Adapter;
+    use crate::adapters::{Adapter, KnownSessions};
 
     use super::*;
 
@@ -257,5 +319,48 @@ mod tests {
         assert!(text.contains("hello"));
         assert!(text.contains("[calling edit]"));
         assert!(text.contains("[edit]: ok"));
+    }
+
+    #[test]
+    fn incremental_projects_file_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let projects_file = temp.path().join("projects.json");
+        fs::create_dir(&projects_file).unwrap();
+        let adapter = CrushAdapter { projects_file };
+        let mut known = KnownSessions::new();
+        known.insert(("crush".to_string(), "crush-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_db_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let projects_file = temp.path().join("projects.json");
+        let data_dir = temp.path().join("project-data");
+        fs::create_dir(&data_dir).unwrap();
+        fs::write(data_dir.join("crush.db"), "not sqlite").unwrap();
+        fs::write(
+            &projects_file,
+            json!({
+                "projects": [{
+                    "path": "/work/crush",
+                    "data_dir": data_dir
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let adapter = CrushAdapter { projects_file };
+        let mut known = KnownSessions::new();
+        known.insert(("crush".to_string(), "crush-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }
