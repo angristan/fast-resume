@@ -108,6 +108,9 @@ impl AppState {
     }
 
     fn refresh_search_inner(&mut self, preserve_selection: bool) {
+        let selected_session = preserve_selection
+            .then(|| self.selected_session_key())
+            .flatten();
         self.search_requested = false;
         self.search_generation = self.search_generation.saturating_add(1);
         self.applied_search_generation = self.search_generation;
@@ -121,7 +124,7 @@ impl AppState {
             100,
         );
         self.last_search_ms = start.elapsed().as_secs_f64() * 1000.0;
-        self.update_selection_after_search(preserve_selection);
+        self.update_selection_after_search(selected_session.as_ref());
         self.preview_scroll = 0;
     }
 
@@ -155,16 +158,25 @@ impl AppState {
         self.visible = visible;
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
-        self.update_selection_after_search(false);
+        self.update_selection_after_search(None);
         self.preview_scroll = 0;
         true
     }
 
-    fn update_selection_after_search(&mut self, preserve_selection: bool) {
+    fn selected_session_key(&self) -> Option<(String, String)> {
+        self.selected_session()
+            .map(|session| (session.agent.clone(), session.id.clone()))
+    }
+
+    fn update_selection_after_search(&mut self, selected_session: Option<&(String, String)>) {
         if self.visible.is_empty() {
             self.selected = 0;
-        } else if preserve_selection {
-            self.selected = self.selected.min(self.visible.len() - 1);
+        } else if let Some((agent, id)) = selected_session {
+            self.selected = self
+                .visible
+                .iter()
+                .position(|session| session.agent == *agent && session.id == *id)
+                .unwrap_or_else(|| self.selected.min(self.visible.len() - 1));
         } else {
             self.selected = 0;
         }

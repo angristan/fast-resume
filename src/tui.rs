@@ -238,7 +238,9 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
+    use std::time::Duration;
+
+    use chrono::{Duration as ChronoDuration, Local};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
     use tempfile::tempdir;
@@ -308,18 +310,26 @@ mod tests {
         sessions: Vec<Session>,
         directory_filter: Option<String>,
     ) -> AppState {
+        test_state_and_index(sessions, directory_filter).0
+    }
+
+    fn test_state_and_index(
+        sessions: Vec<Session>,
+        directory_filter: Option<String>,
+    ) -> (AppState, SessionIndex) {
         let temp = tempdir().unwrap();
         let path = temp.keep();
         let index = SessionIndex::open(path.join("index")).unwrap();
         index.rebuild(sessions).unwrap();
-        AppState::new(
+        let state = AppState::new(
             String::new(),
             None,
             directory_filter,
             false,
-            SearchEngine::from_index(index),
+            SearchEngine::from_index(index.clone()),
             None,
-        )
+        );
+        (state, index)
     }
 
     fn type_query(state: &mut AppState, query: &str) {
@@ -591,6 +601,38 @@ mod tests {
         ));
 
         assert_eq!(state.selected, 0);
+        assert_eq!(state.selected_session().unwrap().id, "b");
+    }
+
+    #[test]
+    fn background_refresh_preserves_selected_session_identity() {
+        let base = Local::now();
+        let mut first = session("a");
+        first.timestamp = base + ChronoDuration::seconds(2);
+        let mut selected = session("b");
+        selected.timestamp = base + ChronoDuration::seconds(1);
+        let mut last = session("c");
+        last.timestamp = base;
+        let (mut state, index) =
+            test_state_and_index(vec![first.clone(), selected.clone(), last.clone()], None);
+        state.selected = 1;
+        assert_eq!(state.selected_session().unwrap().id, "b");
+
+        let mut newer = session("newer");
+        newer.timestamp = base + ChronoDuration::seconds(3);
+        index.rebuild(vec![newer, first, selected, last]).unwrap();
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Progress {
+                elapsed: Duration::ZERO,
+                new_or_modified: 1,
+                deleted: 0,
+                total: 4,
+            },
+        );
+
+        assert_eq!(state.selected, 2);
         assert_eq!(state.selected_session().unwrap().id, "b");
     }
 
