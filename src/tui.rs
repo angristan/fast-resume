@@ -722,6 +722,20 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_y_does_not_confirm_yolo_modal() {
+        let mut state = test_state(vec![session("a")]);
+
+        handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+        assert!(state.modal.is_some());
+
+        let exit = handle_key(&mut state, key(KeyCode::Char('y'), KeyModifiers::CONTROL)).unwrap();
+
+        assert!(exit.is_none());
+        assert!(state.modal.is_some());
+        assert!(!state.modal.as_ref().unwrap().selected);
+    }
+
+    #[test]
     fn enter_resumes_crush_sessions() {
         let mut crush = session("crush-1");
         crush.agent = "crush".to_string();

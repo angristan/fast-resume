@@ -89,26 +89,26 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExi
         return Ok(None);
     };
 
-    match key.code {
-        KeyCode::Esc => state.modal = None,
-        KeyCode::Left => modal.selected = false,
-        KeyCode::Right => modal.selected = true,
-        KeyCode::Tab | KeyCode::BackTab => {
+    match (key.code, key.modifiers) {
+        (KeyCode::Esc, _) => state.modal = None,
+        (KeyCode::Left, _) => modal.selected = false,
+        (KeyCode::Right, _) => modal.selected = true,
+        (KeyCode::Tab | KeyCode::BackTab, _) => {
             modal.selected = !modal.selected;
         }
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
+        (KeyCode::Char('y') | KeyCode::Char('Y'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
             let action = modal.action;
             let session = modal.session.clone();
             state.modal = None;
             return finish_action(state, action, true, session);
         }
-        KeyCode::Char('n') | KeyCode::Char('N') => {
+        (KeyCode::Char('n') | KeyCode::Char('N'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
             let action = modal.action;
             let session = modal.session.clone();
             state.modal = None;
             return finish_action(state, action, false, session);
         }
-        KeyCode::Enter => {
+        (KeyCode::Enter, _) => {
             let yolo = modal.selected;
             let action = modal.action;
             let session = modal.session.clone();
