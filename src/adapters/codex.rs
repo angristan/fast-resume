@@ -10,8 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    codex_session_id_from_path, content_texts, deleted_ids_for_agent, fallback_session_id,
-    parse_timestamp_seconds, raw_stats_for_tree, session_needs_update, string_at,
+    codex_session_id_from_path, content_texts, deleted_ids_for_agent, failed_incremental_scan,
+    fallback_session_id, parse_timestamp_seconds, raw_stats_for_tree, session_needs_update,
+    string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -195,19 +196,24 @@ impl CodexAdapter {
         fallback_session_id(path)
     }
 
-    fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
+    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
         let mut current_files = HashMap::new();
         if !self.sessions_dir.exists() {
-            return current_files;
+            return Some(current_files);
+        }
+        if !self.sessions_dir.is_dir() {
+            return None;
         }
 
         let thread_index = self.load_thread_index();
-        for entry in WalkDir::new(&self.sessions_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("jsonl"))
-        {
+        for entry in WalkDir::new(&self.sessions_dir) {
+            let Ok(entry) = entry else {
+                return None;
+            };
             let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
             let session_id = self.session_id_from_file(path);
             let mut mtime = file_mtime_seconds(path);
             if let Some((_, index_mtime)) = thread_index.get(&session_id) {
@@ -215,7 +221,7 @@ impl CodexAdapter {
             }
             current_files.insert(session_id, (path.to_path_buf(), mtime));
         }
-        current_files
+        Some(current_files)
     }
 }
 
@@ -243,7 +249,9 @@ impl Adapter for CodexAdapter {
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
         let thread_names = self.load_thread_names();
-        let current_files = self.scan_session_files();
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
         let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
 
@@ -273,7 +281,9 @@ impl Adapter for CodexAdapter {
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
         let thread_names = self.load_thread_names();
-        let current_files = self.scan_session_files();
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
         let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
 
@@ -515,5 +525,27 @@ mod tests {
         assert!(emitted.is_empty());
         assert!(streaming_scan.new_or_modified.is_empty());
         assert_eq!(streaming_scan.deleted_ids, vec!["parse-gone"]);
+    }
+
+    #[test]
+    fn incremental_scan_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::write(&sessions_dir, "not a directory").unwrap();
+
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+
+        let mut emitted = Vec::new();
+        let mut on_session = |session| emitted.push(session);
+        let streaming_scan = adapter.find_sessions_incremental_streaming(&known, &mut on_session);
+        assert!(emitted.is_empty());
+        assert!(streaming_scan.new_or_modified.is_empty());
+        assert!(streaming_scan.deleted_ids.is_empty());
     }
 }

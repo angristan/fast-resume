@@ -11,8 +11,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    copilot_fallback_session_id, incremental_from_files, incremental_from_files_streaming,
-    raw_stats_for_tree, string_at,
+    copilot_fallback_session_id, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -51,7 +51,10 @@ impl Adapter for CopilotCliAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
+        incremental_from_files(self.name(), known, current_files, |path| {
             self.parse_session(path)
         })
     }
@@ -61,10 +64,13 @@ impl Adapter for CopilotCliAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
         incremental_from_files_streaming(
             self.name(),
             known,
-            self.scan_session_files(),
+            current_files,
             |path| self.parse_session(path),
             on_session,
         )
@@ -85,22 +91,27 @@ impl Adapter for CopilotCliAdapter {
 }
 
 impl CopilotCliAdapter {
-    fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
+    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
         let mut current_files = HashMap::new();
         if !self.sessions_dir.exists() {
-            return current_files;
+            return Some(current_files);
+        }
+        if !self.sessions_dir.is_dir() {
+            return None;
         }
 
-        for entry in WalkDir::new(&self.sessions_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("jsonl"))
-        {
+        for entry in WalkDir::new(&self.sessions_dir) {
+            let Ok(entry) = entry else {
+                return None;
+            };
             let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
             let session_id = self.session_id_from_file(path);
             current_files.insert(session_id, (path.to_path_buf(), file_mtime_seconds(path)));
         }
-        current_files
+        Some(current_files)
     }
 
     fn session_id_from_file(&self, path: &Path) -> String {
@@ -265,5 +276,20 @@ mod tests {
             adapter.resume_command(&sessions[0], true),
             vec!["copilot", "--yolo", "--resume", "copilot-1"]
         );
+    }
+
+    #[test]
+    fn incremental_walk_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::write(&sessions_dir, "not a directory").unwrap();
+        let adapter = CopilotCliAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("copilot-cli".to_string(), "copilot-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }

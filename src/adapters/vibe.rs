@@ -9,8 +9,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    content_texts, incremental_from_files, incremental_from_files_streaming, parse_datetime,
-    raw_stats_for_tree, string_at,
+    content_texts, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, parse_datetime, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -58,7 +58,10 @@ impl Adapter for VibeAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
+        incremental_from_files(self.name(), known, current_files, |path| {
             self.parse_session(path)
         })
     }
@@ -68,10 +71,13 @@ impl Adapter for VibeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
         incremental_from_files_streaming(
             self.name(),
             known,
-            self.scan_session_files(),
+            current_files,
             |path| self.parse_session(path),
             on_session,
         )
@@ -92,13 +98,22 @@ impl Adapter for VibeAdapter {
 }
 
 impl VibeAdapter {
-    fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
+    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
         let mut current_files = HashMap::new();
+        if !self.sessions_dir.exists() {
+            return Some(current_files);
+        }
+        if !self.sessions_dir.is_dir() {
+            return None;
+        }
         let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
-            return current_files;
+            return None;
         };
 
-        for entry in entries.filter_map(Result::ok) {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return None;
+            };
             let session_dir = entry.path();
             if !session_dir.is_dir()
                 || !session_dir
@@ -132,7 +147,7 @@ impl VibeAdapter {
             );
         }
 
-        current_files
+        Some(current_files)
     }
 
     fn parse_session(&self, session_dir: &Path) -> Option<Session> {
@@ -315,5 +330,20 @@ mod tests {
                 .content
                 .contains("Newer Vibe message")
         );
+    }
+
+    #[test]
+    fn incremental_read_dir_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::write(&sessions_dir, "not a directory").unwrap();
+        let adapter = VibeAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("vibe".to_string(), "vibe-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }

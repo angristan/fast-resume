@@ -10,8 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    content_texts, incremental_from_files, incremental_from_files_streaming,
-    parse_timestamp_seconds, raw_stats_for_tree, string_at, text_from_part,
+    content_texts, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, parse_timestamp_seconds, raw_stats_for_tree, string_at,
+    text_from_part,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -132,22 +133,34 @@ impl ClaudeAdapter {
         Some(session)
     }
 
-    fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
+    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
         let mut current_files = HashMap::new();
+        if !self.sessions_dir.exists() {
+            return Some(current_files);
+        }
+        if !self.sessions_dir.is_dir() {
+            return None;
+        }
         let Ok(projects) = fs::read_dir(&self.sessions_dir) else {
-            return current_files;
+            return None;
         };
 
-        for project in projects.filter_map(Result::ok) {
+        for project in projects {
+            let Ok(project) = project else {
+                return None;
+            };
             let project_dir = project.path();
             if !project_dir.is_dir() {
                 continue;
             }
             let project_index = claude_project_index(&project_dir);
             let Ok(files) = fs::read_dir(&project_dir) else {
-                continue;
+                return None;
             };
-            for file in files.filter_map(Result::ok) {
+            for file in files {
+                let Ok(file) = file else {
+                    return None;
+                };
                 let path = file.path();
                 if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                     continue;
@@ -174,7 +187,7 @@ impl ClaudeAdapter {
             }
         }
 
-        current_files
+        Some(current_files)
     }
 }
 
@@ -217,7 +230,10 @@ impl Adapter for ClaudeAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        incremental_from_files(self.name(), known, self.scan_session_files(), |path| {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
+        incremental_from_files(self.name(), known, current_files, |path| {
             self.parse_session(path)
         })
     }
@@ -227,10 +243,13 @@ impl Adapter for ClaudeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
+        let Some(current_files) = self.scan_session_files() else {
+            return failed_incremental_scan(self.name());
+        };
         incremental_from_files_streaming(
             self.name(),
             known,
-            self.scan_session_files(),
+            current_files,
             |path| self.parse_session(path),
             on_session,
         )
@@ -336,5 +355,20 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+    }
+
+    #[test]
+    fn incremental_read_dir_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        fs::write(&projects, "not a directory").unwrap();
+        let adapter = ClaudeAdapter::new(projects);
+        let mut known = KnownSessions::new();
+        known.insert(("claude".to_string(), "claude-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }

@@ -33,6 +33,14 @@ pub(super) fn deleted_ids_for_agent(
         .collect()
 }
 
+pub(super) fn failed_incremental_scan(agent: &'static str) -> IncrementalScan {
+    IncrementalScan {
+        agent,
+        new_or_modified: Vec::new(),
+        deleted_ids: Vec::new(),
+    }
+}
+
 pub(super) fn incremental_from_files<F>(
     agent: &'static str,
     known: &KnownSessions,
@@ -335,6 +343,15 @@ mod tests {
             panic!("unchanged sessions should not be parsed")
         });
 
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn failed_incremental_scans_do_not_delete_known_sessions() {
+        let scan = failed_incremental_scan("codex");
+
+        assert_eq!(scan.agent, "codex");
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
     }

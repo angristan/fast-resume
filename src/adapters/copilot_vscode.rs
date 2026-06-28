@@ -8,7 +8,10 @@ use url::Url;
 use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
-use super::shared::{deleted_ids_for_agent, session_needs_update, string_at, timestamp_from_ms};
+use super::shared::{
+    deleted_ids_for_agent, failed_incremental_scan, session_needs_update, string_at,
+    timestamp_from_ms,
+};
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,7 @@ impl Adapter for CopilotVsCodeAdapter {
 
     fn find_sessions(&self) -> Vec<Session> {
         self.session_files()
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|file| self.parse_session(&file))
             .collect()
@@ -81,7 +85,7 @@ impl Adapter for CopilotVsCodeAdapter {
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
-        let files = self.session_files();
+        let files = self.session_files().unwrap_or_default();
         RawAdapterStats {
             agent: self.name(),
             data_dir: self.chat_sessions_dir.display().to_string(),
@@ -105,7 +109,10 @@ impl CopilotVsCodeAdapter {
         F: FnMut(Session),
     {
         let mut current_files = HashMap::new();
-        for file in self.session_files() {
+        let Some(files) = self.session_files() else {
+            return failed_incremental_scan(self.name());
+        };
+        for file in files {
             let Some(session_id) = file.session_id() else {
                 continue;
             };
@@ -135,44 +142,65 @@ impl CopilotVsCodeAdapter {
         }
     }
 
-    fn session_files(&self) -> Vec<VscodeSessionFile> {
+    fn session_files(&self) -> Option<Vec<VscodeSessionFile>> {
         let mut files = Vec::new();
         if self.chat_sessions_dir.exists() {
-            if let Ok(read_dir) = fs::read_dir(&self.chat_sessions_dir) {
-                for entry in read_dir.filter_map(Result::ok) {
-                    let path = entry.path();
+            if !self.chat_sessions_dir.is_dir() {
+                return None;
+            }
+            let Ok(read_dir) = fs::read_dir(&self.chat_sessions_dir) else {
+                return None;
+            };
+            for entry in read_dir {
+                let Ok(entry) = entry else {
+                    return None;
+                };
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    files.push(VscodeSessionFile {
+                        path,
+                        workspace_dir: None,
+                    });
+                }
+            }
+        }
+        if self.workspace_storage_dir.exists() {
+            if !self.workspace_storage_dir.is_dir() {
+                return None;
+            }
+            let Ok(read_dir) = fs::read_dir(&self.workspace_storage_dir) else {
+                return None;
+            };
+            for entry in read_dir {
+                let Ok(entry) = entry else {
+                    return None;
+                };
+                let ws_dir = entry.path();
+                let chat_dir = ws_dir.join("chatSessions");
+                if !chat_dir.exists() {
+                    continue;
+                }
+                if !chat_dir.is_dir() {
+                    return None;
+                }
+                let Ok(chat_files) = fs::read_dir(chat_dir) else {
+                    return None;
+                };
+                for chat_file in chat_files {
+                    let Ok(chat_file) = chat_file else {
+                        return None;
+                    };
+                    let path = chat_file.path();
                     if path.extension().and_then(|e| e.to_str()) == Some("json") {
                         files.push(VscodeSessionFile {
                             path,
-                            workspace_dir: None,
+                            workspace_dir: Some(ws_dir.clone()),
                         });
                     }
                 }
             }
         }
-        if self.workspace_storage_dir.exists() {
-            if let Ok(read_dir) = fs::read_dir(&self.workspace_storage_dir) {
-                for entry in read_dir.filter_map(Result::ok) {
-                    let ws_dir = entry.path();
-                    let chat_dir = ws_dir.join("chatSessions");
-                    if !chat_dir.exists() {
-                        continue;
-                    }
-                    if let Ok(chat_files) = fs::read_dir(chat_dir) {
-                        for chat_file in chat_files.filter_map(Result::ok) {
-                            let path = chat_file.path();
-                            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                                files.push(VscodeSessionFile {
-                                    path,
-                                    workspace_dir: Some(ws_dir.clone()),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        files
+        Some(files)
     }
 
     fn parse_session(&self, file: &VscodeSessionFile) -> Option<Session> {
@@ -367,5 +395,23 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["vscode-gone"]);
+    }
+
+    #[test]
+    fn incremental_read_dir_errors_do_not_delete_known_sessions() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::write(&chat_sessions_dir, "not a directory").unwrap();
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(("copilot-vscode".to_string(), "vscode-1".to_string()), 1.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }
