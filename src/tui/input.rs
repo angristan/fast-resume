@@ -66,13 +66,6 @@ fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<Tu
         return Ok(None);
     };
 
-    if matches!(action, PendingAction::Resume) && session.agent == "crush" {
-        state.status =
-            "Crush sessions are searchable; open crush in the project and use its session picker"
-                .to_string();
-        return Ok(None);
-    }
-
     let supports_yolo = adapter_for(&session.agent)
         .as_ref()
         .is_some_and(|adapter| adapter.supports_yolo());

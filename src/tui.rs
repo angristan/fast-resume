@@ -573,4 +573,24 @@ mod tests {
             super::TuiExit::Quit => panic!("expected resume exit"),
         }
     }
+
+    #[test]
+    fn enter_resumes_crush_sessions() {
+        let mut crush = session("crush-1");
+        crush.agent = "crush".to_string();
+        let mut state = test_state(vec![crush]);
+        state.yolo = true;
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        match exit {
+            super::TuiExit::Resume { command, directory } => {
+                assert_eq!(command, vec!["crush", "--yolo", "--session", "crush-1"]);
+                assert_eq!(directory, "/tmp/fast-resume");
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
 }
