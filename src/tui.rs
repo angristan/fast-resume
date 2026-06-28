@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_force_current_search_before_using_selection() {
+    fn actions_wait_for_pending_search_results_before_using_selection() {
         let mut state = test_state(vec![session("a")]);
 
         handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
@@ -645,10 +645,34 @@ mod tests {
         let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
 
         assert!(exit.is_none());
-        assert!(state.visible.is_empty());
+        assert_eq!(state.visible.len(), 1);
         assert!(state.modal.is_none());
-        assert!(!state.apply_search_result(stale.generation, vec![session("stale")], 10.0));
+        assert!(state.status.contains("searching"));
+        assert!(state.apply_search_result(stale.generation, Vec::new(), 10.0));
         assert!(state.visible.is_empty());
+    }
+
+    #[test]
+    fn actions_do_not_use_matching_results_before_redraw() {
+        let mut state = test_state(vec![session("a"), session("b")]);
+        state.selected = state
+            .visible
+            .iter()
+            .position(|session| session.id == "a")
+            .unwrap();
+        assert_eq!(state.selected_session().unwrap().id, "a");
+
+        handle_key(&mut state, key(KeyCode::Char('b'), KeyModifiers::NONE)).unwrap();
+        let request = state.take_search_request().unwrap();
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+
+        assert!(exit.is_none());
+        assert!(state.modal.is_none());
+        assert_eq!(state.selected_session().unwrap().id, "a");
+        assert!(state.status.contains("searching"));
+
+        assert!(state.apply_search_result(request.generation, vec![session("b")], 10.0));
+        assert_eq!(state.selected_session().unwrap().id, "b");
     }
 
     #[test]

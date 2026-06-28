@@ -182,10 +182,8 @@ impl AppState {
         }
     }
 
-    pub(super) fn ensure_current_search(&mut self) {
-        if self.search_requested || self.applied_search_generation != self.search_generation {
-            self.refresh_search();
-        }
+    pub(super) fn search_pending(&self) -> bool {
+        self.search_requested || self.applied_search_generation != self.search_generation
     }
 
     pub(super) fn selected_session(&self) -> Option<&Session> {
