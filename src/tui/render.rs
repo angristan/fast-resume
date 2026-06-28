@@ -38,12 +38,14 @@ pub(super) fn draw(frame: &mut Frame, state: &AppState) {
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, state: &AppState) {
-    let scan = if state.scanning { " refreshing" } else { "" };
-    let left = Line::from(vec![
+    frame.render_widget(Paragraph::new(header_line(state, area.width)), area);
+}
+
+fn header_line(state: &AppState, width: u16) -> Line<'static> {
+    let left_spans = vec![
         Span::styled("fast-resume", Style::new().bold().fg(ACCENT)),
         Span::raw(format!(" v{VERSION}")),
-        Span::styled(scan, Style::new().fg(WARNING)),
-    ]);
+    ];
     let count_agent_filter = state.count_agent_filter();
     let count = state.engine.count_for_agent(count_agent_filter.as_deref());
     let right = format!(
@@ -52,14 +54,34 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppState) {
         count,
         state.last_search_ms
     );
-    let mut spans = left.spans;
-    let pad = area
-        .width
-        .saturating_sub(line_width(&Line::from(spans.clone())) as u16)
-        .saturating_sub(right.width() as u16);
+    let right_width = right.width();
+    let mut spans = left_spans;
+    let refresh_gap = if state.refresh_status.is_empty() {
+        0
+    } else {
+        2
+    };
+    let base_width = line_width(&Line::from(spans.clone())) + right_width + refresh_gap + 2;
+    let refresh_width = (width as usize).saturating_sub(base_width);
+    if !state.refresh_status.is_empty() && refresh_width >= 4 {
+        let style = if state.scanning {
+            Style::new().fg(WARNING)
+        } else {
+            Style::new().fg(Color::DarkGray)
+        };
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            truncate(&state.refresh_status, refresh_width),
+            style,
+        ));
+    }
+
+    let pad = (width as usize)
+        .saturating_sub(line_width(&Line::from(spans.clone())))
+        .saturating_sub(right_width);
     spans.push(Span::raw(" ".repeat(pad as usize)));
     spans.push(Span::styled(right, Style::new().fg(Color::DarkGray)));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    Line::from(spans)
 }
 
 fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {

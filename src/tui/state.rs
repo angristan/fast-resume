@@ -61,6 +61,7 @@ pub(super) struct AppState {
     pub(super) yolo: bool,
     pub(super) scanning: bool,
     pub(super) status: String,
+    pub(super) refresh_status: String,
     pub(super) last_search_ms: f64,
     pub(super) show_preview: bool,
     pub(super) modal: Option<YoloModal>,
@@ -92,7 +93,8 @@ impl AppState {
             directory_filter,
             yolo,
             scanning: true,
-            status: "loading Tantivy index; refreshing session stores".to_string(),
+            status: String::new(),
+            refresh_status: "refreshing session stores".to_string(),
             last_search_ms: 0.0,
             show_preview: true,
             modal: None,
@@ -498,10 +500,8 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
             deleted,
             total,
         } => {
-            state.status = format!(
-                "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
-                elapsed.as_secs_f64() * 1000.0
-            );
+            state.refresh_status =
+                refresh_status("refreshing", total, new_or_modified, deleted, elapsed);
             state.request_search_preserving_selection(true);
         }
         ScanMessage::Finished {
@@ -512,11 +512,33 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
         } => {
             let _ = state.engine.reload();
             state.scanning = false;
-            state.status = format!(
-                "refresh complete: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
-                elapsed.as_secs_f64() * 1000.0
-            );
+            state.refresh_status =
+                refresh_status("refreshed", total, new_or_modified, deleted, elapsed);
             state.request_search_preserving_selection(true);
         }
+    }
+}
+
+fn refresh_status(
+    label: &str,
+    total: usize,
+    new_or_modified: usize,
+    deleted: usize,
+    elapsed: Duration,
+) -> String {
+    let mut status = format!("{label}: {total} sessions, {new_or_modified} changed");
+    if deleted > 0 {
+        status.push_str(&format!(", {deleted} deleted"));
+    }
+    status.push_str(&format!(", {}", elapsed_label(elapsed)));
+    status
+}
+
+fn elapsed_label(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs_f64();
+    if seconds >= 1.0 {
+        format!("{seconds:.1}s")
+    } else {
+        format!("{:.0}ms", seconds * 1000.0)
     }
 }

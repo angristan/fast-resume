@@ -753,6 +753,28 @@ mod tests {
     }
 
     #[test]
+    fn refresh_messages_do_not_overwrite_footer_status() {
+        let mut state = test_state(vec![session("a")]);
+        state.status = "copied: codex resume abc".to_string();
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Finished {
+                elapsed: Duration::from_millis(17_784),
+                new_or_modified: 1_964,
+                deleted: 0,
+                total: 1_964,
+            },
+        );
+
+        assert_eq!(state.status, "copied: codex resume abc");
+        assert_eq!(
+            state.refresh_status,
+            "refreshed: 1964 sessions, 1964 changed, 17.8s"
+        );
+    }
+
+    #[test]
     fn actions_wait_for_pending_search_results_before_using_selection() {
         let mut state = test_state(vec![session("a")]);
 
