@@ -10,6 +10,8 @@ use super::text::char_to_byte_idx;
 
 const DATE_SUGGESTIONS: [&str; 4] = ["today", "yesterday", "week", "month"];
 
+pub(super) const PENDING_SEARCH_STATUS: &str = "searching; press again when results update";
+
 pub(super) enum ScanMessage {
     Progress {
         elapsed: Duration,
@@ -160,6 +162,9 @@ impl AppState {
         self.applied_search_generation = generation;
         self.update_selection_after_search(None);
         self.preview_scroll = 0;
+        if self.status == PENDING_SEARCH_STATUS {
+            self.status.clear();
+        }
         true
     }
 

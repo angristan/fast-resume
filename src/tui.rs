@@ -650,6 +650,7 @@ mod tests {
         assert!(state.status.contains("searching"));
         assert!(state.apply_search_result(stale.generation, Vec::new(), 10.0));
         assert!(state.visible.is_empty());
+        assert!(state.status.is_empty());
     }
 
     #[test]
@@ -673,6 +674,7 @@ mod tests {
 
         assert!(state.apply_search_result(request.generation, vec![session("b")], 10.0));
         assert_eq!(state.selected_session().unwrap().id, "b");
+        assert!(state.status.is_empty());
     }
 
     #[test]

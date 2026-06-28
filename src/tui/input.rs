@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::adapters::adapter_for;
 
 use super::TuiExit;
-use super::state::{AppState, PendingAction, YoloModal};
+use super::state::{AppState, PENDING_SEARCH_STATUS, PendingAction, YoloModal};
 use super::text::{shell_join, shell_quote};
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExit>> {
@@ -62,7 +62,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
 
 fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<TuiExit>> {
     if state.search_pending() {
-        state.status = "searching; press again when results update".to_string();
+        state.status = PENDING_SEARCH_STATUS.to_string();
         return Ok(None);
     }
     let Some(session) = state.selected_session().cloned() else {
