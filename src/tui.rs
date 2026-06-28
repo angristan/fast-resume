@@ -181,9 +181,12 @@ fn latest_search_request(
     request_rx: &Receiver<SearchRequest>,
     mut request: SearchRequest,
 ) -> SearchRequest {
+    let mut reload_index = request.reload_index;
     while let Ok(latest) = request_rx.try_recv() {
+        reload_index |= latest.reload_index;
         request = latest;
     }
+    request.reload_index = reload_index;
     request
 }
 
@@ -318,6 +321,21 @@ mod tests {
 
         assert_eq!(latest.generation, 3);
         assert_eq!(latest.query, "third");
+    }
+
+    #[test]
+    fn coalesced_search_requests_preserve_reload() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut refresh = search_request(2, "second");
+        refresh.reload_index = true;
+        tx.send(refresh).unwrap();
+        tx.send(search_request(3, "third")).unwrap();
+
+        let latest = super::latest_search_request(&rx, search_request(1, "first"));
+
+        assert_eq!(latest.generation, 3);
+        assert_eq!(latest.query, "third");
+        assert!(latest.reload_index);
     }
 
     fn test_state_with_directory_filter(
