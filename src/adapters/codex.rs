@@ -244,16 +244,18 @@ impl Adapter for CodexAdapter {
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
         let thread_names = self.load_thread_names();
         let current_files = self.scan_session_files();
-        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
 
         for (session_id, (path, mtime)) in current_files {
             if !session_needs_update(known, self.name(), &session_id, mtime) {
+                current_ids.insert(session_id);
                 continue;
             }
 
             if let Some(mut session) = self.parse_session(&path, &thread_names) {
                 session.mtime = mtime;
+                current_ids.insert(session_id);
                 new_or_modified.push(session);
             }
         }
@@ -272,17 +274,19 @@ impl Adapter for CodexAdapter {
     ) -> IncrementalScan {
         let thread_names = self.load_thread_names();
         let current_files = self.scan_session_files();
-        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
 
         for (session_id, (path, mtime)) in current_files {
             if !session_needs_update(known, self.name(), &session_id, mtime) {
+                current_ids.insert(session_id);
                 continue;
             }
 
             if let Some(mut session) = self.parse_session(&path, &thread_names) {
                 session.mtime = mtime;
                 on_session(session.clone());
+                current_ids.insert(session_id);
                 new_or_modified.push(session);
             }
         }
@@ -486,5 +490,30 @@ mod tests {
         let unchanged = adapter.find_sessions_incremental(&refreshed_known);
         assert!(unchanged.new_or_modified.is_empty());
         assert!(unchanged.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_deletes_changed_file_that_no_longer_parses() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
+        let session_file = sessions_dir.join("2026/06/21/rollout-parse-gone.jsonl");
+        fs::write(&session_file, "{").unwrap();
+
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "parse-gone".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["parse-gone"]);
+
+        let mut emitted = Vec::new();
+        let mut on_session = |session| emitted.push(session);
+        let streaming_scan = adapter.find_sessions_incremental_streaming(&known, &mut on_session);
+        assert!(emitted.is_empty());
+        assert!(streaming_scan.new_or_modified.is_empty());
+        assert_eq!(streaming_scan.deleted_ids, vec!["parse-gone"]);
     }
 }

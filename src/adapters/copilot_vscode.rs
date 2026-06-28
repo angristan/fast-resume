@@ -113,15 +113,17 @@ impl CopilotVsCodeAdapter {
             current_files.insert(session_id, (file, mtime));
         }
 
-        let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+        let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
         for (session_id, (file, mtime)) in current_files {
             if !session_needs_update(known, self.name(), &session_id, mtime) {
+                current_ids.insert(session_id);
                 continue;
             }
             if let Some(mut session) = self.parse_session(&file) {
                 session.mtime = mtime;
                 on_session(session.clone());
+                current_ids.insert(session_id);
                 new_or_modified.push(session);
             }
         }
@@ -341,5 +343,29 @@ mod tests {
         let scan = adapter.find_sessions_incremental(&known);
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_deletes_changed_file_that_no_longer_parses() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let path = chat_sessions_dir.join("vscode-gone.json");
+        fs::write(&path, "{").unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("copilot-vscode".to_string(), "vscode-gone".to_string()),
+            0.0,
+        );
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["vscode-gone"]);
     }
 }
