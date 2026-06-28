@@ -28,6 +28,15 @@ struct VscodeSessionFile {
 
 impl VscodeSessionFile {
     fn session_id(&self) -> Option<String> {
+        let data: Value = serde_json::from_slice(&fs::read(&self.path).ok()?).ok()?;
+        let session_id = string_at(&data, &["sessionId"]);
+        if !session_id.is_empty() {
+            return Some(session_id);
+        }
+        self.fallback_session_id()
+    }
+
+    fn fallback_session_id(&self) -> Option<String> {
         self.path
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -205,7 +214,14 @@ impl CopilotVsCodeAdapter {
 
     fn parse_session(&self, file: &VscodeSessionFile) -> Option<Session> {
         let data: Value = serde_json::from_slice(&fs::read(&file.path).ok()?).ok()?;
-        let session_id = file.session_id()?;
+        let session_id = {
+            let id = string_at(&data, &["sessionId"]);
+            if id.is_empty() {
+                file.fallback_session_id()?
+            } else {
+                id
+            }
+        };
         let mut title = string_at(&data, &["customTitle"]);
         let requests = data.get("requests")?.as_array()?;
         if requests.is_empty() {
@@ -351,12 +367,78 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_incremental_scan_uses_file_stem_without_parsing_json() {
+    fn parses_session_id_from_json_instead_of_filename() {
         let temp = tempdir().unwrap();
         let chat_sessions_dir = temp.path().join("chat");
         fs::create_dir_all(&chat_sessions_dir).unwrap();
-        let path = chat_sessions_dir.join("vscode-1.json");
-        fs::write(&path, "{").unwrap();
+        fs::write(
+            chat_sessions_dir.join("random-uuid-filename.json"),
+            json!({
+                "sessionId": "actual-session-id-from-json",
+                "requests": [{
+                    "message": {"text": "Use the JSON identity"},
+                    "response": [{"value": "Done"}]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "actual-session-id-from-json");
+    }
+
+    #[test]
+    fn parses_filename_fallback_when_json_session_id_is_missing() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        fs::write(
+            chat_sessions_dir.join("fallback-id-test.json"),
+            json!({
+                "requests": [{
+                    "message": {"text": "No JSON identity"},
+                    "response": [{"value": "Done"}]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "fallback-id-test");
+    }
+
+    #[test]
+    fn unchanged_incremental_scan_uses_json_session_id() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let path = chat_sessions_dir.join("uuid-filename-12345.json");
+        fs::write(
+            &path,
+            json!({
+                "sessionId": "json-session-id-abc",
+                "requests": [{
+                    "message": {"text": "Test for incremental"},
+                    "response": [{"value": "Response"}]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
 
         let adapter = CopilotVsCodeAdapter {
             chat_sessions_dir,
@@ -364,7 +446,10 @@ mod tests {
         };
         let mut known = KnownSessions::new();
         known.insert(
-            ("copilot-vscode".to_string(), "vscode-1".to_string()),
+            (
+                "copilot-vscode".to_string(),
+                "json-session-id-abc".to_string(),
+            ),
             file_mtime_seconds(&path),
         );
 
