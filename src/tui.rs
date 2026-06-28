@@ -636,6 +636,26 @@ mod tests {
     }
 
     #[test]
+    fn yolo_modal_arrows_select_buttons_directionally() {
+        let mut state = test_state(vec![session("a")]);
+
+        handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE)).unwrap();
+        assert!(!state.modal.as_ref().unwrap().selected);
+
+        handle_key(&mut state, key(KeyCode::Left, KeyModifiers::NONE)).unwrap();
+        assert!(!state.modal.as_ref().unwrap().selected);
+
+        handle_key(&mut state, key(KeyCode::Right, KeyModifiers::NONE)).unwrap();
+        assert!(state.modal.as_ref().unwrap().selected);
+
+        handle_key(&mut state, key(KeyCode::Left, KeyModifiers::NONE)).unwrap();
+        assert!(!state.modal.as_ref().unwrap().selected);
+
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+        assert!(state.modal.as_ref().unwrap().selected);
+    }
+
+    #[test]
     fn enter_resumes_crush_sessions() {
         let mut crush = session("crush-1");
         crush.agent = "crush".to_string();

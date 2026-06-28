@@ -88,7 +88,9 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExi
 
     match key.code {
         KeyCode::Esc => state.modal = None,
-        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+        KeyCode::Left => modal.selected = false,
+        KeyCode::Right => modal.selected = true,
+        KeyCode::Tab | KeyCode::BackTab => {
             modal.selected = !modal.selected;
         }
         KeyCode::Char('y') | KeyCode::Char('Y') => {
