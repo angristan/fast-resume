@@ -201,7 +201,8 @@ Options:
 
 | Key             | Action            |
 | --------------- | ----------------- |
-| `Tab` / `←` `→` | Toggle selection  |
+| `Tab`           | Toggle selection  |
+| `←` / `→`       | Select No / Yolo  |
 | `Enter`         | Confirm selection |
 | `y`             | Select Yolo       |
 | `n`             | Select No         |
