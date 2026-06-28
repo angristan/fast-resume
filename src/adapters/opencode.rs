@@ -254,10 +254,13 @@ fn load_opencode_db_incremental(
 
     let mut current_ids = HashSet::new();
     let mut sessions_to_fetch = Vec::new();
+    let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
     for row in rows.filter_map(Result::ok) {
         let (id, title, directory, time_created, time_updated) = row;
         current_ids.insert(id.clone());
-        let timestamp_ms = time_created.max(time_updated);
+        let timestamp_ms = time_created
+            .max(time_updated)
+            .max(activity_mtimes.get(&id).copied().unwrap_or_default());
         let mtime = timestamp_from_ms(Some(timestamp_ms))
             .map(datetime_to_seconds)
             .unwrap_or_else(|| file_mtime_seconds(db_path));
@@ -367,6 +370,73 @@ fn load_opencode_db_incremental(
         agent,
         new_or_modified,
         deleted_ids,
+    }
+}
+
+fn opencode_activity_mtimes_by_session(conn: &Connection) -> HashMap<String, i64> {
+    let mut mtimes = HashMap::new();
+    collect_opencode_activity_mtimes(conn, "message", &mut mtimes);
+    collect_opencode_activity_mtimes(conn, "part", &mut mtimes);
+    mtimes
+}
+
+fn collect_opencode_activity_mtimes(
+    conn: &Connection,
+    table: &str,
+    mtimes: &mut HashMap<String, i64>,
+) {
+    let columns = table_columns(conn, table);
+    if !columns.contains("session_id") {
+        return;
+    }
+    let Some(time_expr) = row_time_expr(&columns) else {
+        return;
+    };
+
+    let query = format!("SELECT session_id, MAX({time_expr}) FROM {table} GROUP BY session_id");
+    let Ok(mut stmt) = conn.prepare(&query) else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+        ))
+    }) else {
+        return;
+    };
+
+    for (session_id, mtime) in rows.filter_map(Result::ok) {
+        mtimes
+            .entry(session_id)
+            .and_modify(|known| *known = (*known).max(mtime))
+            .or_insert(mtime);
+    }
+}
+
+fn table_columns(conn: &Connection, table: &str) -> HashSet<String> {
+    let query = format!("PRAGMA table_info({table})");
+    let Ok(mut stmt) = conn.prepare(&query) else {
+        return HashSet::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) else {
+        return HashSet::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+fn row_time_expr(columns: &HashSet<String>) -> Option<String> {
+    let mut parts = Vec::new();
+    if columns.contains("time_created") {
+        parts.push("COALESCE(time_created, 0)");
+    }
+    if columns.contains("time_updated") {
+        parts.push("COALESCE(time_updated, 0)");
+    }
+    match parts.as_slice() {
+        [] => None,
+        [only] => Some((*only).to_string()),
+        _ => Some(format!("MAX({})", parts.join(", "))),
     }
 }
 
@@ -760,5 +830,79 @@ mod tests {
         let scan = adapter.find_sessions_incremental(&known);
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn sqlite_incremental_uses_message_and_part_mtimes() {
+        let temp = tempdir().unwrap();
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                time_updated INTEGER,
+                data TEXT
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT,
+                session_id TEXT,
+                time_created INTEGER,
+                time_updated INTEGER,
+                data TEXT
+            );
+            INSERT INTO session
+                (id, title, directory, time_created, time_updated)
+                VALUES ('opencode-1', 'OpenCode thread', '/work/opencode', 1720000000000, 1720000000000);
+            INSERT INTO message
+                (id, session_id, time_created, time_updated, data)
+                VALUES ('msg-1', 'opencode-1', 1720000000001, 1720000000500, '{"role":"user"}');
+            INSERT INTO part
+                (id, message_id, session_id, time_created, time_updated, data)
+                VALUES ('part-1', 'msg-1', 'opencode-1', 1720000000002, 1720000000600, '{"type":"text","text":"Updated OpenCode content"}');
+            "#,
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir,
+            db_path,
+            legacy_dir: temp.path().join("legacy"),
+        };
+        let mut known = KnownSessions::new();
+        let session_row_mtime = timestamp_from_ms(Some(1_720_000_000_000))
+            .map(datetime_to_seconds)
+            .unwrap();
+        known.insert(
+            ("opencode".to_string(), "opencode-1".to_string()),
+            session_row_mtime,
+        );
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(scan.new_or_modified[0].content.contains("Updated OpenCode"));
+        assert!(scan.new_or_modified[0].mtime > session_row_mtime);
+
+        let mut refreshed_known = KnownSessions::new();
+        refreshed_known.insert(
+            ("opencode".to_string(), "opencode-1".to_string()),
+            scan.new_or_modified[0].mtime,
+        );
+        let unchanged = adapter.find_sessions_incremental(&refreshed_known);
+        assert!(unchanged.new_or_modified.is_empty());
+        assert!(unchanged.deleted_ids.is_empty());
     }
 }
