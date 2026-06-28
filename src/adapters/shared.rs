@@ -17,7 +17,7 @@ pub(super) fn session_needs_update(
 ) -> bool {
     known
         .get(&(agent.to_string(), id.to_string()))
-        .is_none_or(|known_mtime| mtime > *known_mtime + MTIME_TOLERANCE)
+        .is_none_or(|known_mtime| (mtime - *known_mtime).abs() > MTIME_TOLERANCE)
 }
 
 pub(super) fn deleted_ids_for_agent(
@@ -266,5 +266,25 @@ pub(super) fn raw_stats_for_tree(
         available: true,
         file_count: seen.len(),
         total_bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mtime_decreases_trigger_incremental_updates() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 10.0);
+
+        assert!(!session_needs_update(
+            &known,
+            "codex",
+            "abc123",
+            10.0 + MTIME_TOLERANCE / 2.0
+        ));
+        assert!(session_needs_update(&known, "codex", "abc123", 9.0));
+        assert!(session_needs_update(&known, "codex", "missing", 9.0));
     }
 }
