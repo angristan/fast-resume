@@ -451,6 +451,7 @@ fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> 
     if !session_dir.exists() {
         return Vec::new();
     }
+    let activity_mtimes = opencode_legacy_activity_mtimes(legacy_dir);
 
     let mut messages_by_session: HashMap<String, Vec<(PathBuf, String, String)>> = HashMap::new();
     if message_dir.exists() {
@@ -571,7 +572,8 @@ fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> 
             rendered.join("\n\n"),
             session_messages.len(),
         );
-        session.mtime = opencode_legacy_mtime(&data, path);
+        session.mtime = opencode_legacy_mtime(&data, path)
+            .max(activity_mtimes.get(&session.id).copied().unwrap_or(0.0));
         sessions.push(session);
     }
     sessions
@@ -624,6 +626,7 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf,
     if !session_dir.exists() {
         return current_files;
     }
+    let activity_mtimes = opencode_legacy_activity_mtimes(legacy_dir);
 
     for entry in WalkDir::new(&session_dir)
         .into_iter()
@@ -644,11 +647,83 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf,
         if id.is_empty() {
             continue;
         }
-        let mtime = opencode_legacy_mtime(&data, path);
+        let mtime = opencode_legacy_mtime(&data, path)
+            .max(activity_mtimes.get(&id).copied().unwrap_or(0.0));
         current_files.insert(id, (path.to_path_buf(), mtime));
     }
 
     current_files
+}
+
+fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> HashMap<String, f64> {
+    let message_dir = legacy_dir.join("message");
+    let part_dir = legacy_dir.join("part");
+    let mut session_mtimes: HashMap<String, f64> = HashMap::new();
+    let mut message_sessions: HashMap<String, String> = HashMap::new();
+
+    if message_dir.exists() {
+        for entry in WalkDir::new(&message_dir)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("msg_") && name.ends_with(".json"))
+            {
+                continue;
+            }
+            let Some(session_id) = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .filter(|id| !id.is_empty())
+                .map(ToString::to_string)
+            else {
+                continue;
+            };
+            let mtime = file_mtime_seconds(path);
+            session_mtimes
+                .entry(session_id.clone())
+                .and_modify(|known| *known = known.max(mtime))
+                .or_insert(mtime);
+            let Ok(data) = serde_json::from_slice::<Value>(&fs::read(path).unwrap_or_default())
+            else {
+                continue;
+            };
+            let msg_id = string_at(&data, &["id"]);
+            if !msg_id.is_empty() {
+                message_sessions.insert(msg_id, session_id);
+            }
+        }
+    }
+
+    if part_dir.exists() {
+        for entry in WalkDir::new(&part_dir).into_iter().filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(message_id) = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+            else {
+                continue;
+            };
+            let Some(session_id) = message_sessions.get(message_id) else {
+                continue;
+            };
+            let mtime = file_mtime_seconds(path);
+            session_mtimes
+                .entry(session_id.clone())
+                .and_modify(|known| *known = known.max(mtime))
+                .or_insert(mtime);
+        }
+    }
+
+    session_mtimes
 }
 
 fn opencode_legacy_mtime(data: &Value, path: &Path) -> f64 {
@@ -770,6 +845,70 @@ mod tests {
 
         assert_eq!(scan.new_or_modified.len(), 1);
         assert_eq!(scan.new_or_modified[0].title, "Updated title");
+        assert!(scan.new_or_modified[0].mtime > sessions[0].mtime);
+    }
+
+    #[test]
+    fn legacy_incremental_uses_part_mtime() {
+        let temp = tempdir().unwrap();
+        let legacy_dir = temp.path().join("legacy");
+        let session_dir = legacy_dir.join("session");
+        let message_dir = legacy_dir.join("message/opencode-1");
+        let part_dir = legacy_dir.join("part/msg-1");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::create_dir_all(&message_dir).unwrap();
+        fs::create_dir_all(&part_dir).unwrap();
+        fs::write(
+            session_dir.join("ses_opencode-1.json"),
+            json!({
+                "id": "opencode-1",
+                "title": "OpenCode thread",
+                "directory": "/work/opencode",
+                "time": {"updated": 1_720_000_000_000_i64}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            message_dir.join("msg_1.json"),
+            json!({"id": "msg-1", "role": "user"}).to_string(),
+        )
+        .unwrap();
+        let part_file = part_dir.join("part.json");
+        fs::write(
+            &part_file,
+            json!({"type": "text", "text": "Original OpenCode text"}).to_string(),
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir: temp.path().join("data"),
+            db_path: temp.path().join("data/opencode.db"),
+            legacy_dir,
+        };
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("opencode".to_string(), "opencode-1".to_string()),
+            sessions[0].mtime,
+        );
+
+        thread::sleep(Duration::from_millis(20));
+        fs::write(
+            &part_file,
+            json!({"type": "text", "text": "Updated OpenCode text"}).to_string(),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Updated OpenCode text")
+        );
         assert!(scan.new_or_modified[0].mtime > sessions[0].mtime);
     }
 
