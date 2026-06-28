@@ -497,7 +497,7 @@ fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> 
             rendered.join("\n\n"),
             session_messages.len(),
         );
-        session.mtime = file_mtime_seconds(path);
+        session.mtime = opencode_legacy_mtime(&data, path);
         sessions.push(session);
     }
     sessions
@@ -570,20 +570,25 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf,
         if id.is_empty() {
             continue;
         }
-        let time_ms = value_i64_at(&data, &["time", "updated"])
-            .or_else(|| value_i64_at(&data, &["time", "created"]));
-        let mtime = timestamp_from_ms(time_ms)
-            .map(datetime_to_seconds)
-            .unwrap_or_else(|| file_mtime_seconds(path));
+        let mtime = opencode_legacy_mtime(&data, path);
         current_files.insert(id, (path.to_path_buf(), mtime));
     }
 
     current_files
 }
 
+fn opencode_legacy_mtime(data: &Value, path: &Path) -> f64 {
+    let time_ms = value_i64_at(data, &["time", "updated"])
+        .or_else(|| value_i64_at(data, &["time", "created"]));
+    timestamp_from_ms(time_ms)
+        .map(datetime_to_seconds)
+        .unwrap_or(0.0)
+        .max(file_mtime_seconds(path))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, thread, time::Duration};
 
     use serde_json::json;
     use tempfile::tempdir;
@@ -640,6 +645,58 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["opencode", "/work/opencode", "--session", "opencode-1"]
         );
+    }
+
+    #[test]
+    fn legacy_incremental_uses_file_mtime_when_json_time_is_unchanged() {
+        let temp = tempdir().unwrap();
+        let legacy_dir = temp.path().join("legacy");
+        let session_dir = legacy_dir.join("session");
+        fs::create_dir_all(&session_dir).unwrap();
+        let session_file = session_dir.join("ses_opencode-1.json");
+        fs::write(
+            &session_file,
+            json!({
+                "id": "opencode-1",
+                "title": "Original title",
+                "directory": "/work/opencode",
+                "time": {"updated": 1_720_000_000_000_i64}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir: temp.path().join("data"),
+            db_path: temp.path().join("data/opencode.db"),
+            legacy_dir,
+        };
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("opencode".to_string(), "opencode-1".to_string()),
+            sessions[0].mtime,
+        );
+
+        thread::sleep(Duration::from_millis(20));
+        fs::write(
+            &session_file,
+            json!({
+                "id": "opencode-1",
+                "title": "Updated title",
+                "directory": "/work/opencode",
+                "time": {"updated": 1_720_000_000_000_i64}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].title, "Updated title");
+        assert!(scan.new_or_modified[0].mtime > sessions[0].mtime);
     }
 
     #[test]
