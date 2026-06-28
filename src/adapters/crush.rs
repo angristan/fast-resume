@@ -10,8 +10,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, truncate_title};
 
 use super::shared::{
-    deleted_ids_for_agent, failed_incremental_scan, normalize_seconds, session_needs_update,
-    string_at, timestamp_from_seconds,
+    deleted_ids_for_agent, failed_incremental_scan, session_needs_update, string_at,
+    timestamp_from_ms, timestamp_from_seconds,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -146,7 +146,7 @@ fn load_crush_db_checked(
         )
         .ok()?;
 
-    let mut data: HashMap<String, (String, i64, i64)> = HashMap::new();
+    let mut data: HashMap<String, (String, i64, i64, Option<f64>)> = HashMap::new();
     let mut messages: HashMap<String, Vec<(String, String)>> = HashMap::new();
     let rows = stmt
         .query_map([], |row| {
@@ -157,21 +157,30 @@ fn load_crush_db_checked(
                 row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
                 row.get::<_, Option<String>>(5)?.unwrap_or_default(),
                 row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                row.get::<_, Option<i64>>(7)?.unwrap_or_default(),
             ))
         })
         .ok()?;
 
     for row in rows {
-        let (id, title, updated_at, created_at, role, parts) = row.ok()?;
+        let (id, title, updated_at, created_at, role, parts, msg_created_at) = row.ok()?;
+        let activity_at = crush_activity_seconds([updated_at, created_at, msg_created_at]);
         data.entry(id.clone())
-            .or_insert((title, updated_at, created_at));
+            .and_modify(|(_, _, _, known_activity_at)| {
+                if activity_at.is_some_and(|activity_at| {
+                    known_activity_at.is_none_or(|known| activity_at > known)
+                }) {
+                    *known_activity_at = activity_at;
+                }
+            })
+            .or_insert((title, updated_at, created_at, activity_at));
         if !role.is_empty() {
             messages.entry(id).or_default().push((role, parts));
         }
     }
 
     let mut sessions = Vec::new();
-    for (id, (title, updated_at, created_at)) in data {
+    for (id, (title, updated_at, created_at, activity_at)) in data {
         let mut rendered = Vec::new();
         let mut first_user = String::new();
         for (role, parts) in messages.remove(&id).unwrap_or_default() {
@@ -193,8 +202,7 @@ fn load_crush_db_checked(
         } else {
             title
         };
-        let timestamp =
-            timestamp_from_seconds(normalize_seconds(updated_at).or(normalize_seconds(created_at)));
+        let timestamp = crush_timestamp(updated_at).or_else(|| crush_timestamp(created_at));
         let mut session = Session::new(
             id,
             agent,
@@ -204,10 +212,37 @@ fn load_crush_db_checked(
             rendered.join("\n\n"),
             rendered.len(),
         );
-        session.mtime = session.timestamp.timestamp() as f64;
+        session.mtime = activity_at.unwrap_or_else(|| session.timestamp.timestamp() as f64);
         sessions.push(session);
     }
     Some(sessions)
+}
+
+fn crush_activity_seconds(values: impl IntoIterator<Item = i64>) -> Option<f64> {
+    values
+        .into_iter()
+        .filter_map(crush_timestamp_seconds)
+        .reduce(f64::max)
+}
+
+fn crush_timestamp_seconds(value: i64) -> Option<f64> {
+    if value <= 0 {
+        None
+    } else if value > 100_000_000_000 {
+        Some(value as f64 / 1000.0)
+    } else {
+        Some(value as f64)
+    }
+}
+
+fn crush_timestamp(value: i64) -> Option<chrono::DateTime<Local>> {
+    if value <= 0 {
+        None
+    } else if value > 100_000_000_000 {
+        timestamp_from_ms(Some(value))
+    } else {
+        timestamp_from_seconds(Some(value))
+    }
 }
 
 fn crush_projects(projects_file: &Path) -> Vec<(String, PathBuf)> {
@@ -277,6 +312,7 @@ mod tests {
     use std::fs;
 
     use chrono::Local;
+    use rusqlite::Connection;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -362,5 +398,83 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_uses_millisecond_message_activity_mtime() {
+        let temp = tempdir().unwrap();
+        let projects_file = temp.path().join("projects.json");
+        let data_dir = temp.path().join("project-data");
+        fs::create_dir(&data_dir).unwrap();
+        let db_path = data_dir.join("crush.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                message_count INTEGER,
+                updated_at INTEGER,
+                created_at INTEGER
+            );
+            CREATE TABLE messages (
+                session_id TEXT,
+                role TEXT,
+                parts TEXT,
+                created_at INTEGER
+            );
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, title, message_count, updated_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            ("crush-1", "Crush thread", 1_i64, 1_720_000_000_123_i64, 1_720_000_000_000_i64),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (session_id, role, parts, created_at) VALUES (?1, ?2, ?3, ?4)",
+            (
+                "crush-1",
+                "user",
+                json!([{"type": "text", "data": {"text": "Original prompt"}}]).to_string(),
+                1_720_000_000_123_i64,
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &projects_file,
+            json!({
+                "projects": [{
+                    "path": "/work/crush",
+                    "data_dir": data_dir
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let adapter = CrushAdapter { projects_file };
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("crush".to_string(), "crush-1".to_string()),
+            sessions[0].mtime,
+        );
+
+        conn.execute(
+            "UPDATE messages SET parts = ?1, created_at = ?2 WHERE session_id = ?3",
+            (
+                json!([{"type": "text", "data": {"text": "Updated prompt"}}]).to_string(),
+                1_720_000_000_999_i64,
+                "crush-1",
+            ),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(scan.new_or_modified[0].content.contains("Updated prompt"));
+        assert!(scan.new_or_modified[0].mtime > sessions[0].mtime);
     }
 }

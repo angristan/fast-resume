@@ -235,16 +235,6 @@ pub(super) fn timestamp_from_seconds(value: Option<i64>) -> Option<DateTime<Loca
     Local.timestamp_opt(value, 0).single()
 }
 
-pub(super) fn normalize_seconds(value: i64) -> Option<i64> {
-    if value <= 0 {
-        None
-    } else if value > 100_000_000_000 {
-        Some(value / 1000)
-    } else {
-        Some(value)
-    }
-}
-
 pub(super) fn raw_stats_for_tree(
     agent: &'static str,
     dir: &Path,
