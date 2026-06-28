@@ -128,7 +128,7 @@ impl VibeAdapter {
             };
             current_files.insert(
                 session_id,
-                (session_dir, file_mtime_seconds(&metadata_file)),
+                (session_dir.clone(), vibe_session_mtime(&session_dir)),
             );
         }
 
@@ -205,21 +205,28 @@ impl VibeAdapter {
             messages.join("\n\n"),
             messages.len(),
         );
-        session.mtime = file_mtime_seconds(&metadata_file);
+        session.mtime = vibe_session_mtime(session_dir);
         session.yolo = yolo;
         Some(session)
     }
+}
+
+fn vibe_session_mtime(session_dir: &Path) -> f64 {
+    file_mtime_seconds(&session_dir.join("meta.json"))
+        .max(file_mtime_seconds(&session_dir.join("messages.jsonl")))
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
 
     use serde_json::{Value, json};
     use tempfile::tempdir;
 
-    use crate::adapters::Adapter;
+    use crate::adapters::{Adapter, KnownSessions};
 
     use super::*;
 
@@ -269,6 +276,44 @@ mod tests {
         assert_eq!(
             adapter.resume_command(&sessions[0], true),
             vec!["vibe", "--agent", "auto-approve", "--resume", "vibe-1"]
+        );
+    }
+
+    #[test]
+    fn incremental_refresh_uses_messages_mtime() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = sessions_dir.join("session_alpha");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("meta.json"),
+            json!({
+                "session_id": "vibe-1",
+                "environment": {"working_directory": "/work/vibe"},
+                "start_time": "2026-01-01T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let meta_mtime = file_mtime_seconds(&session_dir.join("meta.json"));
+        thread::sleep(Duration::from_millis(20));
+        write_jsonl(
+            &session_dir.join("messages.jsonl"),
+            &[json!({"role": "user", "content": "Newer Vibe message"})],
+        );
+
+        let adapter = VibeAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("vibe".to_string(), "vibe-1".to_string()), meta_mtime);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(scan.new_or_modified[0].mtime > meta_mtime);
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Newer Vibe message")
         );
     }
 }
