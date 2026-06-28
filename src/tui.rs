@@ -693,6 +693,46 @@ mod tests {
     }
 
     #[test]
+    fn background_refresh_does_not_preserve_selection_over_typed_search() {
+        let base = Local::now();
+        let mut first = session("a");
+        first.timestamp = base + ChronoDuration::seconds(2);
+        let mut second = session("c");
+        second.timestamp = base + ChronoDuration::seconds(1);
+        let mut stale_selection = session("stale");
+        stale_selection.timestamp = base;
+        let mut state = test_state(vec![first, second, stale_selection]);
+        state.move_selection(2);
+        assert_eq!(state.selected_session().unwrap().id, "stale");
+
+        handle_key(&mut state, key(KeyCode::Char('b'), KeyModifiers::NONE)).unwrap();
+        let typed_request = state.take_search_request().unwrap();
+        assert!(typed_request.preserve_selection.is_none());
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Progress {
+                elapsed: Duration::ZERO,
+                new_or_modified: 1,
+                deleted: 0,
+                total: 3,
+            },
+        );
+
+        let refresh_request = state.take_search_request().unwrap();
+        assert!(refresh_request.reload_index);
+        assert!(refresh_request.preserve_selection.is_none());
+        assert!(state.apply_search_result(
+            refresh_request.generation,
+            vec![session("b"), session("c")],
+            0.0,
+            refresh_request.preserve_selection.as_ref()
+        ));
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.selected_session().unwrap().id, "b");
+    }
+
+    #[test]
     fn actions_wait_for_pending_search_results_before_using_selection() {
         let mut state = test_state(vec![session("a")]);
 

@@ -141,7 +141,7 @@ impl AppState {
 
     pub(super) fn request_search_preserving_selection(&mut self, reload_index: bool) {
         self.search_reload_requested |= reload_index;
-        if !self.search_requested {
+        if !self.search_requested && self.applied_search_generation == self.search_generation {
             self.search_preserve_selection = self.selected_session_key();
         }
         self.search_requested = true;
