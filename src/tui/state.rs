@@ -100,6 +100,14 @@ impl AppState {
     }
 
     pub(super) fn refresh_search(&mut self) {
+        self.refresh_search_inner(false);
+    }
+
+    fn refresh_search_preserving_selection(&mut self) {
+        self.refresh_search_inner(true);
+    }
+
+    fn refresh_search_inner(&mut self, preserve_selection: bool) {
         self.search_requested = false;
         self.search_generation = self.search_generation.saturating_add(1);
         self.applied_search_generation = self.search_generation;
@@ -113,11 +121,7 @@ impl AppState {
             100,
         );
         self.last_search_ms = start.elapsed().as_secs_f64() * 1000.0;
-        if self.visible.is_empty() {
-            self.selected = 0;
-        } else {
-            self.selected = self.selected.min(self.visible.len() - 1);
-        }
+        self.update_selection_after_search(preserve_selection);
         self.preview_scroll = 0;
     }
 
@@ -151,13 +155,19 @@ impl AppState {
         self.visible = visible;
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
-        if self.visible.is_empty() {
-            self.selected = 0;
-        } else {
-            self.selected = self.selected.min(self.visible.len() - 1);
-        }
+        self.update_selection_after_search(false);
         self.preview_scroll = 0;
         true
+    }
+
+    fn update_selection_after_search(&mut self, preserve_selection: bool) {
+        if self.visible.is_empty() {
+            self.selected = 0;
+        } else if preserve_selection {
+            self.selected = self.selected.min(self.visible.len() - 1);
+        } else {
+            self.selected = 0;
+        }
     }
 
     pub(super) fn ensure_current_search(&mut self) {
@@ -459,7 +469,7 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
                 "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
                 elapsed.as_secs_f64() * 1000.0
             );
-            state.refresh_search();
+            state.refresh_search_preserving_selection();
         }
         ScanMessage::Finished {
             elapsed,
@@ -473,7 +483,7 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
                 "refresh complete: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
                 elapsed.as_secs_f64() * 1000.0
             );
-            state.refresh_search();
+            state.refresh_search_preserving_selection();
         }
     }
 }

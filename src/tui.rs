@@ -577,6 +577,24 @@ mod tests {
     }
 
     #[test]
+    fn new_search_results_reset_selection_to_top() {
+        let mut state = test_state(vec![session("a"), session("b"), session("c")]);
+        state.move_selection(2);
+        assert_eq!(state.selected, 2);
+
+        handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
+        let request = state.take_search_request().unwrap();
+        assert!(state.apply_search_result(
+            request.generation,
+            vec![session("b"), session("c")],
+            1.0
+        ));
+
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.selected_session().unwrap().id, "b");
+    }
+
+    #[test]
     fn actions_force_current_search_before_using_selection() {
         let mut state = test_state(vec![session("a")]);
 
