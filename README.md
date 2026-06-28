@@ -155,19 +155,24 @@ Resume sessions with auto-approve / skip-permissions flags:
 Usage: fr [OPTIONS] [QUERY]
 
 Arguments:
-  QUERY                    Search query (optional)
+  [QUERY]                 Search query
 
 Options:
-  -a, --agent [claude|codex|copilot-cli|copilot-vscode|crush|opencode|vibe]
+  -a, --agent <AGENT>
                           Filter by agent
-  -d, --directory TEXT    Filter by directory (substring match)
-  --no-tui                Output list to stdout instead of TUI
+  -d, --directory <DIRECTORY>
+                          Filter by directory substring
+  --no-tui                Output list to stdout instead of opening the TUI
   --list                  Just list sessions, don't resume
-  --rebuild               Force rebuild the session index
-  --stats                 Show index statistics
-  --yolo                  Resume with auto-approve/skip-permissions flags
-  --version               Show version
-  --help                  Show this message and exit
+  --rebuild               Force a fresh session scan and rebuild the Tantivy index
+  --stats                 Show index/session statistics
+  --yolo                  Resume sessions with auto-approve/skip-permissions flags where supported
+  --images                Render agent PNGs in the preview pane (enabled by default when supported)
+  --no-images             Disable agent PNGs in the TUI
+  --image-protocol <IMAGE_PROTOCOL>
+                          Force a terminal image protocol for --images [default: auto] [possible values: auto, kitty, sixel, iterm2]
+  -h, --help              Print help
+  -V, --version           Print version
 ```
 
 ## Keybindings
