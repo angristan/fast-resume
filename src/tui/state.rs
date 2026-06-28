@@ -32,6 +32,8 @@ pub(super) struct SearchRequest {
     pub(super) query: String,
     pub(super) agent_filter: Option<String>,
     pub(super) directory_filter: Option<String>,
+    pub(super) preserve_selection: Option<(String, String)>,
+    pub(super) reload_index: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +68,8 @@ pub(super) struct AppState {
     search_generation: u64,
     applied_search_generation: u64,
     search_requested: bool,
+    search_preserve_selection: Option<(String, String)>,
+    search_reload_requested: bool,
 }
 
 impl AppState {
@@ -96,6 +100,8 @@ impl AppState {
             search_generation: 0,
             applied_search_generation: 0,
             search_requested: false,
+            search_preserve_selection: None,
+            search_reload_requested: false,
         };
         state.refresh_search();
         state
@@ -105,15 +111,13 @@ impl AppState {
         self.refresh_search_inner(false);
     }
 
-    fn refresh_search_preserving_selection(&mut self) {
-        self.refresh_search_inner(true);
-    }
-
     fn refresh_search_inner(&mut self, preserve_selection: bool) {
         let selected_session = preserve_selection
             .then(|| self.selected_session_key())
             .flatten();
         self.search_requested = false;
+        self.search_preserve_selection = None;
+        self.search_reload_requested = false;
         self.search_generation = self.search_generation.saturating_add(1);
         self.applied_search_generation = self.search_generation;
         let start = Instant::now();
@@ -131,6 +135,15 @@ impl AppState {
     }
 
     pub(super) fn request_search(&mut self) {
+        self.search_preserve_selection = None;
+        self.search_requested = true;
+    }
+
+    pub(super) fn request_search_preserving_selection(&mut self, reload_index: bool) {
+        self.search_reload_requested |= reload_index;
+        if !self.search_requested {
+            self.search_preserve_selection = self.selected_session_key();
+        }
         self.search_requested = true;
     }
 
@@ -140,11 +153,16 @@ impl AppState {
         }
         self.search_requested = false;
         self.search_generation = self.search_generation.saturating_add(1);
+        let preserve_selection = self.search_preserve_selection.take();
+        let reload_index = self.search_reload_requested;
+        self.search_reload_requested = false;
         Some(SearchRequest {
             generation: self.search_generation,
             query: self.query.clone(),
             agent_filter: self.effective_agent_filter(),
             directory_filter: self.effective_directory_filter(),
+            preserve_selection,
+            reload_index,
         })
     }
 
@@ -153,6 +171,7 @@ impl AppState {
         generation: u64,
         visible: Vec<Session>,
         elapsed_ms: f64,
+        preserve_selection: Option<&(String, String)>,
     ) -> bool {
         if generation != self.search_generation {
             return false;
@@ -160,7 +179,7 @@ impl AppState {
         self.visible = visible;
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
-        self.update_selection_after_search(None);
+        self.update_selection_after_search(preserve_selection);
         self.preview_scroll = 0;
         if self.status == PENDING_SEARCH_STATUS {
             self.status.clear();
@@ -479,12 +498,11 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
             deleted,
             total,
         } => {
-            let _ = state.engine.reload();
             state.status = format!(
                 "refreshing: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
                 elapsed.as_secs_f64() * 1000.0
             );
-            state.refresh_search_preserving_selection();
+            state.request_search_preserving_selection(true);
         }
         ScanMessage::Finished {
             elapsed,
@@ -498,7 +516,7 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
                 "refresh complete: {total} sessions, {new_or_modified} changed, {deleted} deleted in {:.1}ms",
                 elapsed.as_secs_f64() * 1000.0
             );
-            state.refresh_search_preserving_selection();
+            state.request_search_preserving_selection(true);
         }
     }
 }

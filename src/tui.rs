@@ -102,11 +102,17 @@ fn run_loop(
         }
         if let Some(message) = latest_scan_message {
             handle_scan_message(state, message);
+            start_search_if_requested(state, &search_tx);
             needs_draw = true;
         }
 
         while let Ok(result) = search_rx.try_recv() {
-            if state.apply_search_result(result.generation, result.visible, result.elapsed_ms) {
+            if state.apply_search_result(
+                result.generation,
+                result.visible,
+                result.elapsed_ms,
+                result.preserve_selection.as_ref(),
+            ) {
                 needs_draw = true;
             }
         }
@@ -146,6 +152,7 @@ struct SearchResult {
     generation: u64,
     visible: Vec<Session>,
     elapsed_ms: f64,
+    preserve_selection: Option<(String, String)>,
 }
 
 fn start_search_if_requested(state: &mut AppState, tx: &Sender<SearchRequest>) {
@@ -159,8 +166,9 @@ fn spawn_search_worker(engine: SearchEngine) -> (Sender<SearchRequest>, Receiver
     let (request_tx, request_rx) = mpsc::channel::<SearchRequest>();
     let (result_tx, result_rx) = mpsc::channel::<SearchResult>();
     thread::spawn(move || {
+        let mut engine = engine;
         while let Ok(request) = request_rx.recv() {
-            let result = run_search(&engine, latest_search_request(&request_rx, request));
+            let result = run_search(&mut engine, latest_search_request(&request_rx, request));
             if result_tx.send(result).is_err() {
                 break;
             }
@@ -179,7 +187,10 @@ fn latest_search_request(
     request
 }
 
-fn run_search(engine: &SearchEngine, request: SearchRequest) -> SearchResult {
+fn run_search(engine: &mut SearchEngine, request: SearchRequest) -> SearchResult {
+    if request.reload_index {
+        let _ = engine.reload();
+    }
     let start = Instant::now();
     let visible = engine.search(
         &request.query,
@@ -192,6 +203,7 @@ fn run_search(engine: &SearchEngine, request: SearchRequest) -> SearchResult {
         generation: request.generation,
         visible,
         elapsed_ms,
+        preserve_selection: request.preserve_selection,
     }
 }
 
@@ -271,6 +283,8 @@ mod tests {
             query: query.to_string(),
             agent_filter: None,
             directory_filter: None,
+            preserve_selection: None,
+            reload_index: false,
         }
     }
 
@@ -580,9 +594,9 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('b'), KeyModifiers::NONE)).unwrap();
         let latest = state.take_search_request().unwrap();
 
-        assert!(!state.apply_search_result(stale.generation, Vec::new(), 10.0));
+        assert!(!state.apply_search_result(stale.generation, Vec::new(), 10.0, None));
         assert_eq!(state.visible.len(), 1);
-        assert!(state.apply_search_result(latest.generation, Vec::new(), 1.0));
+        assert!(state.apply_search_result(latest.generation, Vec::new(), 1.0, None));
         assert!(state.visible.is_empty());
     }
 
@@ -597,7 +611,8 @@ mod tests {
         assert!(state.apply_search_result(
             request.generation,
             vec![session("b"), session("c")],
-            1.0
+            1.0,
+            None
         ));
 
         assert_eq!(state.selected, 0);
@@ -620,7 +635,9 @@ mod tests {
 
         let mut newer = session("newer");
         newer.timestamp = base + ChronoDuration::seconds(3);
-        index.rebuild(vec![newer, first, selected, last]).unwrap();
+        index
+            .rebuild(vec![newer, first, selected.clone(), last])
+            .unwrap();
 
         super::state::handle_scan_message(
             &mut state,
@@ -632,6 +649,27 @@ mod tests {
             },
         );
 
+        assert_eq!(state.selected, 1);
+        assert_eq!(state.selected_session().unwrap().id, "b");
+        let request = state.take_search_request().unwrap();
+        assert!(request.reload_index);
+        assert_eq!(
+            request.preserve_selection.as_ref(),
+            Some(&(selected.agent.clone(), selected.id.clone()))
+        );
+        state.engine.reload().unwrap();
+        let visible = state.engine.search(
+            &request.query,
+            request.agent_filter.as_deref(),
+            request.directory_filter.as_deref(),
+            100,
+        );
+        assert!(state.apply_search_result(
+            request.generation,
+            visible,
+            0.0,
+            request.preserve_selection.as_ref()
+        ));
         assert_eq!(state.selected, 2);
         assert_eq!(state.selected_session().unwrap().id, "b");
     }
@@ -648,7 +686,7 @@ mod tests {
         assert_eq!(state.visible.len(), 1);
         assert!(state.modal.is_none());
         assert!(state.status.contains("searching"));
-        assert!(state.apply_search_result(stale.generation, Vec::new(), 10.0));
+        assert!(state.apply_search_result(stale.generation, Vec::new(), 10.0, None));
         assert!(state.visible.is_empty());
         assert!(state.status.is_empty());
     }
@@ -672,7 +710,7 @@ mod tests {
         assert_eq!(state.selected_session().unwrap().id, "a");
         assert!(state.status.contains("searching"));
 
-        assert!(state.apply_search_result(request.generation, vec![session("b")], 10.0));
+        assert!(state.apply_search_result(request.generation, vec![session("b")], 10.0, None));
         assert_eq!(state.selected_session().unwrap().id, "b");
         assert!(state.status.is_empty());
     }
