@@ -360,23 +360,21 @@ Sessions appear in the TUI as adapters emit changed sessions and batches are com
 
 [Tantivy](https://github.com/quickwit-oss/tantivy) is a Rust full-text search library (powers Quickwit, similar to Lucene).
 
-**Hybrid search** combines boosted exact search with a cheap title-only fuzzy fallback:
+**Hybrid search** combines boosted exact search with fuzzy fallback over titles and message content:
 
 ```rust
 let parser = QueryParser::for_index(&index, vec![title, content, directory]);
 let (exact, _) = parser.parse_query_lenient(search_text);
 let boosted_exact = BoostQuery::new(exact, 5.0);
 
-// Fuzzy expansion over full content is too expensive while typing,
-// so typo tolerance is limited to title terms with 3+ characters.
-let fuzzy_title = title_fuzzy_prefix_queries(search_text);
+let fuzzy_text = title_or_content_fuzzy_prefix_queries(search_text);
 let combined = BooleanQuery::new(vec![
     (Occur::Should, Box::new(boosted_exact)),
-    (Occur::Should, Box::new(fuzzy_title)),
+    (Occur::Should, Box::new(fuzzy_text)),
 ]);
 ```
 
-This ensures exact matches rank first while still finding typos like `auth midleware` → "authentication middleware".
+This ensures exact matches rank first while still finding typos in titles or messages, like `auth midleware` → "authentication middleware".
 
 **Query lifecycle:**
 

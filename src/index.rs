@@ -426,6 +426,25 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_search_handles_one_character_content_typo() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[session(
+                "a",
+                "claude",
+                "Deployment notes",
+                "/work/api",
+                "refresh token failure",
+            )])
+            .unwrap();
+
+        let results = index.search("tokem", None, None, 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].session.id, "a");
+    }
+
+    #[test]
     fn stats_include_content_bytes_and_activity_buckets() {
         let temp = tempdir().unwrap();
         let index = SessionIndex::open(temp.path().join("index")).unwrap();
