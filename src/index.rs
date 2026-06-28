@@ -189,31 +189,9 @@ impl SessionIndex {
             return Ok(Vec::new());
         }
 
-        let parsed = parse_query(query);
-        let effective_agent = agent_filter
-            .map(|agent| Filter {
-                include: vec![agent.to_string()],
-                exclude: Vec::new(),
-            })
-            .or(parsed.agent);
-        let effective_dir = directory_filter
-            .map(|dir| Filter {
-                include: vec![dir.to_string()],
-                exclude: Vec::new(),
-            })
-            .or(parsed.directory);
-
-        let search_text = parsed.text.trim();
         let searcher = self.searcher()?;
-        let query = queries::build(
-            &self.index,
-            self.fields,
-            search_text,
-            effective_agent,
-            effective_dir,
-            parsed.date,
-        )?;
-        if search_text.is_empty() {
+        let (query, has_text) = self.build_search_query(query, agent_filter, directory_filter)?;
+        if !has_text {
             let collector =
                 TopDocs::with_limit(limit).order_by_fast_field::<f64>("timestamp", Order::Desc);
             let hits: Vec<(Option<f64>, DocAddress)> = searcher.search(&query, &collector)?;
@@ -227,6 +205,17 @@ impl SessionIndex {
                 searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
             self.hits_to_sessions(&searcher, hits.into_iter())
         }
+    }
+
+    pub fn search_count(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+    ) -> Result<usize> {
+        let searcher = self.searcher()?;
+        let (query, _) = self.build_search_query(query, agent_filter, directory_filter)?;
+        Ok(searcher.search(&query, &Count)?)
     }
 
     pub fn stats(&self) -> Result<IndexStats> {
@@ -272,6 +261,39 @@ impl SessionIndex {
 
     fn searcher(&self) -> Result<tantivy::Searcher> {
         Ok(self.reader.searcher())
+    }
+
+    fn build_search_query(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+    ) -> Result<(Box<dyn tantivy::query::Query>, bool)> {
+        let parsed = parse_query(query);
+        let effective_agent = agent_filter
+            .map(|agent| Filter {
+                include: vec![agent.to_string()],
+                exclude: Vec::new(),
+            })
+            .or(parsed.agent);
+        let effective_dir = directory_filter
+            .map(|dir| Filter {
+                include: vec![dir.to_string()],
+                exclude: Vec::new(),
+            })
+            .or(parsed.directory);
+
+        let search_text = parsed.text.trim().to_string();
+        let has_text = !search_text.is_empty();
+        let query = queries::build(
+            &self.index,
+            self.fields,
+            &search_text,
+            effective_agent,
+            effective_dir,
+            parsed.date,
+        )?;
+        Ok((query, has_text))
     }
 
     fn search_all_addresses(

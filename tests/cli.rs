@@ -40,6 +40,18 @@ fn write_codex_session(home: &Path, id: &str, directory: &str, prompt: &str) -> 
     session_file
 }
 
+fn write_claude_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home.join(".claude/projects/project");
+    fs::create_dir_all(&session_dir).unwrap();
+    let session_file = session_dir.join(format!("{id}.jsonl"));
+    let rows = [
+        json!({"type": "user", "cwd": directory, "message": {"content": prompt}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}}),
+    ];
+    write_jsonl(&session_file, &rows);
+    session_file
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -106,4 +118,45 @@ fn list_removes_stale_sessions_on_incremental_refresh() {
     assert!(second_stderr.is_empty());
     assert!(second_stdout.contains("No sessions found."));
     assert!(!second_stdout.contains("gone123"));
+}
+
+#[test]
+fn list_footer_counts_filtered_matches() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(
+        temp.path(),
+        "backend123",
+        "/repo/backend",
+        "Needle backend investigation",
+    );
+    write_codex_session(
+        temp.path(),
+        "frontend123",
+        "/repo/frontend",
+        "Frontend polish session",
+    );
+    write_claude_session(
+        temp.path(),
+        "claude123",
+        "/repo/backend",
+        "Claude backend architecture review",
+    );
+
+    let (query_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "Needle"]));
+    assert!(query_stdout.contains("backend123"));
+    assert!(!query_stdout.contains("frontend123"));
+    assert!(!query_stdout.contains("claude123"));
+    assert!(query_stdout.contains("Showing 1 of 1 sessions"));
+
+    let (directory_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-d", "backend"]));
+    assert!(directory_stdout.contains("backend123"));
+    assert!(directory_stdout.contains("claude123"));
+    assert!(!directory_stdout.contains("frontend123"));
+    assert!(directory_stdout.contains("Showing 2 of 2 sessions"));
+
+    let (agent_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-a", "claude"]));
+    assert!(agent_stdout.contains("claude123"));
+    assert!(!agent_stdout.contains("backend123"));
+    assert!(!agent_stdout.contains("frontend123"));
+    assert!(agent_stdout.contains("Showing 1 of 1 sessions"));
 }

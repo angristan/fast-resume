@@ -103,7 +103,8 @@ fn main() -> Result<()> {
         let index = refreshed_index()?;
         let engine = SearchEngine::from_index(index);
         let results = engine.search(&query, args.agent.as_deref(), args.directory.as_deref(), 50);
-        print_sessions(&results, engine.total_len());
+        let total = engine.count_matches(&query, args.agent.as_deref(), args.directory.as_deref());
+        print_sessions(&results, total);
         return Ok(());
     }
 
