@@ -67,13 +67,34 @@ impl SearchEngine {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
+    use chrono::{Duration as ChronoDuration, Local};
     use tempfile::tempdir;
 
     use super::*;
 
     fn session(id: &str, agent: &str, title: &str, dir: &str, content: &str) -> Session {
         Session::new(id, agent, title, dir, Local::now(), content, 2)
+    }
+
+    fn session_at(
+        id: &str,
+        agent: &str,
+        title: &str,
+        dir: &str,
+        content: &str,
+        age: ChronoDuration,
+    ) -> Session {
+        Session::new(id, agent, title, dir, Local::now() - age, content, 2)
+    }
+
+    fn result_ids(engine: &SearchEngine, query: &str) -> Vec<String> {
+        let mut ids: Vec<_> = engine
+            .search(query, None, None, 10)
+            .into_iter()
+            .map(|session| session.id)
+            .collect();
+        ids.sort();
+        ids
     }
 
     #[test]
@@ -143,5 +164,71 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "a");
+    }
+
+    #[test]
+    fn executes_keyword_filter_combinations() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .rebuild(vec![
+                session_at(
+                    "claude-recent",
+                    "claude",
+                    "Auth UI",
+                    "/work/web-app",
+                    "token",
+                    ChronoDuration::hours(1),
+                ),
+                session_at(
+                    "codex-recent",
+                    "codex",
+                    "API UI",
+                    "/work/web-api",
+                    "button",
+                    ChronoDuration::hours(2),
+                ),
+                session_at(
+                    "vibe-old",
+                    "vibe",
+                    "Old UI",
+                    "/work/web-app",
+                    "archive",
+                    ChronoDuration::days(10),
+                ),
+                session_at(
+                    "opencode-recent",
+                    "opencode",
+                    "CLI",
+                    "/work/cli",
+                    "terminal",
+                    ChronoDuration::minutes(30),
+                ),
+            ])
+            .unwrap();
+        let engine = SearchEngine::from_index(index);
+
+        assert_eq!(
+            result_ids(&engine, "agent:claude,codex"),
+            vec!["claude-recent", "codex-recent"]
+        );
+        assert_eq!(
+            result_ids(&engine, "-agent:claude"),
+            vec!["codex-recent", "opencode-recent", "vibe-old"]
+        );
+        assert_eq!(
+            result_ids(&engine, "dir:!web-app"),
+            vec!["codex-recent", "opencode-recent"]
+        );
+        assert_eq!(
+            result_ids(&engine, "date:<3h"),
+            vec!["claude-recent", "codex-recent", "opencode-recent"]
+        );
+        assert_eq!(result_ids(&engine, "date:>3d"), vec!["vibe-old"]);
+        assert_eq!(result_ids(&engine, "date:!today"), vec!["vibe-old"]);
+        assert_eq!(
+            result_ids(&engine, "agent:claude,codex dir:web date:<5h"),
+            vec!["claude-recent", "codex-recent"]
+        );
     }
 }
