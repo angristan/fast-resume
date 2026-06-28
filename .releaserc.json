@@ -12,14 +12,13 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' pyproject.toml && uv lock",
-        "publishCmd": "uv build && uv publish"
+        "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' Cargo.toml && cargo generate-lockfile"
       }
     ],
     [
       "@semantic-release/git",
       {
-        "assets": ["CHANGELOG.md", "pyproject.toml", "uv.lock"],
+        "assets": ["CHANGELOG.md", "Cargo.toml", "Cargo.lock"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],
