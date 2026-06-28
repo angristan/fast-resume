@@ -9,8 +9,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    deleted_ids_for_agent, failed_incremental_scan, session_needs_update, string_at,
-    timestamp_from_ms,
+    deleted_ids_for_agent, failed_incremental_scan, json_file_has_parse_errors,
+    session_needs_update, string_at, timestamp_from_ms,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -123,7 +123,7 @@ impl CopilotVsCodeAdapter {
         };
         for file in files {
             let Some(session_id) = file.session_id() else {
-                continue;
+                return failed_incremental_scan(self.name());
             };
             let mtime = file_mtime_seconds(&file.path);
             current_files.insert(session_id, (file, mtime));
@@ -132,15 +132,18 @@ impl CopilotVsCodeAdapter {
         let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
         for (session_id, (file, mtime)) in current_files {
+            current_ids.insert(session_id.clone());
             if !session_needs_update(known, self.name(), &session_id, mtime) {
-                current_ids.insert(session_id);
                 continue;
             }
-            if let Some(mut session) = self.parse_session(&file) {
+            if json_file_has_parse_errors(&file.path) {
+                continue;
+            } else if let Some(mut session) = self.parse_session(&file) {
                 session.mtime = mtime;
                 on_session(session.clone());
-                current_ids.insert(session_id);
                 new_or_modified.push(session);
+            } else {
+                current_ids.remove(&session_id);
             }
         }
 
@@ -459,12 +462,44 @@ mod tests {
     }
 
     #[test]
-    fn incremental_deletes_changed_file_that_no_longer_parses() {
+    fn incremental_retains_malformed_changed_file() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let path = chat_sessions_dir.join("vscode-malformed.json");
+        fs::write(&path, "{").unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("copilot-vscode".to_string(), "vscode-malformed".to_string()),
+            0.0,
+        );
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_deletes_valid_changed_file_that_no_longer_qualifies() {
         let temp = tempdir().unwrap();
         let chat_sessions_dir = temp.path().join("chat");
         fs::create_dir_all(&chat_sessions_dir).unwrap();
         let path = chat_sessions_dir.join("vscode-gone.json");
-        fs::write(&path, "{").unwrap();
+        fs::write(
+            &path,
+            json!({
+                "sessionId": "vscode-gone",
+                "requests": []
+            })
+            .to_string(),
+        )
+        .unwrap();
 
         let adapter = CopilotVsCodeAdapter {
             chat_sessions_dir,

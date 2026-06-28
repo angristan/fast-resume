@@ -11,8 +11,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    copilot_fallback_session_id, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, raw_stats_for_tree, string_at,
+    IncrementalParse, copilot_fallback_session_id, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, incremental_parse_from_option, jsonl_has_parse_errors,
+    raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -55,7 +56,7 @@ impl Adapter for CopilotCliAdapter {
             return failed_incremental_scan(self.name());
         };
         incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session(path)
+            self.parse_session_incremental(path)
         })
     }
 
@@ -71,7 +72,7 @@ impl Adapter for CopilotCliAdapter {
             self.name(),
             known,
             current_files,
-            |path| self.parse_session(path),
+            |path| self.parse_session_incremental(path),
             on_session,
         )
     }
@@ -224,6 +225,14 @@ impl CopilotCliAdapter {
         );
         session.mtime = file_mtime_seconds(path);
         Some(session)
+    }
+
+    fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
+        if jsonl_has_parse_errors(path) {
+            IncrementalParse::Retain
+        } else {
+            incremental_parse_from_option(self.parse_session(path))
+        }
     }
 }
 

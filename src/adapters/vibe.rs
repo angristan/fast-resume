@@ -9,8 +9,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, parse_datetime, raw_stats_for_tree, string_at,
+    IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, incremental_parse_from_option, json_file_has_parse_errors,
+    jsonl_has_parse_errors, parse_datetime, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -62,7 +63,7 @@ impl Adapter for VibeAdapter {
             return failed_incremental_scan(self.name());
         };
         incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session(path)
+            self.parse_session_incremental(path)
         })
     }
 
@@ -78,7 +79,7 @@ impl Adapter for VibeAdapter {
             self.name(),
             known,
             current_files,
-            |path| self.parse_session(path),
+            |path| self.parse_session_incremental(path),
             on_session,
         )
     }
@@ -124,10 +125,11 @@ impl VibeAdapter {
                 continue;
             }
             let metadata_file = session_dir.join("meta.json");
-            let Ok(metadata) =
-                serde_json::from_slice::<Value>(&fs::read(&metadata_file).unwrap_or_default())
-            else {
-                continue;
+            let Ok(metadata_data) = fs::read(&metadata_file) else {
+                return None;
+            };
+            let Ok(metadata) = serde_json::from_slice::<Value>(&metadata_data) else {
+                return None;
             };
             let session_id = {
                 let id = string_at(&metadata, &["session_id"]);
@@ -223,6 +225,18 @@ impl VibeAdapter {
         session.mtime = vibe_session_mtime(session_dir);
         session.yolo = yolo;
         Some(session)
+    }
+
+    fn parse_session_incremental(&self, session_dir: &Path) -> IncrementalParse {
+        let metadata_file = session_dir.join("meta.json");
+        let messages_file = session_dir.join("messages.jsonl");
+        if json_file_has_parse_errors(&metadata_file)
+            || (messages_file.exists() && jsonl_has_parse_errors(&messages_file))
+        {
+            IncrementalParse::Retain
+        } else {
+            incremental_parse_from_option(self.parse_session(session_dir))
+        }
     }
 }
 

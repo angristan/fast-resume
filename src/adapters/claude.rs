@@ -10,9 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, parse_timestamp_seconds, raw_stats_for_tree, string_at,
-    text_from_part,
+    IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
+    incremental_from_files_streaming, incremental_parse_from_option, jsonl_has_parse_errors,
+    parse_timestamp_seconds, raw_stats_for_tree, string_at, text_from_part,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -133,6 +133,14 @@ impl ClaudeAdapter {
         Some(session)
     }
 
+    fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
+        if jsonl_has_parse_errors(path) {
+            IncrementalParse::Retain
+        } else {
+            incremental_parse_from_option(self.parse_session(path))
+        }
+    }
+
     fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
         let mut current_files = HashMap::new();
         if !self.sessions_dir.exists() {
@@ -234,7 +242,7 @@ impl Adapter for ClaudeAdapter {
             return failed_incremental_scan(self.name());
         };
         incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session(path)
+            self.parse_session_incremental(path)
         })
     }
 
@@ -250,7 +258,7 @@ impl Adapter for ClaudeAdapter {
             self.name(),
             known,
             current_files,
-            |path| self.parse_session(path),
+            |path| self.parse_session_incremental(path),
             on_session,
         )
     }

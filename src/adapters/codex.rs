@@ -11,8 +11,8 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     codex_session_id_from_path, content_texts, deleted_ids_for_agent, failed_incremental_scan,
-    fallback_session_id, parse_timestamp_seconds, raw_stats_for_tree, session_needs_update,
-    string_at,
+    fallback_session_id, jsonl_has_parse_errors, parse_timestamp_seconds, raw_stats_for_tree,
+    session_needs_update, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -214,6 +214,9 @@ impl CodexAdapter {
             if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
+            if jsonl_has_parse_errors(path) {
+                return None;
+            }
             let session_id = self.session_id_from_file(path);
             let mut mtime = file_mtime_seconds(path);
             if let Some((_, index_mtime)) = thread_index.get(&session_id) {
@@ -256,15 +259,18 @@ impl Adapter for CodexAdapter {
         let mut new_or_modified = Vec::new();
 
         for (session_id, (path, mtime)) in current_files {
+            current_ids.insert(session_id.clone());
             if !session_needs_update(known, self.name(), &session_id, mtime) {
-                current_ids.insert(session_id);
                 continue;
             }
 
-            if let Some(mut session) = self.parse_session(&path, &thread_names) {
+            if jsonl_has_parse_errors(&path) {
+                continue;
+            } else if let Some(mut session) = self.parse_session(&path, &thread_names) {
                 session.mtime = mtime;
-                current_ids.insert(session_id);
                 new_or_modified.push(session);
+            } else {
+                current_ids.remove(&session_id);
             }
         }
 
@@ -288,16 +294,19 @@ impl Adapter for CodexAdapter {
         let mut new_or_modified = Vec::new();
 
         for (session_id, (path, mtime)) in current_files {
+            current_ids.insert(session_id.clone());
             if !session_needs_update(known, self.name(), &session_id, mtime) {
-                current_ids.insert(session_id);
                 continue;
             }
 
-            if let Some(mut session) = self.parse_session(&path, &thread_names) {
+            if jsonl_has_parse_errors(&path) {
+                continue;
+            } else if let Some(mut session) = self.parse_session(&path, &thread_names) {
                 session.mtime = mtime;
                 on_session(session.clone());
-                current_ids.insert(session_id);
                 new_or_modified.push(session);
+            } else {
+                current_ids.remove(&session_id);
             }
         }
 
@@ -503,12 +512,41 @@ mod tests {
     }
 
     #[test]
-    fn incremental_deletes_changed_file_that_no_longer_parses() {
+    fn incremental_retains_malformed_changed_file() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
+        let session_file = sessions_dir.join("2026/06/21/rollout-malformed.jsonl");
+        fs::write(&session_file, "{").unwrap();
+
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "malformed".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+
+        let mut emitted = Vec::new();
+        let mut on_session = |session| emitted.push(session);
+        let streaming_scan = adapter.find_sessions_incremental_streaming(&known, &mut on_session);
+        assert!(emitted.is_empty());
+        assert!(streaming_scan.new_or_modified.is_empty());
+        assert!(streaming_scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_deletes_valid_changed_file_that_no_longer_qualifies() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");
         fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
         let session_file = sessions_dir.join("2026/06/21/rollout-parse-gone.jsonl");
-        fs::write(&session_file, "{").unwrap();
+        fs::write(
+            &session_file,
+            json!({"type": "session_meta", "payload": {"id": "parse-gone"}}).to_string(),
+        )
+        .unwrap();
 
         let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
         let mut known = KnownSessions::new();

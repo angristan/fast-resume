@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -8,6 +10,12 @@ use walkdir::WalkDir;
 use crate::model::{RawAdapterStats, Session};
 
 use super::{IncrementalScan, KnownSessions, MTIME_TOLERANCE, SessionCallback};
+
+pub(super) enum IncrementalParse {
+    Session(Session),
+    Delete,
+    Retain,
+}
 
 pub(super) fn session_needs_update(
     known: &KnownSessions,
@@ -48,20 +56,25 @@ pub(super) fn incremental_from_files<F>(
     mut parse: F,
 ) -> IncrementalScan
 where
-    F: FnMut(&Path) -> Option<Session>,
+    F: FnMut(&Path) -> IncrementalParse,
 {
     let mut current_ids = HashSet::new();
     let mut new_or_modified = Vec::new();
 
     for (session_id, (path, mtime)) in current_files {
+        current_ids.insert(session_id.clone());
         if !session_needs_update(known, agent, &session_id, mtime) {
-            current_ids.insert(session_id);
             continue;
         }
-        if let Some(mut session) = parse(&path) {
-            session.mtime = mtime;
-            current_ids.insert(session_id);
-            new_or_modified.push(session);
+        match parse(&path) {
+            IncrementalParse::Session(mut session) => {
+                session.mtime = mtime;
+                new_or_modified.push(session);
+            }
+            IncrementalParse::Delete => {
+                current_ids.remove(&session_id);
+            }
+            IncrementalParse::Retain => {}
         }
     }
 
@@ -80,21 +93,26 @@ pub(super) fn incremental_from_files_streaming<F>(
     on_session: &mut SessionCallback<'_>,
 ) -> IncrementalScan
 where
-    F: FnMut(&Path) -> Option<Session>,
+    F: FnMut(&Path) -> IncrementalParse,
 {
     let mut current_ids = HashSet::new();
     let mut new_or_modified = Vec::new();
 
     for (session_id, (path, mtime)) in current_files {
+        current_ids.insert(session_id.clone());
         if !session_needs_update(known, agent, &session_id, mtime) {
-            current_ids.insert(session_id);
             continue;
         }
-        if let Some(mut session) = parse(&path) {
-            session.mtime = mtime;
-            current_ids.insert(session_id);
-            on_session(session.clone());
-            new_or_modified.push(session);
+        match parse(&path) {
+            IncrementalParse::Session(mut session) => {
+                session.mtime = mtime;
+                on_session(session.clone());
+                new_or_modified.push(session);
+            }
+            IncrementalParse::Delete => {
+                current_ids.remove(&session_id);
+            }
+            IncrementalParse::Retain => {}
         }
     }
 
@@ -103,6 +121,35 @@ where
         new_or_modified,
         deleted_ids: deleted_ids_for_agent(known, agent, &current_ids),
     }
+}
+
+pub(super) fn incremental_parse_from_option(session: Option<Session>) -> IncrementalParse {
+    session.map_or(IncrementalParse::Delete, IncrementalParse::Session)
+}
+
+pub(super) fn json_file_has_parse_errors(path: &Path) -> bool {
+    let Ok(data) = fs::read(path) else {
+        return true;
+    };
+    serde_json::from_slice::<Value>(&data).is_err()
+}
+
+pub(super) fn jsonl_has_parse_errors(path: &Path) -> bool {
+    let Ok(file) = fs::File::open(path) else {
+        return true;
+    };
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else {
+            return true;
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        if serde_json::from_str::<Value>(&line).is_err() {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) fn content_texts(content: &Value) -> Vec<String> {
@@ -297,7 +344,9 @@ mod tests {
         let mut known = KnownSessions::new();
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
 
-        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| None);
+        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| {
+            IncrementalParse::Delete
+        });
 
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["abc123"]);
@@ -313,13 +362,45 @@ mod tests {
             "codex",
             &known,
             current_file("abc123", 2.0),
-            |_| None,
+            |_| IncrementalParse::Delete,
             &mut |session| streamed.push(session),
         );
 
         assert!(streamed.is_empty());
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["abc123"]);
+    }
+
+    #[test]
+    fn parse_failed_changed_files_are_retained() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+
+        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| {
+            IncrementalParse::Retain
+        });
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn streaming_parse_failed_changed_files_are_retained() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+        let mut streamed = Vec::new();
+
+        let scan = incremental_from_files_streaming(
+            "codex",
+            &known,
+            current_file("abc123", 2.0),
+            |_| IncrementalParse::Retain,
+            &mut |session| streamed.push(session),
+        );
+
+        assert!(streamed.is_empty());
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
