@@ -42,15 +42,17 @@ pub(super) fn incremental_from_files<F>(
 where
     F: FnMut(&Path) -> Option<Session>,
 {
-    let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+    let mut current_ids = HashSet::new();
     let mut new_or_modified = Vec::new();
 
     for (session_id, (path, mtime)) in current_files {
         if !session_needs_update(known, agent, &session_id, mtime) {
+            current_ids.insert(session_id);
             continue;
         }
         if let Some(mut session) = parse(&path) {
             session.mtime = mtime;
+            current_ids.insert(session_id);
             new_or_modified.push(session);
         }
     }
@@ -72,15 +74,17 @@ pub(super) fn incremental_from_files_streaming<F>(
 where
     F: FnMut(&Path) -> Option<Session>,
 {
-    let current_ids: HashSet<_> = current_files.keys().cloned().collect();
+    let mut current_ids = HashSet::new();
     let mut new_or_modified = Vec::new();
 
     for (session_id, (path, mtime)) in current_files {
         if !session_needs_update(known, agent, &session_id, mtime) {
+            current_ids.insert(session_id);
             continue;
         }
         if let Some(mut session) = parse(&path) {
             session.mtime = mtime;
+            current_ids.insert(session_id);
             on_session(session.clone());
             new_or_modified.push(session);
         }
@@ -273,6 +277,10 @@ pub(super) fn raw_stats_for_tree(
 mod tests {
     use super::*;
 
+    fn current_file(id: &str, mtime: f64) -> HashMap<String, (PathBuf, f64)> {
+        HashMap::from([(id.to_string(), (PathBuf::from(id), mtime))])
+    }
+
     #[test]
     fn mtime_decreases_trigger_incremental_updates() {
         let mut known = KnownSessions::new();
@@ -286,5 +294,48 @@ mod tests {
         ));
         assert!(session_needs_update(&known, "codex", "abc123", 9.0));
         assert!(session_needs_update(&known, "codex", "missing", 9.0));
+    }
+
+    #[test]
+    fn changed_files_that_no_longer_parse_are_deleted() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+
+        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| None);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["abc123"]);
+    }
+
+    #[test]
+    fn streaming_changed_files_that_no_longer_parse_are_deleted() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+        let mut streamed = Vec::new();
+
+        let scan = incremental_from_files_streaming(
+            "codex",
+            &known,
+            current_file("abc123", 2.0),
+            |_| None,
+            &mut |session| streamed.push(session),
+        );
+
+        assert!(streamed.is_empty());
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["abc123"]);
+    }
+
+    #[test]
+    fn unchanged_files_are_retained_without_parsing() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
+
+        let scan = incremental_from_files("codex", &known, current_file("abc123", 1.0), |_| {
+            panic!("unchanged sessions should not be parsed")
+        });
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 }
