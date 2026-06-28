@@ -39,6 +39,17 @@ brew tap angristan/tap
 brew install fast-resume
 ```
 
+### uv (PyPI)
+
+```bash
+# Run directly (no install needed)
+uvx --from fast-resume fr
+
+# Or install permanently
+uv tool install fast-resume
+fr
+```
+
 ### Cargo
 
 ```bash
@@ -474,6 +485,7 @@ fast-resume/
 │   └── model.rs            # Shared session model
 ├── assets/                 # Logo and embedded agent icons
 ├── Cargo.toml              # Dependencies and build config
+├── pyproject.toml          # PyPI wheel metadata
 └── README.md
 ```
 

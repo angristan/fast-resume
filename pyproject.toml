@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.13,<2"]
+build-backend = "maturin"
+
+[project]
+name = "fast-resume"
+version = "1.18.0"
+description = "Fast fuzzy finder for coding agent session history"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+
+[tool.maturin]
+bindings = "bin"
+data = "python/fast_resume.data"
+manifest-path = "Cargo.toml"
+strip = true

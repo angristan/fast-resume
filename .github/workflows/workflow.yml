@@ -45,10 +45,33 @@ jobs:
       - name: Build
         run: cargo build --locked
 
+  python-wheel:
+    name: Python wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: x86_64-unknown-linux-gnu
+          manylinux: '2014'
+          args: --release --locked --out dist --compatibility pypi
+      - name: Verify wheel installs and runs
+        run: |
+          python -m venv .wheel-test
+          .wheel-test/bin/pip install dist/*.whl
+          .wheel-test/bin/fr --version
+          .wheel-test/bin/fr --help
+          .wheel-test/bin/fast-resume --version
+
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [commitlint, rust]
+    needs: [commitlint, rust, python-wheel]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     # Prevent concurrent releases from racing (would cause "tag already exists" errors)
     concurrency:
@@ -97,7 +120,7 @@ jobs:
       matrix:
         platform:
           - name: macOS (Apple Silicon)
-            runner: macos-latest
+            runner: macos-26
             archive: macos-arm64
           - name: Linux (x86_64)
             runner: ubuntu-latest
@@ -136,6 +159,83 @@ jobs:
           gh release upload "v${{ needs.release.outputs.new_release_version }}" \
             dist/fast-resume-*.tar.gz \
             --clobber
+
+  build-python-wheels:
+    name: Build PyPI wheel (${{ matrix.platform.name }})
+    needs: [release]
+    if: needs.release.outputs.new_release_version != ''
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS (Apple Silicon)
+            runner: macos-26
+            target: aarch64-apple-darwin
+            artifact: python-wheel-macos-arm64
+          - name: Linux (x86_64)
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: '2014'
+            artifact: python-wheel-linux-x86_64
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.new_release_version }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Build Linux wheel
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Build macOS wheel
+        if: runner.os == 'macOS'
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Verify wheel installs and runs
+        run: |
+          python -m venv .wheel-test
+          .wheel-test/bin/pip install dist/*.whl
+          .wheel-test/bin/fr --version
+          .wheel-test/bin/fr --help
+          .wheel-test/bin/fast-resume --version
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.platform.artifact }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish PyPI wheels
+    needs: [release, build-python-wheels]
+    if: needs.release.outputs.new_release_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: python-wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v8.2.0
+      - name: Publish wheels
+        run: uv publish dist/*.whl
 
   update-homebrew:
     name: Update Homebrew formula

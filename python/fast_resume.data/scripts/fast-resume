@@ -1,0 +1,7 @@
+#!/bin/sh
+self=$0
+case "$self" in
+  */*) ;;
+  *) self=$(command -v "$self") ;;
+esac
+exec "${self%/*}/fr" "$@"
