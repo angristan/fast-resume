@@ -54,6 +54,8 @@ PyPI publishes Rust binary wheels for macOS and Linux on arm64/x86_64, plus Wind
 
 ### Cargo
 
+Requires Rust 1.90 or newer.
+
 ```bash
 # Install from source
 cargo install --locked --git https://github.com/angristan/fast-resume

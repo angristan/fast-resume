@@ -45,6 +45,15 @@ jobs:
       - name: Build
         run: cargo build --locked
 
+  rust-msrv:
+    name: Rust 1.90 MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.90
+      - name: Check minimum supported Rust version
+        run: cargo check --locked
+
   python-wheel:
     name: Python wheel (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.runner }}
@@ -123,7 +132,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [commitlint, rust, python-wheel]
+    needs: [commitlint, rust, rust-msrv, python-wheel]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     # Prevent concurrent releases from racing (would cause "tag already exists" errors)
     concurrency:
