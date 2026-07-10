@@ -251,11 +251,48 @@ fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+    let mut guard = TerminalSetupGuard::default();
     enable_raw_mode()?;
+    guard.raw_mode = true;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
+    guard.alternate_screen = true;
+    execute!(stdout, EnableMouseCapture)?;
+    guard.mouse_capture = true;
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    let terminal = Terminal::new(backend)?;
+    guard.disarm();
+    Ok(terminal)
+}
+
+#[derive(Default)]
+struct TerminalSetupGuard {
+    raw_mode: bool,
+    alternate_screen: bool,
+    mouse_capture: bool,
+}
+
+impl TerminalSetupGuard {
+    fn disarm(&mut self) {
+        self.raw_mode = false;
+        self.alternate_screen = false;
+        self.mouse_capture = false;
+    }
+}
+
+impl Drop for TerminalSetupGuard {
+    fn drop(&mut self) {
+        let mut stdout = io::stdout();
+        if self.mouse_capture {
+            let _ = execute!(stdout, DisableMouseCapture);
+        }
+        if self.alternate_screen {
+            let _ = execute!(stdout, LeaveAlternateScreen);
+        }
+        if self.raw_mode {
+            let _ = disable_raw_mode();
+        }
+    }
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
