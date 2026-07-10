@@ -451,7 +451,7 @@ fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> 
     if !session_dir.exists() {
         return Vec::new();
     }
-    let activity_mtimes = opencode_legacy_activity_mtimes(legacy_dir);
+    let (activity_mtimes, _) = opencode_legacy_activity_mtimes(legacy_dir);
 
     let mut messages_by_session: HashMap<String, Vec<(PathBuf, String, String)>> = HashMap::new();
     if message_dir.exists() {
@@ -584,9 +584,13 @@ fn load_opencode_legacy_incremental(
     legacy_dir: &Path,
     known: &KnownSessions,
 ) -> IncrementalScan {
-    let current_files = scan_opencode_legacy_sessions(legacy_dir);
+    let (current_files, complete) = scan_opencode_legacy_sessions(legacy_dir);
     let current_ids: HashSet<_> = current_files.keys().cloned().collect();
-    let deleted_ids = deleted_ids_for_agent(known, agent, &current_ids);
+    let deleted_ids = if complete {
+        deleted_ids_for_agent(known, agent, &current_ids)
+    } else {
+        Vec::new()
+    };
     let changed_ids: HashSet<_> = current_files
         .iter()
         .filter_map(|(id, (_, mtime))| {
@@ -620,18 +624,21 @@ fn load_opencode_legacy_incremental(
     }
 }
 
-fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf, f64)> {
+fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> (HashMap<String, (PathBuf, f64)>, bool) {
     let mut current_files = HashMap::new();
+    let mut complete = true;
     let session_dir = legacy_dir.join("session");
     if !session_dir.exists() {
-        return current_files;
+        return (current_files, complete);
     }
-    let activity_mtimes = opencode_legacy_activity_mtimes(legacy_dir);
+    let (activity_mtimes, activity_complete) = opencode_legacy_activity_mtimes(legacy_dir);
+    complete &= activity_complete;
 
-    for entry in WalkDir::new(&session_dir)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
+    for entry in WalkDir::new(&session_dir) {
+        let Ok(entry) = entry else {
+            complete = false;
+            continue;
+        };
         let path = entry.path();
         if !path
             .file_name()
@@ -640,11 +647,17 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf,
         {
             continue;
         }
-        let Ok(data) = serde_json::from_slice::<Value>(&fs::read(path).unwrap_or_default()) else {
+        let Ok(data_bytes) = fs::read(path) else {
+            complete = false;
+            continue;
+        };
+        let Ok(data) = serde_json::from_slice::<Value>(&data_bytes) else {
+            complete = false;
             continue;
         };
         let id = string_at(&data, &["id"]);
         if id.is_empty() {
+            complete = false;
             continue;
         }
         let mtime = opencode_legacy_mtime(&data, path)
@@ -652,20 +665,22 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> HashMap<String, (PathBuf,
         current_files.insert(id, (path.to_path_buf(), mtime));
     }
 
-    current_files
+    (current_files, complete)
 }
 
-fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> HashMap<String, f64> {
+fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> (HashMap<String, f64>, bool) {
     let message_dir = legacy_dir.join("message");
     let part_dir = legacy_dir.join("part");
     let mut session_mtimes: HashMap<String, f64> = HashMap::new();
     let mut message_sessions: HashMap<String, String> = HashMap::new();
+    let mut complete = true;
 
     if message_dir.exists() {
-        for entry in WalkDir::new(&message_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
+        for entry in WalkDir::new(&message_dir) {
+            let Ok(entry) = entry else {
+                complete = false;
+                continue;
+            };
             let path = entry.path();
             if !path
                 .file_name()
@@ -688,19 +703,29 @@ fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> HashMap<String, f64> {
                 .entry(session_id.clone())
                 .and_modify(|known| *known = known.max(mtime))
                 .or_insert(mtime);
-            let Ok(data) = serde_json::from_slice::<Value>(&fs::read(path).unwrap_or_default())
-            else {
+            let Ok(data_bytes) = fs::read(path) else {
+                complete = false;
+                continue;
+            };
+            let Ok(data) = serde_json::from_slice::<Value>(&data_bytes) else {
+                complete = false;
                 continue;
             };
             let msg_id = string_at(&data, &["id"]);
             if !msg_id.is_empty() {
                 message_sessions.insert(msg_id, session_id);
+            } else {
+                complete = false;
             }
         }
     }
 
     if part_dir.exists() {
-        for entry in WalkDir::new(&part_dir).into_iter().filter_map(Result::ok) {
+        for entry in WalkDir::new(&part_dir) {
+            let Ok(entry) = entry else {
+                complete = false;
+                continue;
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
@@ -723,7 +748,7 @@ fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> HashMap<String, f64> {
         }
     }
 
-    session_mtimes
+    (session_mtimes, complete)
 }
 
 fn opencode_legacy_mtime(data: &Value, path: &Path) -> f64 {
@@ -910,6 +935,55 @@ mod tests {
                 .contains("Updated OpenCode text")
         );
         assert!(scan.new_or_modified[0].mtime > sessions[0].mtime);
+    }
+
+    #[test]
+    fn legacy_scan_errors_retain_known_sessions_and_update_valid_ones() {
+        let temp = tempdir().unwrap();
+        let legacy_dir = temp.path().join("legacy");
+        let session_dir = legacy_dir.join("session");
+        let message_dir = legacy_dir.join("message/good");
+        let part_dir = legacy_dir.join("part/msg-good");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::create_dir_all(&message_dir).unwrap();
+        fs::create_dir_all(&part_dir).unwrap();
+        fs::write(session_dir.join("ses_malformed.json"), "{").unwrap();
+        fs::write(
+            session_dir.join("ses_good.json"),
+            json!({
+                "id": "good",
+                "title": "Good OpenCode session",
+                "directory": "/work/good",
+                "time": {"updated": 1_720_000_000_000_i64}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            message_dir.join("msg_good.json"),
+            json!({"id": "msg-good", "role": "user"}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            part_dir.join("part.json"),
+            json!({"type": "text", "text": "Updated content"}).to_string(),
+        )
+        .unwrap();
+
+        let adapter = OpenCodeAdapter {
+            data_dir: temp.path().join("data"),
+            db_path: temp.path().join("data/opencode.db"),
+            legacy_dir,
+        };
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "malformed".to_string()), 0.0);
+        known.insert(("opencode".to_string(), "good".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "good");
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
