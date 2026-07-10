@@ -59,12 +59,16 @@ impl Adapter for VibeAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
+        let Some((current_files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
-        incremental_from_files(self.name(), known, current_files, |path| {
+        let mut scan = incremental_from_files(self.name(), known, current_files, |path| {
             self.parse_session_incremental(path)
-        })
+        });
+        if !complete {
+            scan.deleted_ids.clear();
+        }
+        scan
     }
 
     fn find_sessions_incremental_streaming(
@@ -72,16 +76,20 @@ impl Adapter for VibeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
+        let Some((current_files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
-        incremental_from_files_streaming(
+        let mut scan = incremental_from_files_streaming(
             self.name(),
             known,
             current_files,
             |path| self.parse_session_incremental(path),
             on_session,
-        )
+        );
+        if !complete {
+            scan.deleted_ids.clear();
+        }
+        scan
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
@@ -99,10 +107,11 @@ impl Adapter for VibeAdapter {
 }
 
 impl VibeAdapter {
-    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
+    fn scan_session_files(&self) -> Option<(HashMap<String, (PathBuf, f64)>, bool)> {
         let mut current_files = HashMap::new();
+        let mut complete = true;
         if !self.sessions_dir.exists() {
-            return Some(current_files);
+            return Some((current_files, complete));
         }
         if !self.sessions_dir.is_dir() {
             return None;
@@ -113,7 +122,8 @@ impl VibeAdapter {
 
         for entry in entries {
             let Ok(entry) = entry else {
-                return None;
+                complete = false;
+                continue;
             };
             let session_dir = entry.path();
             if !session_dir.is_dir()
@@ -126,10 +136,12 @@ impl VibeAdapter {
             }
             let metadata_file = session_dir.join("meta.json");
             let Ok(metadata_data) = fs::read(&metadata_file) else {
-                return None;
+                complete = false;
+                continue;
             };
             let Ok(metadata) = serde_json::from_slice::<Value>(&metadata_data) else {
-                return None;
+                complete = false;
+                continue;
             };
             let session_id = {
                 let id = string_at(&metadata, &["session_id"]);
@@ -149,7 +161,7 @@ impl VibeAdapter {
             );
         }
 
-        Some(current_files)
+        Some((current_files, complete))
     }
 
     fn parse_session(&self, session_dir: &Path) -> Option<Session> {
@@ -378,6 +390,43 @@ mod tests {
                 .content
                 .contains("Newer Vibe message")
         );
+    }
+
+    #[test]
+    fn malformed_metadata_does_not_block_other_incremental_updates() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let malformed_dir = sessions_dir.join("session_malformed");
+        fs::create_dir_all(&malformed_dir).unwrap();
+        fs::write(malformed_dir.join("meta.json"), "{").unwrap();
+
+        let good_dir = sessions_dir.join("session_good");
+        fs::create_dir_all(&good_dir).unwrap();
+        fs::write(
+            good_dir.join("meta.json"),
+            json!({
+                "session_id": "good",
+                "environment": {"working_directory": "/work/good"},
+                "start_time": "2026-01-01T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &good_dir.join("messages.jsonl"),
+            &[json!({"role": "user", "content": "Updated Vibe prompt"})],
+        );
+
+        let adapter = VibeAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("vibe".to_string(), "malformed".to_string()), 0.0);
+        known.insert(("vibe".to_string(), "good".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "good");
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
