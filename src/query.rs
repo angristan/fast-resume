@@ -191,15 +191,18 @@ fn parse_relative_time(value: &str, now: DateTime<Local>, negated: bool) -> Opti
     let op = caps.get(1).map(|m| m.as_str()).unwrap_or("<");
     let number: i64 = caps.get(2)?.as_str().parse().ok()?;
     let unit = caps.get(3)?.as_str();
-    let seconds = match unit {
-        "m" => number * 60,
-        "h" => number * 60 * 60,
-        "d" => number * 24 * 60 * 60,
-        "w" => number * 7 * 24 * 60 * 60,
-        "mo" => number * 30 * 24 * 60 * 60,
-        "y" => number * 365 * 24 * 60 * 60,
+    let unit_seconds = match unit {
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 24 * 60 * 60,
+        "w" => 7 * 24 * 60 * 60,
+        "mo" => 30 * 24 * 60 * 60,
+        "y" => 365 * 24 * 60 * 60,
         _ => return None,
     };
+    let seconds = number.checked_mul(unit_seconds)?;
+    let duration = Duration::try_seconds(seconds)?;
+    let cutoff = now.checked_sub_signed(duration)?;
 
     Some(DateFilter {
         op: if op == ">" {
@@ -208,7 +211,7 @@ fn parse_relative_time(value: &str, now: DateTime<Local>, negated: bool) -> Opti
             DateOp::LessThan
         },
         value: value.to_string(),
-        cutoff: now - Duration::seconds(seconds),
+        cutoff,
         negated,
     })
 }
@@ -260,5 +263,11 @@ mod tests {
             parse_query("date:>1w").date.unwrap().op,
             DateOp::GreaterThan
         );
+    }
+
+    #[test]
+    fn rejects_out_of_range_relative_dates() {
+        assert!(parse_query("date:999999999y").date.is_none());
+        assert!(parse_query("date:9223372036854775807y").date.is_none());
     }
 }
