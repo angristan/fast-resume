@@ -426,12 +426,11 @@ match run_tui(query, agent_filter, directory_filter, yolo, image_protocol)? {
 }
 ```
 
-`exec()` replaces the fast-resume process entirely with the agent CLI. This means:
+On Unix, `exec()` replaces the fast-resume process entirely with the agent CLI. On Windows, fast-resume waits for the agent and exits with the same status. This means:
 
-- No subprocess overhead
-- Shell history shows `claude --resume xyz`, not `fr`
 - Agent inherits the correct working directory
-- fast-resume process is gone after handoff
+- On Unix, no intermediary fast-resume process remains after handoff
+- On Windows, fast-resume forwards the agent's exit status
 
 Each adapter returns the appropriate command:
 
