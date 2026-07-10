@@ -50,7 +50,7 @@ uv tool install fast-resume
 fr
 ```
 
-PyPI publishes Rust binary wheels for macOS and Linux on arm64/x86_64. No source distribution is published yet; unsupported platforms should use Cargo or Homebrew.
+PyPI publishes Rust binary wheels for macOS and Linux on arm64/x86_64, plus Windows on x86_64. No source distribution is published yet; other platforms should use Cargo. macOS and Linux users can also use Homebrew.
 
 ### Cargo
 

@@ -66,6 +66,9 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: '2014'
+          - name: Windows (x86_64)
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -89,13 +92,33 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
-      - name: Verify wheel installs and runs
+      - name: Build Windows wheel
+        if: runner.os == 'Windows'
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Verify wheel installs and runs (Unix)
+        if: runner.os != 'Windows'
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
+
+      - name: Verify wheel installs and runs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .wheel-test
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          & .\.wheel-test\Scripts\python.exe -m pip install $wheel.FullName
+          & .\.wheel-test\Scripts\fr.exe --version
+          & .\.wheel-test\Scripts\fr.exe --help
+          & .\.wheel-test\Scripts\fast-resume.cmd --version
 
   release:
     name: Release
@@ -222,6 +245,10 @@ jobs:
             target: aarch64-unknown-linux-gnu
             manylinux: '2014'
             artifact: python-wheel-linux-arm64
+          - name: Windows (x86_64)
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: python-wheel-windows-x86_64
     permissions:
       contents: read
     steps:
@@ -249,13 +276,33 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
-      - name: Verify wheel installs and runs
+      - name: Build Windows wheel
+        if: runner.os == 'Windows'
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Verify wheel installs and runs (Unix)
+        if: runner.os != 'Windows'
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
+
+      - name: Verify wheel installs and runs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .wheel-test
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          & .\.wheel-test\Scripts\python.exe -m pip install $wheel.FullName
+          & .\.wheel-test\Scripts\fr.exe --version
+          & .\.wheel-test\Scripts\fr.exe --help
+          & .\.wheel-test\Scripts\fast-resume.cmd --version
 
       - uses: actions/upload-artifact@v6
         with:
