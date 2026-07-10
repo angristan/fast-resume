@@ -1,6 +1,7 @@
 use std::ops::Bound;
 
 use anyhow::Result;
+use chrono::{DateTime, Days, TimeZone};
 use tantivy::query::{
     AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, QueryParser, RangeQuery,
     RegexQuery, TermQuery, TermSetQuery,
@@ -178,12 +179,48 @@ fn date_query(fields: IndexFields, date: &DateFilter) -> Box<dyn Query> {
             Bound::Unbounded,
         )),
         DateOp::Exact if date.value.eq_ignore_ascii_case("yesterday") => {
-            let end = cutoff + 86_400.0;
+            let end = next_day_start_seconds(&date.cutoff).unwrap_or(cutoff + 86_400.0);
             Box::new(RangeQuery::new(
                 Bound::Included(Term::from_field_f64(fields.timestamp, cutoff)),
                 Bound::Excluded(Term::from_field_f64(fields.timestamp, end)),
             ))
         }
         DateOp::Exact => Box::new(AllQuery),
+    }
+}
+
+fn next_day_start_seconds<Tz: TimeZone>(cutoff: &DateTime<Tz>) -> Option<f64> {
+    cutoff
+        .clone()
+        .checked_add_days(Days::new(1))
+        .map(|end| end.timestamp_millis() as f64 / 1000.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use chrono_tz::Europe::Paris;
+
+    use super::next_day_start_seconds;
+
+    #[test]
+    fn next_day_start_follows_civil_time_across_dst() {
+        let spring = Paris
+            .with_ymd_and_hms(2026, 3, 29, 0, 0, 0)
+            .single()
+            .unwrap();
+        let fall = Paris
+            .with_ymd_and_hms(2026, 10, 25, 0, 0, 0)
+            .single()
+            .unwrap();
+
+        assert_eq!(
+            next_day_start_seconds(&spring).unwrap() - spring.timestamp() as f64,
+            82_800.0
+        );
+        assert_eq!(
+            next_day_start_seconds(&fall).unwrap() - fall.timestamp() as f64,
+            90_000.0
+        );
     }
 }
