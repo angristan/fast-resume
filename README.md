@@ -346,12 +346,12 @@ Most adapters keep the index focused on actual conversation text. Crush also ind
 
 ```rust
 index.refresh_incremental_streaming(BATCH_SIZE, |summary| {
-    scan_tx.send(ScanMessage::Progress {
+    let _ = scan_tx.send(ScanMessage::Progress {
         new_or_modified: summary.new_or_modified,
         deleted: summary.deleted,
         total: summary.sessions,
         elapsed: start.elapsed(),
-    })?;
+    });
 });
 ```
 
