@@ -25,6 +25,10 @@ pub(super) enum ScanMessage {
         deleted: usize,
         total: usize,
     },
+    Failed {
+        elapsed: Duration,
+        error: String,
+    },
 }
 
 pub(super) struct SearchRequest {
@@ -190,6 +194,16 @@ impl AppState {
         if self.status == PENDING_SEARCH_STATUS {
             self.status.clear();
         }
+        true
+    }
+
+    pub(super) fn apply_search_error(&mut self, generation: u64, error: &str) -> bool {
+        if generation != self.search_generation {
+            return false;
+        }
+        self.applied_search_generation = generation;
+        self.search_preserve_selection = None;
+        self.status = format!("search failed: {error}");
         true
     }
 
@@ -519,6 +533,11 @@ pub(super) fn handle_scan_message(state: &mut AppState, message: ScanMessage) {
             state.refresh_status =
                 refresh_status("refreshed", total, new_or_modified, deleted, elapsed);
             state.request_search_preserving_selection(true);
+        }
+        ScanMessage::Failed { elapsed, error } => {
+            state.scanning = false;
+            state.refresh_status =
+                format!("refresh failed after {}: {error}", elapsed_label(elapsed));
         }
     }
 }

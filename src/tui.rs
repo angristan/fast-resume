@@ -65,15 +65,19 @@ pub fn run_tui(
                 });
             })
         });
-        let (new_or_modified, deleted, total) = refreshed
-            .map(|summary| (summary.new_or_modified, summary.deleted, summary.sessions))
-            .unwrap_or((0, 0, 0));
-        let _ = scan_tx.send(ScanMessage::Finished {
-            elapsed: start.elapsed(),
-            new_or_modified,
-            deleted,
-            total,
-        });
+        let message = match refreshed {
+            Ok(summary) => ScanMessage::Finished {
+                elapsed: start.elapsed(),
+                new_or_modified: summary.new_or_modified,
+                deleted: summary.deleted,
+                total: summary.sessions,
+            },
+            Err(error) => ScanMessage::Failed {
+                elapsed: start.elapsed(),
+                error: format!("{error:#}"),
+            },
+        };
+        let _ = scan_tx.send(message);
     });
 
     let mut terminal = setup_terminal()?;
@@ -94,7 +98,10 @@ fn run_loop(
     loop {
         let mut latest_scan_message = None;
         while let Ok(message) = scan_rx.try_recv() {
-            let finished = matches!(message, ScanMessage::Finished { .. });
+            let finished = matches!(
+                message,
+                ScanMessage::Finished { .. } | ScanMessage::Failed { .. }
+            );
             latest_scan_message = Some(message);
             if finished {
                 break;
@@ -107,12 +114,16 @@ fn run_loop(
         }
 
         while let Ok(result) = search_rx.try_recv() {
-            if state.apply_search_result(
-                result.generation,
-                result.visible,
-                result.elapsed_ms,
-                result.preserve_selection.as_ref(),
-            ) {
+            let applied = match result.visible {
+                Ok(visible) => state.apply_search_result(
+                    result.generation,
+                    visible,
+                    result.elapsed_ms,
+                    result.preserve_selection.as_ref(),
+                ),
+                Err(error) => state.apply_search_error(result.generation, &error),
+            };
+            if applied {
                 needs_draw = true;
             }
         }
@@ -150,7 +161,7 @@ fn run_loop(
 
 struct SearchResult {
     generation: u64,
-    visible: Vec<Session>,
+    visible: std::result::Result<Vec<Session>, String>,
     elapsed_ms: f64,
     preserve_selection: Option<(String, String)>,
 }
@@ -191,16 +202,19 @@ fn latest_search_request(
 }
 
 fn run_search(engine: &mut SearchEngine, request: SearchRequest) -> SearchResult {
-    if request.reload_index {
-        let _ = engine.reload();
-    }
     let start = Instant::now();
-    let visible = engine.search(
-        &request.query,
-        request.agent_filter.as_deref(),
-        request.directory_filter.as_deref(),
-        100,
-    );
+    let visible = (|| {
+        if request.reload_index {
+            engine.reload()?;
+        }
+        engine.search_result(
+            &request.query,
+            request.agent_filter.as_deref(),
+            request.directory_filter.as_deref(),
+            100,
+        )
+    })()
+    .map_err(|error| format!("{error:#}"));
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     SearchResult {
         generation: request.generation,
@@ -836,6 +850,40 @@ mod tests {
             state.refresh_status,
             "refreshed: 1964 sessions, 1964 changed, 17.8s"
         );
+    }
+
+    #[test]
+    fn failed_refresh_reports_error_without_requesting_a_search() {
+        let mut state = test_state(vec![session("a")]);
+
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Failed {
+                elapsed: Duration::from_millis(250),
+                error: "index writer is locked".to_string(),
+            },
+        );
+
+        assert!(!state.scanning);
+        assert_eq!(
+            state.refresh_status,
+            "refresh failed after 250ms: index writer is locked"
+        );
+        assert!(state.take_search_request().is_none());
+        assert_eq!(state.selected_session().unwrap().id, "a");
+    }
+
+    #[test]
+    fn search_errors_keep_visible_results_and_finish_the_generation() {
+        let mut state = test_state(vec![session("a")]);
+        handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
+        let request = state.take_search_request().unwrap();
+
+        assert!(state.apply_search_error(request.generation, "reload failed"));
+
+        assert_eq!(state.selected_session().unwrap().id, "a");
+        assert_eq!(state.status, "search failed: reload failed");
+        assert!(!state.search_pending());
     }
 
     #[test]

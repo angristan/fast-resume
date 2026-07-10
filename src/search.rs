@@ -58,10 +58,20 @@ impl SearchEngine {
         directory_filter: Option<&str>,
         limit: usize,
     ) -> Vec<Session> {
+        self.search_result(query, agent_filter, directory_filter, limit)
+            .unwrap_or_default()
+    }
+
+    pub fn search_result(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Session>> {
         self.index
             .search(query, agent_filter, directory_filter, limit)
             .map(|hits| hits.into_iter().map(|hit| hit.session).collect())
-            .unwrap_or_default()
     }
 }
 
