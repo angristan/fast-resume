@@ -791,6 +791,60 @@ mod tests {
     }
 
     #[test]
+    fn background_refresh_does_not_undo_newer_navigation() {
+        let base = Local::now();
+        let mut first = session("a");
+        first.timestamp = base + ChronoDuration::seconds(2);
+        let mut initially_selected = session("b");
+        initially_selected.timestamp = base + ChronoDuration::seconds(1);
+        let mut newly_selected = session("c");
+        newly_selected.timestamp = base;
+        let (mut state, index) = test_state_and_index(
+            vec![
+                first.clone(),
+                initially_selected.clone(),
+                newly_selected.clone(),
+            ],
+            None,
+        );
+        state.selected = 1;
+
+        let mut newer = session("newer");
+        newer.timestamp = base + ChronoDuration::seconds(3);
+        index
+            .rebuild(vec![newer, first, initially_selected, newly_selected])
+            .unwrap();
+        super::state::handle_scan_message(
+            &mut state,
+            super::state::ScanMessage::Progress {
+                elapsed: Duration::ZERO,
+                new_or_modified: 1,
+                deleted: 0,
+                total: 4,
+            },
+        );
+        let request = state.take_search_request().unwrap();
+
+        state.move_selection(1);
+        assert_eq!(state.selected_session().unwrap().id, "c");
+        state.engine.reload().unwrap();
+        let visible = state.engine.search(
+            &request.query,
+            request.agent_filter.as_deref(),
+            request.directory_filter.as_deref(),
+            100,
+        );
+        assert!(state.apply_search_result(
+            request.generation,
+            visible,
+            0.0,
+            request.preserve_selection.as_ref()
+        ));
+
+        assert_eq!(state.selected_session().unwrap().id, "c");
+    }
+
+    #[test]
     fn background_refresh_does_not_preserve_selection_over_typed_search() {
         let base = Local::now();
         let mut first = session("a");

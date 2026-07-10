@@ -185,10 +185,11 @@ impl AppState {
         if generation != self.search_generation {
             return false;
         }
+        let selected_session = preserve_selection.and_then(|_| self.selected_session_key());
         self.visible = visible;
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
-        self.update_selection_after_search(preserve_selection);
+        self.update_selection_after_search(selected_session.as_ref());
         self.search_preserve_selection = None;
         self.preview_scroll = 0;
         if self.status == PENDING_SEARCH_STATUS {
