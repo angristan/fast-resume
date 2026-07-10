@@ -55,6 +55,10 @@ struct Args {
     #[arg(long)]
     yolo: bool,
 
+    /// Retained as a hidden no-op for compatibility with the Python CLI.
+    #[arg(long = "no-version-check", hide = true)]
+    _no_version_check: bool,
+
     /// Render agent PNGs in the preview pane (enabled by default when supported).
     #[arg(long)]
     images: bool,
@@ -294,5 +298,13 @@ mod tests {
         assert!(backend.directories.is_empty());
         assert!(backend.commands.is_empty());
         assert!(error.to_string().contains("no resume command"));
+    }
+
+    #[test]
+    fn accepts_legacy_no_version_check_flag() {
+        let args = Args::try_parse_from(["fr", "--no-version-check", "--list"]).unwrap();
+
+        assert!(args._no_version_check);
+        assert!(args.list_only);
     }
 }
