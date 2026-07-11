@@ -44,8 +44,9 @@ impl AgentImages {
         };
         picker.set_protocol_type(protocol_type);
 
-        let row = load_agent_protocols(&picker, Size::new(2, 1));
-        let preview = load_agent_protocols(&picker, Size::new(8, 4));
+        let ghostty = is_ghostty();
+        let row = load_agent_protocols(&picker, Size::new(2, 1), ghostty);
+        let preview = load_agent_protocols(&picker, Size::new(8, 4), ghostty);
         if preview.is_empty() {
             return None;
         }
@@ -107,10 +108,7 @@ fn detect_image_protocol(protocol: ImageProtocol) -> Option<ProtocolType> {
         ImageProtocol::Auto => {}
     }
 
-    if env_present("KITTY_WINDOW_ID")
-        || env_present("GHOSTTY_BIN_DIR")
-        || env_eq("TERM_PROGRAM", "ghostty")
-    {
+    if env_present("KITTY_WINDOW_ID") || is_ghostty() {
         return Some(ProtocolType::Kitty);
     }
 
@@ -129,6 +127,10 @@ fn detect_image_protocol(protocol: ImageProtocol) -> Option<ProtocolType> {
     None
 }
 
+fn is_ghostty() -> bool {
+    env_present("GHOSTTY_BIN_DIR") || env_eq("TERM_PROGRAM", "ghostty")
+}
+
 fn env_present(key: &str) -> bool {
     env::var(key).is_ok_and(|value| !value.is_empty())
 }
@@ -141,7 +143,11 @@ fn env_contains(key: &str, needle: &str) -> bool {
     env::var(key).is_ok_and(|value| value.contains(needle))
 }
 
-fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol> {
+fn load_agent_protocols(
+    picker: &Picker,
+    size: Size,
+    compensate_ghostty_aspect: bool,
+) -> HashMap<String, Protocol> {
     let mut protocols = HashMap::new();
     for agent in AGENT_ORDER {
         let Some(bytes) = agent_asset_bytes(agent) else {
@@ -153,6 +159,7 @@ fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol
         let Ok(image) = reader.decode() else {
             continue;
         };
+        let image = compensate_logo_aspect(agent, image, compensate_ghostty_aspect);
         if let Ok(protocol) =
             picker.new_protocol(image, size, Resize::Fit(Some(FilterType::Lanczos3)))
         {
@@ -160,6 +167,28 @@ fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol
         }
     }
     protocols
+}
+
+fn compensate_logo_aspect(
+    agent: &str,
+    image: image::DynamicImage,
+    compensate_ghostty_aspect: bool,
+) -> image::DynamicImage {
+    if agent != "codex" || !compensate_ghostty_aspect {
+        return image;
+    }
+
+    let width = image.width();
+    let height = image.height();
+    let stretched_height = height.saturating_mul(11) / 10;
+    if stretched_height <= height {
+        return image;
+    }
+
+    let offset = (stretched_height - height) / 2;
+    image
+        .resize_exact(width, stretched_height, FilterType::Lanczos3)
+        .crop_imm(0, offset, width, height)
 }
 
 fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
@@ -179,6 +208,24 @@ fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    fn visible_size(image: &image::DynamicImage) -> (u32, u32) {
+        let rgba = image.to_rgba8();
+        let mut min_x = u32::MAX;
+        let mut min_y = u32::MAX;
+        let mut max_x = 0;
+        let mut max_y = 0;
+        for (x, y, pixel) in rgba.enumerate_pixels() {
+            if pixel[3] <= 16 {
+                continue;
+            }
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        (max_x - min_x + 1, max_y - min_y + 1)
+    }
+
     #[test]
     fn derives_rounded_cell_size_from_window_pixels() {
         let size = cell_size_from_window(120, 48, 1_080, 816).expect("cell size");
@@ -191,5 +238,23 @@ mod tests {
     fn rejects_missing_window_pixel_metrics() {
         assert!(cell_size_from_window(120, 48, 0, 0).is_none());
         assert!(cell_size_from_window(0, 0, 1_080, 816).is_none());
+    }
+
+    #[test]
+    fn ghostty_codex_logo_has_a_more_square_visible_footprint() {
+        let image = ImageReader::new(Cursor::new(
+            agent_asset_bytes("codex").expect("codex asset"),
+        ))
+        .with_guessed_format()
+        .expect("image format")
+        .decode()
+        .expect("image");
+        let before = visible_size(&image);
+        let corrected = compensate_logo_aspect("codex", image, true);
+        let after = visible_size(&corrected);
+
+        assert_eq!(corrected.width(), 64);
+        assert_eq!(corrected.height(), 64);
+        assert!(after.0.abs_diff(after.1) < before.0.abs_diff(before.1));
     }
 }
