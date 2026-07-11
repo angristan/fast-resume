@@ -17,6 +17,7 @@ use super::text::{
 };
 
 const ACCENT: Color = Color::Rgb(224, 150, 70);
+const FILTER_SELECTED_BG: Color = Color::Rgb(42, 46, 54);
 const PANEL_BORDER: Color = Color::Rgb(70, 80, 95);
 const SELECTED_BG: Color = Color::Rgb(68, 52, 34);
 const WARNING: Color = Color::Rgb(240, 180, 80);
@@ -242,31 +243,47 @@ fn draw_filter_tab(
         return x.saturating_add(tab_width);
     }
 
-    let style = if active {
+    let background_style = if active {
+        Style::new().bg(FILTER_SELECTED_BG)
+    } else {
         Style::new()
-            .fg(Color::Black)
-            .bg(color)
+    };
+    let label_style = if active {
+        Style::new()
+            .fg(color)
+            .bg(FILTER_SELECTED_BG)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(color)
     };
     let count_style = if active {
-        style
+        Style::new().fg(Color::Gray).bg(FILTER_SELECTED_BG)
     } else {
         Style::new().fg(Color::DarkGray)
     };
     let label_line = || {
         Line::from(vec![
-            Span::styled(label.to_string(), style),
+            Span::styled(label.to_string(), label_style),
             Span::styled(suffix.clone(), count_style),
         ])
     };
 
     let visible_width = tab_width.min(area.right().saturating_sub(x));
     frame.render_widget(
-        Paragraph::new(" ".repeat(visible_width as usize)).style(style),
+        Paragraph::new(" ".repeat(visible_width as usize)).style(background_style),
         Rect::new(x, area.y, visible_width, 1),
     );
+    if active {
+        frame.render_widget(
+            Paragraph::new("▌").style(
+                Style::new()
+                    .fg(color)
+                    .bg(FILTER_SELECTED_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(x, area.y, 1.min(visible_width), 1),
+        );
+    }
 
     if let Some(protocol) = icon {
         if x + 1 < area.right() {
