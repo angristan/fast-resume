@@ -179,13 +179,18 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
     );
     for agent in AGENT_ORDER {
         let config = AGENTS.get(agent).expect("known agent");
+        let label = filter_label(config.badge, state.engine.count_for_agent(Some(agent)));
         let active = active_agents.iter().any(|active| active == agent);
         let icon = state
             .images
             .as_ref()
             .and_then(|images| images.row.get(agent));
-        x = draw_filter_tab(frame, area, x, config.badge, active, config.color, icon);
+        x = draw_filter_tab(frame, area, x, &label, active, config.color, icon);
     }
+}
+
+fn filter_label(label: &str, count: usize) -> String {
+    format!("{label} {count}")
 }
 
 fn draw_filter_tab(
@@ -664,6 +669,11 @@ fn button_span(label: &'static str, selected: bool) -> Span<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_filter_label_includes_session_count() {
+        assert_eq!(filter_label("codex", 124), "codex 124");
+    }
 
     #[test]
     fn footer_renders_status_when_present() {
