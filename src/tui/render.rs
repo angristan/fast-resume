@@ -213,16 +213,12 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
                     .and_then(|images| images.row.get(*agent))
             })
             .flatten();
-        x = draw_filter_tab(
-            frame,
-            area,
-            x,
-            config.badge,
-            count,
-            active,
-            config.color,
-            icon,
-        );
+        let label = if filter_layout.show_labels || icon.is_none() {
+            config.badge
+        } else {
+            ""
+        };
+        x = draw_filter_tab(frame, area, x, label, count, active, config.color, icon);
     }
 }
 
@@ -239,17 +235,24 @@ struct FilterLayout {
     show_all: bool,
     show_counts: bool,
     show_icons: bool,
+    show_labels: bool,
     visible_agents: std::ops::Range<usize>,
 }
 
 fn plan_filter_layout(width: u16, tabs: &[AgentFilterTab<'_>], all_active: bool) -> FilterLayout {
-    for (show_counts, show_icons) in [(true, true), (false, true), (false, false)] {
+    for (show_counts, show_icons, show_labels) in [
+        (true, true, true),
+        (false, true, true),
+        (false, false, true),
+        (false, true, false),
+    ] {
         let total_width = filter_tab_width("All", None, false)
             + tabs
                 .iter()
                 .map(|tab| {
+                    let label = filter_tab_label(tab, show_icons, show_labels);
                     filter_tab_width(
-                        tab.label,
+                        label,
                         show_counts.then_some(tab.count),
                         show_icons && tab.has_icon,
                     )
@@ -260,16 +263,24 @@ fn plan_filter_layout(width: u16, tabs: &[AgentFilterTab<'_>], all_active: bool)
                 show_all: true,
                 show_counts,
                 show_icons,
+                show_labels,
                 visible_agents: 0..tabs.len(),
             };
         }
     }
 
     let show_counts = false;
-    let show_icons = false;
+    let show_icons = true;
+    let show_labels = false;
     let tab_widths: Vec<_> = tabs
         .iter()
-        .map(|tab| filter_tab_width(tab.label, None, false))
+        .map(|tab| {
+            filter_tab_width(
+                filter_tab_label(tab, show_icons, show_labels),
+                None,
+                tab.has_icon,
+            )
+        })
         .collect();
     let all_width = filter_tab_width("All", None, false);
     let active_index = tabs.iter().position(|tab| tab.active);
@@ -293,7 +304,20 @@ fn plan_filter_layout(width: u16, tabs: &[AgentFilterTab<'_>], all_active: bool)
         show_all,
         show_counts,
         show_icons,
+        show_labels,
         visible_agents: start..end,
+    }
+}
+
+fn filter_tab_label<'a>(
+    tab: &'a AgentFilterTab<'a>,
+    show_icons: bool,
+    show_labels: bool,
+) -> &'a str {
+    if show_labels || !show_icons || !tab.has_icon {
+        tab.label
+    } else {
+        ""
     }
 }
 
@@ -849,12 +873,17 @@ mod tests {
         tabs: &[AgentFilterTab<'_>],
         show_counts: bool,
         show_icons: bool,
+        show_labels: bool,
     ) -> u16 {
         filter_tab_width("All", None, false)
             + tabs
                 .iter()
                 .map(|tab| {
-                    filter_tab_width(tab.label, show_counts.then_some(tab.count), show_icons)
+                    filter_tab_width(
+                        filter_tab_label(tab, show_icons, show_labels),
+                        show_counts.then_some(tab.count),
+                        show_icons && tab.has_icon,
+                    )
                 })
                 .sum::<u16>()
     }
@@ -862,22 +891,36 @@ mod tests {
     #[test]
     fn filter_layout_drops_counts_before_icons() {
         let tabs = filter_tabs(None);
-        let icons_only_width = filter_layout_width(&tabs, false, true);
+        let icons_only_width = filter_layout_width(&tabs, false, true, true);
         let layout = plan_filter_layout(icons_only_width, &tabs, true);
 
         assert!(!layout.show_counts);
         assert!(layout.show_icons);
+        assert!(layout.show_labels);
         assert_eq!(layout.visible_agents, 0..tabs.len());
     }
 
     #[test]
     fn filter_layout_drops_icons_after_counts() {
         let tabs = filter_tabs(None);
-        let labels_only_width = filter_layout_width(&tabs, false, false);
+        let labels_only_width = filter_layout_width(&tabs, false, false, true);
         let layout = plan_filter_layout(labels_only_width, &tabs, true);
 
         assert!(!layout.show_counts);
         assert!(!layout.show_icons);
+        assert!(layout.show_labels);
+        assert_eq!(layout.visible_agents, 0..tabs.len());
+    }
+
+    #[test]
+    fn filter_layout_uses_icon_only_tabs_as_the_last_full_bar_stage() {
+        let tabs = filter_tabs(None);
+        let icon_only_width = filter_layout_width(&tabs, false, true, false);
+        let layout = plan_filter_layout(icon_only_width, &tabs, true);
+
+        assert!(!layout.show_counts);
+        assert!(layout.show_icons);
+        assert!(!layout.show_labels);
         assert_eq!(layout.visible_agents, 0..tabs.len());
     }
 
@@ -889,6 +932,8 @@ mod tests {
         let layout = plan_filter_layout(width, &tabs, false);
 
         assert!(layout.show_all);
+        assert!(layout.show_icons);
+        assert!(!layout.show_labels);
         assert!(layout.visible_agents.contains(&6));
         assert!(!layout.visible_agents.contains(&0));
     }
@@ -900,6 +945,8 @@ mod tests {
         let layout = plan_filter_layout(width, &tabs, false);
 
         assert!(!layout.show_all);
+        assert!(layout.show_icons);
+        assert!(!layout.show_labels);
         assert_eq!(layout.visible_agents, 6..7);
     }
 
