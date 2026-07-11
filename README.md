@@ -8,7 +8,7 @@ Search and resume conversations across Claude Code, Codex, and more, all from on
 
 Coding agents can resume previous sessions, but searching those sessions is often limited or title-only. `fast-resume` builds a single full-text index over your local agent history so you can find a prompt, response, project, or session and jump straight back in.
 
-<https://github.com/user-attachments/assets/4f39e6ed-1971-43d6-ae9c-49de844521fd>
+<https://github.com/user-attachments/assets/b9ef1274-8426-4819-ae5f-458264e01d48>
 
 ## Highlights
 
