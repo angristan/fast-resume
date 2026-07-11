@@ -509,7 +509,7 @@ fn result_columns(width: u16) -> ResultColumns {
     } else if width >= 72 {
         (13, 22, 6, 9)
     } else {
-        (11, 0, 5, 8)
+        (13, 0, 5, 8)
     };
     let fixed = agent_w + dir_w + turns_w + age_w + 4;
     let title_w = width.saturating_sub(fixed).max(16);
@@ -530,6 +530,13 @@ fn result_columns(width: u16) -> ResultColumns {
         age_x,
         age_w,
     }
+}
+
+fn agent_badge(agent: &str) -> &str {
+    AGENTS
+        .get(agent)
+        .map(|config| config.badge)
+        .unwrap_or(agent)
 }
 
 fn draw_result_header(frame: &mut Frame, inner: Rect, columns: ResultColumns) {
@@ -594,10 +601,11 @@ fn draw_result_row(
         Rect::new(rows_area.x, row_y, rows_area.width, 1),
     );
 
-    let agent_color = AGENTS
-        .get(session.agent.as_str())
+    let agent_config = AGENTS.get(session.agent.as_str());
+    let agent_color = agent_config
         .map(|agent| agent.color)
         .unwrap_or(Color::White);
+    let agent_label = agent_badge(&session.agent);
     let pointer = if selected { "▸" } else { " " };
     draw_cell(
         frame,
@@ -630,7 +638,7 @@ fn draw_result_row(
         row_y - rows_area.y,
         columns.agent_w.saturating_sub(label_x),
         &truncate(
-            &session.agent,
+            agent_label,
             columns.agent_w.saturating_sub(label_x) as usize,
         ),
         row_style.fg(agent_color).add_modifier(Modifier::BOLD),
@@ -956,6 +964,21 @@ mod tests {
         assert_eq!(count_suffix(Some(1_249)), " · 1.2k");
         assert_eq!(count_suffix(Some(15_200)), " · 15k");
         assert_eq!(count_suffix(Some(0)), "");
+    }
+
+    #[test]
+    fn result_rows_use_short_agent_badges() {
+        assert_eq!(agent_badge("copilot-cli"), "copilot");
+        assert_eq!(agent_badge("copilot-vscode"), "vscode");
+        assert_eq!(agent_badge("unknown-agent"), "unknown-agent");
+    }
+
+    #[test]
+    fn narrow_results_reserve_room_for_the_longest_agent_badge() {
+        let columns = result_columns(60);
+
+        assert_eq!(columns.agent_w, 13);
+        assert_eq!(columns.agent_w - 5, "opencode".width() as u16);
     }
 
     #[test]
