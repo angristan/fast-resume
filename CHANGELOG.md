@@ -1,3 +1,104 @@
+# [2.0.0](https://github.com/angristan/fast-resume/compare/v1.18.0...v2.0.0) (2026-07-11)
+
+
+* feat!: complete Rust rewrite ([ac00a92](https://github.com/angristan/fast-resume/commit/ac00a9266868479f4ab7065e07e8885284aa5686))
+
+
+### Bug Fixes
+
+* address review findings ([952c95d](https://github.com/angristan/fast-resume/commit/952c95d55247c3139c14c2a94ce79722e15a9660))
+* allow crush resume from tui ([a5dc6ae](https://github.com/angristan/fast-resume/commit/a5dc6aeb21ef3193297b284221a31cc165133cca))
+* allow punctuation in tui search ([121003b](https://github.com/angristan/fast-resume/commit/121003b50b05241d2e322c9fe52ab687a638a8b5))
+* apply tui directory filter ([f6fd517](https://github.com/angristan/fast-resume/commit/f6fd517582dbd1fef97f2eb4acfb636c669f63fb))
+* avoid deletions after failed adapter scans ([bf7e71d](https://github.com/angristan/fast-resume/commit/bf7e71d1147555d0da122dc0dc0ccf75e1f545f5))
+* clear pending search status after results apply ([94aab55](https://github.com/angristan/fast-resume/commit/94aab5524016dde3e56de60f3b20c79538770000))
+* coalesce tui search requests ([df20e7a](https://github.com/angristan/fast-resume/commit/df20e7a717e2943fcd60b9c25dbd0b0ae4f3cf14))
+* continue incremental scans past malformed files ([22b4a8f](https://github.com/angristan/fast-resume/commit/22b4a8f699dd959d134db0208fa5f93de052f149))
+* correct all logo aspects in ghostty ([6cab3c9](https://github.com/angristan/fast-resume/commit/6cab3c95f616a0d8ebe5138ea15560bf2c6384ee))
+* correct codex logo aspect in ghostty ([12e346f](https://github.com/angristan/fast-resume/commit/12e346fa20e064b8cb93d4d445c9adba8819362e))
+* count filtered cli list matches ([f716b19](https://github.com/angristan/fast-resume/commit/f716b196b85f1f51d1bd28b9b2351374d1a49c06))
+* delete custom sessions that stop parsing ([2ae0632](https://github.com/angristan/fast-resume/commit/2ae06329515e29cee3a8c39da45c04af6fe7eff3))
+* delete sessions that stop parsing ([dd4407d](https://github.com/angristan/fast-resume/commit/dd4407da2a5add29ff8e9675125c2037d800cd4f))
+* ignore modified yolo modal shortcuts ([5549e24](https://github.com/angristan/fast-resume/commit/5549e24335eb44d00eae967ad0cb05d588c2dc80))
+* ignore mouse scrolls during modal ([a5449be](https://github.com/angristan/fast-resume/commit/a5449be348c8e8036519c06ad8e19d3df97321cc))
+* improve search placeholder ([7061789](https://github.com/angristan/fast-resume/commit/7061789381b0a2d43294acf4e4dd8747405e66b7))
+* keep agent names visible in results ([fb3339f](https://github.com/angristan/fast-resume/commit/fb3339f8f2df1823b6ab6c35eceb537c46408a6d))
+* keep Codex session identity stable ([87128c1](https://github.com/angristan/fast-resume/commit/87128c1f7858087c2a4fa476c666f824c826ed82))
+* keep crush docs on scan errors ([c9acd58](https://github.com/angristan/fast-resume/commit/c9acd581aa0e87dc1e303a83199d8a10bffcba6d))
+* keep directory matches in text search ([e710eeb](https://github.com/angristan/fast-resume/commit/e710eeb5c075ae47e6d8d32ddfb7ee600b3a7c22))
+* keep no-version-check cli compatibility ([1392da3](https://github.com/angristan/fast-resume/commit/1392da31592e5f6bcda3b53b88daaf3814ca57a0))
+* keep opencode docs on sqlite scan errors ([5b4b2e5](https://github.com/angristan/fast-resume/commit/5b4b2e5f46e1fcb005d603bec8cbe8b97a152eca))
+* label copy yolo modal accurately ([93faf4a](https://github.com/angristan/fast-resume/commit/93faf4af3e161a90a1808e9606eeec8bfe00877b))
+* make yolo modal arrows directional ([b0b1197](https://github.com/angristan/fast-resume/commit/b0b1197ca03a9359471690b12d99470ff7b54638))
+* move refresh status to header ([2cea639](https://github.com/angristan/fast-resume/commit/2cea63997bbd5c24490a0bdcb52804d5768a153b))
+* normalize logo aspect across terminals ([9b57583](https://github.com/angristan/fast-resume/commit/9b57583a00d5debd79d5af2b94782a2810241c82))
+* parse fractional vibe timestamps ([9dc7298](https://github.com/angristan/fast-resume/commit/9dc72984d755d590fc6329179b44fdc4bc014b5f))
+* pin yolo modal session ([57cd5c3](https://github.com/angristan/fast-resume/commit/57cd5c3d20eb3a98e5b771aaf72998dddbd50f2b))
+* preserve crush activity precision ([d896c97](https://github.com/angristan/fast-resume/commit/d896c975cc55296ef4cf10b8f65299ce473d6ea8))
+* preserve icon aspect without terminal query ([615bead](https://github.com/angristan/fast-resume/commit/615beadc9dbef77ffd8ebce426cc3fbf9b459292))
+* preserve locked deps during release ([f5a1e54](https://github.com/angristan/fast-resume/commit/f5a1e542a5021f8b695a44528d49422bb4f1ac63))
+* preserve navigation during refresh searches ([3171636](https://github.com/angristan/fast-resume/commit/31716363a973aaab41075241886c9889c19127c1))
+* preserve opencode content on fetch errors ([e5a0a0a](https://github.com/angristan/fast-resume/commit/e5a0a0a7885bfcbaefe5648d72c91724cbc10135))
+* preserve selection across refresh searches ([4a08d3f](https://github.com/angristan/fast-resume/commit/4a08d3ff89f7e12c980c9f5df0130198c3438d02))
+* preserve terminal logo aspect ([988fd8b](https://github.com/angristan/fast-resume/commit/988fd8bf41d3fa9f9ff34fca137fb5bf557a6a06))
+* preserve tui reload requests ([bc1c861](https://github.com/angristan/fast-resume/commit/bc1c8614d3bc9526b06fd8f7deced296a2749080))
+* preserve tui selection identity on refresh ([64c9400](https://github.com/angristan/fast-resume/commit/64c9400c6de87f00c092a6eb16ccc273dc95c9f3))
+* redraw tui on resize ([42f9e85](https://github.com/angristan/fast-resume/commit/42f9e854975fb84c18742a5dd40dd5a01820d987))
+* refresh legacy opencode message changes ([be4012a](https://github.com/angristan/fast-resume/commit/be4012a65afc0b247454a2ae429164a2f64d3f3e))
+* refresh sessions when mtimes decrease ([387c875](https://github.com/angristan/fast-resume/commit/387c87552aeb5647dc98f16bc0c0df6b501b7ad4))
+* refresh valid rows after malformed jsonl ([2eafd51](https://github.com/angristan/fast-resume/commit/2eafd51d6019827a574e3715dfd2620b6f3ed19e))
+* refresh vibe message changes ([91ef795](https://github.com/angristan/fast-resume/commit/91ef795c3cc206ba068340654bdaf1a6ce30ab7d))
+* reject out-of-range date filters ([bb27986](https://github.com/angristan/fast-resume/commit/bb279866cee45e83b61c2155c3412f9b7aab740d))
+* remove ignored version check flag ([df3701f](https://github.com/angristan/fast-resume/commit/df3701ff3b07e683ddb6837e71400c21af5b7468))
+* render tui status feedback ([bfd79c4](https://github.com/angristan/fast-resume/commit/bfd79c43fd9d6ff42227466b1a74ebf2d06fb88a))
+* report tui refresh failures ([2c4407c](https://github.com/angristan/fast-resume/commit/2c4407c865b520bca1802cead917060c8efa128a))
+* reset selection for typed searches ([4912389](https://github.com/angristan/fast-resume/commit/4912389e30a46800452bac7e8d7c4693daf48c83))
+* reset selection on new tui searches ([10693dd](https://github.com/angristan/fast-resume/commit/10693dd4218e1e4a9963a39ee537fbcb93c4496a))
+* restore fuzzy matching for message content ([242bf16](https://github.com/angristan/fast-resume/commit/242bf1601aaa528a77fddce11e592eaa7f40e68c))
+* restore Rust index parity regressions ([686d9b9](https://github.com/angristan/fast-resume/commit/686d9b9a59cc34fb364af47559268f8a452ecc5a))
+* restore terminal after setup failures ([eba99e0](https://github.com/angristan/fast-resume/commit/eba99e0efc9edab534eee04954c1bc97846f6588))
+* restore windows install support ([a68d307](https://github.com/angristan/fast-resume/commit/a68d307b97b863873fc9393bb793b689e49bd681))
+* retain crush sessions with malformed parts ([6579a01](https://github.com/angristan/fast-resume/commit/6579a012e3f4c129d8b1338f0961f8953e7a0c38))
+* retain legacy opencode content on parse errors ([3080d1e](https://github.com/angristan/fast-resume/commit/3080d1e626a32e8e61eaa5148ea0b671bc28099c))
+* retain legacy opencode sessions on scan errors ([205170b](https://github.com/angristan/fast-resume/commit/205170b7e05311197a222044209d969d13e28628))
+* retain malformed copilot session identity ([fc7bbe0](https://github.com/angristan/fast-resume/commit/fc7bbe0154de5b687d296bf950b240ecbbef7987))
+* retain sessions on parse failures ([f5f50d8](https://github.com/angristan/fast-resume/commit/f5f50d815aa3681c93b310fd974a164e193c39b4))
+* scroll long tui search input ([803609a](https://github.com/angristan/fast-resume/commit/803609ad65cc5ab4263089fabc7ed3460304a3ea))
+* search refresh results asynchronously ([c57b9cb](https://github.com/angristan/fast-resume/commit/c57b9cb94eb6a831df8e40c390580dafff07878c))
+* show friendly empty stats message ([4d15041](https://github.com/angristan/fast-resume/commit/4d150413d3134339f9ba0baa4253edea5755238c))
+* speed up refresh scans ([5ff93cd](https://github.com/angristan/fast-resume/commit/5ff93cd9a17dcc4e013f27b0a11c424dc8b1af91))
+* track legacy opencode file edits ([3ed4252](https://github.com/angristan/fast-resume/commit/3ed42521aa66af063c2db20d7986bf246f1c71da))
+* track opencode sqlite activity mtimes ([f249f37](https://github.com/angristan/fast-resume/commit/f249f3746c7cdd699dcf56b0f04798924bd1b21d))
+* use civil-day bounds for yesterday ([37e4ac7](https://github.com/angristan/fast-resume/commit/37e4ac70aaf1a1dfc3d6b5d894685e82589679a3))
+* use vscode copilot session ids ([360233c](https://github.com/angristan/fast-resume/commit/360233c7856860b71d10111df7cf9b614998a023))
+* wait for tui search results before actions ([e587e0e](https://github.com/angristan/fast-resume/commit/e587e0ec9dba846a9723564045ace10fd044ffa3))
+
+
+### Features
+
+* add Rust TUI implementation ([77dcf90](https://github.com/angristan/fast-resume/commit/77dcf902fd0eb807303d6138c792f103ae9c7e50))
+* highlight Rust search filters ([1bc839c](https://github.com/angristan/fast-resume/commit/1bc839c16c39dc79ee54a8aec8e1456b79283919))
+* improve tui preview rendering ([f32498e](https://github.com/angristan/fast-resume/commit/f32498e0261bfe487ce30c4faa254a3af0a1272e))
+* make agent filters responsive ([5a412bf](https://github.com/angristan/fast-resume/commit/5a412bf2291c86cd506f359d18036cb3f6d3cec3))
+* scroll hovered tui pane with mouse ([311b4ec](https://github.com/angristan/fast-resume/commit/311b4ecf40d6f4e3854b0bfaf0e34b502071e888))
+* show session counts in agent filters ([f65de4b](https://github.com/angristan/fast-resume/commit/f65de4b5aaebcb2156ffaf5788ff0f2722463baf))
+* stream Rust index refresh progress ([582eb53](https://github.com/angristan/fast-resume/commit/582eb539e0572f36ec6aa2e741d5d505e0b273db))
+* sync tui search filters ([4570be6](https://github.com/angristan/fast-resume/commit/4570be68ba66c96f5d329a15371064cb5a399cd9))
+* use icons for narrow agent filters ([e92f5d9](https://github.com/angristan/fast-resume/commit/e92f5d90f8359b3f140ad74631f6bff1d49cdc31))
+
+
+### Performance Improvements
+
+* decouple tui search from input ([e745d03](https://github.com/angristan/fast-resume/commit/e745d036eb67739cd9742252ff1c65a96bfb450b))
+* redraw TUI only on changes ([c795041](https://github.com/angristan/fast-resume/commit/c795041785e3d8b645962ec4d0a6497f1cfecfb3))
+* reduce Rust refresh overhead ([63fe508](https://github.com/angristan/fast-resume/commit/63fe5081db7e565956e22c78d59d2284b3eda497))
+* speed up interactive search ([d6d2c9f](https://github.com/angristan/fast-resume/commit/d6d2c9f9c803eecff62c8f7fcc7a4a544a2029aa))
+
+
+### BREAKING CHANGES
+
+* the Python implementation was replaced by Rust.
+
 # [1.18.0](https://github.com/angristan/fast-resume/compare/v1.17.3...v1.18.0) (2026-06-03)
 
 
