@@ -52,12 +52,16 @@ impl Adapter for CopilotCliAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
+        let Some((current_files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
-        incremental_from_files(self.name(), known, current_files, |path| {
+        let mut scan = incremental_from_files(self.name(), known, current_files, |path| {
             self.parse_session_incremental(path)
-        })
+        });
+        if !complete {
+            scan.deleted_ids.clear();
+        }
+        scan
     }
 
     fn find_sessions_incremental_streaming(
@@ -65,16 +69,20 @@ impl Adapter for CopilotCliAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
+        let Some((current_files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
-        incremental_from_files_streaming(
+        let mut scan = incremental_from_files_streaming(
             self.name(),
             known,
             current_files,
             |path| self.parse_session_incremental(path),
             on_session,
-        )
+        );
+        if !complete {
+            scan.deleted_ids.clear();
+        }
+        scan
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
@@ -92,10 +100,11 @@ impl Adapter for CopilotCliAdapter {
 }
 
 impl CopilotCliAdapter {
-    fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
+    fn scan_session_files(&self) -> Option<(HashMap<String, (PathBuf, f64)>, bool)> {
         let mut current_files = HashMap::new();
+        let mut complete = true;
         if !self.sessions_dir.exists() {
-            return Some(current_files);
+            return Some((current_files, complete));
         }
         if !self.sessions_dir.is_dir() {
             return None;
@@ -109,31 +118,39 @@ impl CopilotCliAdapter {
             if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let session_id = self.session_id_from_file(path);
+            let Some(session_id) = self.session_id_from_file(path) else {
+                complete = false;
+                continue;
+            };
             current_files.insert(session_id, (path.to_path_buf(), file_mtime_seconds(path)));
         }
-        Some(current_files)
+        Some((current_files, complete))
     }
 
-    fn session_id_from_file(&self, path: &Path) -> String {
-        if let Ok(file) = fs::File::open(path) {
-            for line in BufReader::new(file).lines().map_while(Result::ok) {
-                if line.trim().is_empty() {
-                    continue;
+    fn session_id_from_file(&self, path: &Path) -> Option<String> {
+        let file = fs::File::open(path).ok()?;
+        let mut complete = true;
+        for line in BufReader::new(file).lines() {
+            let Ok(line) = line else {
+                complete = false;
+                continue;
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+                complete = false;
+                continue;
+            };
+            if string_at(&entry, &["type"]) == "session.start" {
+                let id = string_at(entry.get("data").unwrap_or(&Value::Null), &["sessionId"]);
+                if !id.is_empty() {
+                    return Some(id);
                 }
-                let Ok(entry) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
-                if string_at(&entry, &["type"]) == "session.start" {
-                    let id = string_at(entry.get("data").unwrap_or(&Value::Null), &["sessionId"]);
-                    if !id.is_empty() {
-                        return id;
-                    }
-                    break;
-                }
+                break;
             }
         }
-        copilot_fallback_session_id(path, &self.sessions_dir)
+        complete.then(|| copilot_fallback_session_id(path, &self.sessions_dir))
     }
 
     fn parse_session(&self, path: &Path) -> Option<Session> {
@@ -300,5 +317,40 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn malformed_file_retains_session_with_embedded_id() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        let session_file = sessions_dir.join("filename-id.jsonl");
+        write_jsonl(
+            &session_file,
+            &[
+                json!({"type": "session.start", "data": {"sessionId": "embedded-id", "context": {"cwd": "/work/copilot"}}}),
+                json!({"type": "user.message", "data": {"content": "Original searchable prompt"}}),
+                json!({"type": "assistant.message", "data": {"content": "Done"}}),
+            ],
+        );
+        let adapter = CopilotCliAdapter { sessions_dir };
+        let session = adapter.find_sessions().pop().unwrap();
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("copilot-cli".to_string(), session.id.clone()),
+            session.mtime,
+        );
+        fs::write(&session_file, "{").unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+        let mut streamed = Vec::new();
+        let streaming_scan = adapter
+            .find_sessions_incremental_streaming(&known, &mut |session| streamed.push(session));
+
+        assert_eq!(session.id, "embedded-id");
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+        assert!(streamed.is_empty());
+        assert!(streaming_scan.deleted_ids.is_empty());
     }
 }
