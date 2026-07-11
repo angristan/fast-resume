@@ -173,24 +173,55 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
         area,
         x,
         "All",
+        None,
         state.all_agent_filter_active(),
         Color::White,
         None,
     );
     for agent in AGENT_ORDER {
         let config = AGENTS.get(agent).expect("known agent");
-        let label = filter_label(config.badge, state.engine.count_for_agent(Some(agent)));
+        let count = state.engine.count_for_agent(Some(agent));
         let active = active_agents.iter().any(|active| active == agent);
         let icon = state
             .images
             .as_ref()
             .and_then(|images| images.row.get(agent));
-        x = draw_filter_tab(frame, area, x, &label, active, config.color, icon);
+        x = draw_filter_tab(
+            frame,
+            area,
+            x,
+            config.badge,
+            Some(count),
+            active,
+            config.color,
+            icon,
+        );
     }
 }
 
-fn filter_label(label: &str, count: usize) -> String {
-    format!("{label} {count}")
+fn compact_count(count: usize) -> String {
+    if count < 1_000 {
+        return count.to_string();
+    }
+    if count < 10_000 {
+        let tenths = (count + 50) / 100;
+        return if tenths.is_multiple_of(10) {
+            format!("{}k", tenths / 10)
+        } else {
+            format!("{}.{}k", tenths / 10, tenths % 10)
+        };
+    }
+    if count < 1_000_000 {
+        return format!("{}k", (count + 500) / 1_000);
+    }
+    format!("{}m", (count + 500_000) / 1_000_000)
+}
+
+fn count_suffix(count: Option<usize>) -> String {
+    match count {
+        Some(0) | None => String::new(),
+        Some(count) => format!(" · {}", compact_count(count)),
+    }
 }
 
 fn draw_filter_tab(
@@ -198,12 +229,14 @@ fn draw_filter_tab(
     area: Rect,
     x: u16,
     label: &str,
+    count: Option<usize>,
     active: bool,
     color: Color,
     icon: Option<&Protocol>,
 ) -> u16 {
     let has_icon = icon.is_some();
-    let label_width = label.width() as u16;
+    let suffix = count_suffix(count);
+    let label_width = (label.width() + suffix.width()) as u16;
     let tab_width = label_width + if has_icon { 5 } else { 3 };
     if x >= area.right() {
         return x.saturating_add(tab_width);
@@ -216,6 +249,17 @@ fn draw_filter_tab(
             .add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(color)
+    };
+    let count_style = if active {
+        style
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+    let label_line = || {
+        Line::from(vec![
+            Span::styled(label.to_string(), style),
+            Span::styled(suffix.clone(), count_style),
+        ])
     };
 
     let visible_width = tab_width.min(area.right().saturating_sub(x));
@@ -234,15 +278,13 @@ fn draw_filter_tab(
         }
         if x + 4 < area.right() {
             frame.render_widget(
-                Paragraph::new(truncate(label, area.right().saturating_sub(x + 4) as usize))
-                    .style(style),
+                Paragraph::new(label_line()),
                 Rect::new(x + 4, area.y, label_width.min(area.right() - (x + 4)), 1),
             );
         }
     } else if x + 1 < area.right() {
         frame.render_widget(
-            Paragraph::new(truncate(label, area.right().saturating_sub(x + 1) as usize))
-                .style(style),
+            Paragraph::new(label_line()),
             Rect::new(x + 1, area.y, label_width.min(area.right() - (x + 1)), 1),
         );
     }
@@ -671,8 +713,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_filter_label_includes_session_count() {
-        assert_eq!(filter_label("codex", 124), "codex 124");
+    fn agent_filter_counts_are_compact_and_zero_is_hidden() {
+        assert_eq!(count_suffix(Some(124)), " · 124");
+        assert_eq!(count_suffix(Some(1_249)), " · 1.2k");
+        assert_eq!(count_suffix(Some(15_200)), " · 15k");
+        assert_eq!(count_suffix(Some(0)), "");
     }
 
     #[test]
