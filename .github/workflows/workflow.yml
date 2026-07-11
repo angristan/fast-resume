@@ -11,6 +11,10 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   commitlint:
     name: Commit Lint
@@ -38,6 +42,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Cache Cargo dependencies and build output
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-debug-
       - name: Check formatting
         run: cargo fmt --check
       - name: Run tests
@@ -80,6 +94,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux }}
           args: --release --locked --out dist --compatibility pypi
@@ -89,6 +104,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
@@ -97,6 +113,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
@@ -191,6 +208,17 @@ jobs:
           ref: v${{ needs.release.outputs.new_release_version }}
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Cargo dependencies and release build output
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-release-
+
       - name: Build binary
         run: cargo build --release --locked
 
@@ -264,6 +292,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux }}
           args: --release --locked --out dist --compatibility pypi
@@ -273,6 +302,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
@@ -281,6 +311,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           maturin-version: v1.14.1
+          sccache: true
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
