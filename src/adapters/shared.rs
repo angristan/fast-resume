@@ -17,6 +17,13 @@ pub(super) enum IncrementalParse {
     Retain,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JsonlHealth {
+    Clean,
+    Partial,
+    Invalid,
+}
+
 pub(super) fn session_needs_update(
     known: &KnownSessions,
     agent: &str,
@@ -127,6 +134,31 @@ pub(super) fn incremental_parse_from_option(session: Option<Session>) -> Increme
     session.map_or(IncrementalParse::Delete, IncrementalParse::Session)
 }
 
+pub(super) fn incremental_parse_jsonl<F>(path: &Path, parse: F) -> IncrementalParse
+where
+    F: FnOnce() -> Option<Session>,
+{
+    incremental_parse_jsonl_with_partial_check(path, parse, |_| true)
+}
+
+pub(super) fn incremental_parse_jsonl_with_partial_check<F, P>(
+    path: &Path,
+    parse: F,
+    partial_session_is_usable: P,
+) -> IncrementalParse
+where
+    F: FnOnce() -> Option<Session>,
+    P: FnOnce(&Session) -> bool,
+{
+    match jsonl_health(path) {
+        JsonlHealth::Invalid => IncrementalParse::Retain,
+        JsonlHealth::Partial => parse()
+            .filter(partial_session_is_usable)
+            .map_or(IncrementalParse::Retain, IncrementalParse::Session),
+        JsonlHealth::Clean => incremental_parse_from_option(parse()),
+    }
+}
+
 pub(super) fn json_file_has_parse_errors(path: &Path) -> bool {
     let Ok(data) = fs::read(path) else {
         return true;
@@ -134,22 +166,36 @@ pub(super) fn json_file_has_parse_errors(path: &Path) -> bool {
     serde_json::from_slice::<Value>(&data).is_err()
 }
 
-pub(super) fn jsonl_has_parse_errors(path: &Path) -> bool {
+fn jsonl_health(path: &Path) -> JsonlHealth {
     let Ok(file) = fs::File::open(path) else {
-        return true;
+        return JsonlHealth::Invalid;
     };
+    let mut valid_rows = 0usize;
+    let mut malformed_rows = 0usize;
+    let mut valid_after_last_malformed = false;
     for line in BufReader::new(file).lines() {
         let Ok(line) = line else {
-            return true;
+            return JsonlHealth::Invalid;
         };
         if line.trim().is_empty() {
             continue;
         }
         if serde_json::from_str::<Value>(&line).is_err() {
-            return true;
+            malformed_rows += 1;
+            valid_after_last_malformed = false;
+        } else {
+            valid_rows += 1;
+            if malformed_rows > 0 {
+                valid_after_last_malformed = true;
+            }
         }
     }
-    false
+    match (valid_rows, malformed_rows) {
+        (_, 0) => JsonlHealth::Clean,
+        (0, _) => JsonlHealth::Invalid,
+        _ if valid_after_last_malformed => JsonlHealth::Partial,
+        _ => JsonlHealth::Invalid,
+    }
 }
 
 pub(super) fn content_texts(content: &Value) -> Vec<String> {
@@ -318,10 +364,34 @@ pub(super) fn raw_stats_for_tree(
 
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
     use super::*;
 
     fn current_file(id: &str, mtime: f64) -> HashMap<String, (PathBuf, f64)> {
         HashMap::from([(id.to_string(), (PathBuf::from(id), mtime))])
+    }
+
+    #[test]
+    fn classifies_clean_partial_and_invalid_jsonl() {
+        let temp = tempdir().unwrap();
+        let clean = temp.path().join("clean.jsonl");
+        let partial = temp.path().join("partial.jsonl");
+        let trailing_partial = temp.path().join("trailing-partial.jsonl");
+        let invalid = temp.path().join("invalid.jsonl");
+        fs::write(&clean, "{\"valid\":true}\n").unwrap();
+        fs::write(&partial, "{\"valid\":true}\n{\n{\"later\":true}\n").unwrap();
+        fs::write(&trailing_partial, "{\"valid\":true}\n{\n").unwrap();
+        fs::write(&invalid, "{\n").unwrap();
+
+        assert_eq!(jsonl_health(&clean), JsonlHealth::Clean);
+        assert_eq!(jsonl_health(&partial), JsonlHealth::Partial);
+        assert_eq!(jsonl_health(&trailing_partial), JsonlHealth::Invalid);
+        assert_eq!(jsonl_health(&invalid), JsonlHealth::Invalid);
+        assert_eq!(
+            jsonl_health(&temp.path().join("missing.jsonl")),
+            JsonlHealth::Invalid
+        );
     }
 
     #[test]

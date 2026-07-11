@@ -10,9 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    codex_session_id_from_path, content_texts, deleted_ids_for_agent, failed_incremental_scan,
-    fallback_session_id, jsonl_has_parse_errors, parse_timestamp_seconds, raw_stats_for_tree,
-    session_needs_update, string_at,
+    IncrementalParse, codex_session_id_from_path, content_texts, deleted_ids_for_agent,
+    failed_incremental_scan, fallback_session_id, incremental_parse_jsonl, parse_timestamp_seconds,
+    raw_stats_for_tree, session_needs_update, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -263,13 +263,15 @@ impl Adapter for CodexAdapter {
                 continue;
             }
 
-            if jsonl_has_parse_errors(&path) {
-                continue;
-            } else if let Some(mut session) = self.parse_session(&path, &thread_names) {
-                session.mtime = mtime;
-                new_or_modified.push(session);
-            } else {
-                current_ids.remove(&session_id);
+            match incremental_parse_jsonl(&path, || self.parse_session(&path, &thread_names)) {
+                IncrementalParse::Session(mut session) => {
+                    session.mtime = mtime;
+                    new_or_modified.push(session);
+                }
+                IncrementalParse::Delete => {
+                    current_ids.remove(&session_id);
+                }
+                IncrementalParse::Retain => {}
             }
         }
 
@@ -302,14 +304,16 @@ impl Adapter for CodexAdapter {
                 continue;
             }
 
-            if jsonl_has_parse_errors(&path) {
-                continue;
-            } else if let Some(mut session) = self.parse_session(&path, &thread_names) {
-                session.mtime = mtime;
-                on_session(session.clone());
-                new_or_modified.push(session);
-            } else {
-                current_ids.remove(&session_id);
+            match incremental_parse_jsonl(&path, || self.parse_session(&path, &thread_names)) {
+                IncrementalParse::Session(mut session) => {
+                    session.mtime = mtime;
+                    on_session(session.clone());
+                    new_or_modified.push(session);
+                }
+                IncrementalParse::Delete => {
+                    current_ids.remove(&session_id);
+                }
+                IncrementalParse::Retain => {}
             }
         }
 
@@ -516,6 +520,103 @@ mod tests {
         let unchanged = adapter.find_sessions_incremental(&refreshed_known);
         assert!(unchanged.new_or_modified.is_empty());
         assert!(unchanged.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_updates_valid_rows_after_malformed_jsonl_row() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let day_dir = sessions_dir.join("2026/06/21");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_file = day_dir.join("rollout-partial.jsonl");
+        fs::write(
+            &session_file,
+            [
+                json!({"type": "session_meta", "payload": {"id": "partial", "cwd": "/work/codex"}}).to_string(),
+                "{".to_string(),
+                json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Valid prompt after malformed history"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "partial".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+        let mut emitted = Vec::new();
+        let streaming_scan = adapter
+            .find_sessions_incremental_streaming(&known, &mut |session| emitted.push(session));
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Valid prompt after malformed history")
+        );
+        assert!(scan.deleted_ids.is_empty());
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(streaming_scan.new_or_modified.len(), 1);
+        assert!(streaming_scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_retains_trailing_partial_row_until_completion() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let day_dir = sessions_dir.join("2026/06/21");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_file = day_dir.join("rollout-partial-tail.jsonl");
+        let metadata = json!({
+            "type": "session_meta",
+            "payload": {"id": "partial-tail", "cwd": "/work/codex"}
+        })
+        .to_string();
+        let user_message = json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "Prompt written before trailing partial row"
+            }
+        })
+        .to_string();
+        fs::write(
+            &session_file,
+            [metadata.clone(), user_message.clone(), "{".to_string()].join("\n"),
+        )
+        .unwrap();
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "partial-tail".to_string()), 0.0);
+
+        let partial_scan = adapter.find_sessions_incremental(&known);
+
+        assert!(partial_scan.new_or_modified.is_empty());
+        assert!(partial_scan.deleted_ids.is_empty());
+
+        fs::write(
+            &session_file,
+            [
+                metadata,
+                user_message,
+                json!({
+                    "type": "response_item",
+                    "payload": {"role": "assistant", "content": [{"text": "Completed row"}]}
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let completed_scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(completed_scan.new_or_modified.len(), 1);
+        assert!(
+            completed_scan.new_or_modified[0]
+                .content
+                .contains("Completed row")
+        );
+        assert!(completed_scan.deleted_ids.is_empty());
     }
 
     #[test]

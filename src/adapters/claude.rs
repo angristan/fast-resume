@@ -11,8 +11,8 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_from_option, jsonl_has_parse_errors,
-    parse_timestamp_seconds, raw_stats_for_tree, string_at, text_from_part,
+    incremental_from_files_streaming, incremental_parse_jsonl, parse_timestamp_seconds,
+    raw_stats_for_tree, string_at, text_from_part,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -134,11 +134,7 @@ impl ClaudeAdapter {
     }
 
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
-        if jsonl_has_parse_errors(path) {
-            IncrementalParse::Retain
-        } else {
-            incremental_parse_from_option(self.parse_session(path))
-        }
+        incremental_parse_jsonl(path, || self.parse_session(path))
     }
 
     fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
@@ -363,6 +359,43 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+    }
+
+    #[test]
+    fn incremental_updates_valid_rows_after_malformed_jsonl_row() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("partial.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Valid Claude prompt after malformed history"}
+                })
+                .to_string(),
+                "{".to_string(),
+                json!({"type": "assistant", "message": {"content": "Updated response"}})
+                    .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = ClaudeAdapter::new(projects);
+        let mut known = KnownSessions::new();
+        known.insert(("claude".to_string(), "partial".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Valid Claude prompt after malformed history")
+        );
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]

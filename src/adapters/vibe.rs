@@ -10,8 +10,9 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_from_option, json_file_has_parse_errors,
-    jsonl_has_parse_errors, parse_datetime, raw_stats_for_tree, string_at,
+    incremental_from_files_streaming, incremental_parse_from_option,
+    incremental_parse_jsonl_with_partial_check, json_file_has_parse_errors, parse_datetime,
+    raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -242,10 +243,14 @@ impl VibeAdapter {
     fn parse_session_incremental(&self, session_dir: &Path) -> IncrementalParse {
         let metadata_file = session_dir.join("meta.json");
         let messages_file = session_dir.join("messages.jsonl");
-        if json_file_has_parse_errors(&metadata_file)
-            || (messages_file.exists() && jsonl_has_parse_errors(&messages_file))
-        {
+        if json_file_has_parse_errors(&metadata_file) {
             IncrementalParse::Retain
+        } else if messages_file.exists() {
+            incremental_parse_jsonl_with_partial_check(
+                &messages_file,
+                || self.parse_session(session_dir),
+                |_| vibe_messages_have_user_content(&messages_file),
+            )
         } else {
             incremental_parse_from_option(self.parse_session(session_dir))
         }
@@ -255,6 +260,26 @@ impl VibeAdapter {
 fn vibe_session_mtime(session_dir: &Path) -> f64 {
     file_mtime_seconds(&session_dir.join("meta.json"))
         .max(file_mtime_seconds(&session_dir.join("messages.jsonl")))
+}
+
+fn vibe_messages_have_user_content(path: &Path) -> bool {
+    let Ok(file) = fs::File::open(path) else {
+        return false;
+    };
+    BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .any(|line| {
+            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                return false;
+            };
+            string_at(&message, &["role"]) == "user"
+                && message.get("content").is_some_and(|content| {
+                    content_texts(content)
+                        .iter()
+                        .any(|text| !text.trim().is_empty())
+                })
+        })
 }
 
 #[cfg(test)]
@@ -390,6 +415,88 @@ mod tests {
                 .content
                 .contains("Newer Vibe message")
         );
+    }
+
+    #[test]
+    fn partial_jsonl_updates_while_invalid_jsonl_retains() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let partial_dir = sessions_dir.join("session_partial");
+        let invalid_dir = sessions_dir.join("session_invalid");
+        let unusable_partial_dir = sessions_dir.join("session_unusable");
+        let whitespace_partial_dir = sessions_dir.join("session_whitespace");
+        fs::create_dir_all(&partial_dir).unwrap();
+        fs::create_dir_all(&invalid_dir).unwrap();
+        fs::create_dir_all(&unusable_partial_dir).unwrap();
+        fs::create_dir_all(&whitespace_partial_dir).unwrap();
+        for (session_dir, session_id) in [
+            (&partial_dir, "partial"),
+            (&invalid_dir, "invalid"),
+            (&unusable_partial_dir, "unusable"),
+            (&whitespace_partial_dir, "whitespace"),
+        ] {
+            fs::write(
+                session_dir.join("meta.json"),
+                json!({
+                    "session_id": session_id,
+                    "environment": {"working_directory": "/work/vibe"},
+                    "start_time": "2026-01-01T00:00:00Z"
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        fs::write(
+            partial_dir.join("messages.jsonl"),
+            [
+                json!({"role": "user", "content": "Valid Vibe prompt after malformed history"})
+                    .to_string(),
+                "{".to_string(),
+                json!({"role": "assistant", "content": "Updated response"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(invalid_dir.join("messages.jsonl"), "{").unwrap();
+        fs::write(
+            unusable_partial_dir.join("messages.jsonl"),
+            [
+                "{".to_string(),
+                json!({
+                    "role": "assistant",
+                    "content": "Assistant text\n» looks like rendered user content"
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            whitespace_partial_dir.join("messages.jsonl"),
+            [
+                "{".to_string(),
+                json!({"role": "user", "content": "   "}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = VibeAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("vibe".to_string(), "partial".to_string()), 0.0);
+        known.insert(("vibe".to_string(), "invalid".to_string()), 0.0);
+        known.insert(("vibe".to_string(), "unusable".to_string()), 0.0);
+        known.insert(("vibe".to_string(), "whitespace".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "partial");
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Valid Vibe prompt after malformed history")
+        );
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]

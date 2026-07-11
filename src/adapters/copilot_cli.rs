@@ -12,8 +12,7 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     IncrementalParse, copilot_fallback_session_id, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_from_option, jsonl_has_parse_errors,
-    raw_stats_for_tree, string_at,
+    incremental_from_files_streaming, incremental_parse_jsonl, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -245,11 +244,7 @@ impl CopilotCliAdapter {
     }
 
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
-        if jsonl_has_parse_errors(path) {
-            IncrementalParse::Retain
-        } else {
-            incremental_parse_from_option(self.parse_session(path))
-        }
+        incremental_parse_jsonl(path, || self.parse_session(path))
     }
 }
 
@@ -302,6 +297,64 @@ mod tests {
             adapter.resume_command(&sessions[0], true),
             vec!["copilot", "--yolo", "--resume", "copilot-1"]
         );
+    }
+
+    #[test]
+    fn incremental_updates_valid_rows_after_malformed_jsonl_row() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        let session_file = sessions_dir.join("filename-id.jsonl");
+        fs::write(
+            &session_file,
+            [
+                json!({"type": "session.start", "data": {"sessionId": "embedded-id", "context": {"cwd": "/work/copilot"}}}).to_string(),
+                "{".to_string(),
+                json!({"type": "user.message", "data": {"content": "Valid Copilot prompt after malformed history"}}).to_string(),
+                json!({"type": "assistant.message", "data": {"content": "Updated response"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = CopilotCliAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("copilot-cli".to_string(), "embedded-id".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "embedded-id");
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Valid Copilot prompt after malformed history")
+        );
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn uncertain_identity_does_not_create_fallback_session() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        fs::write(
+            sessions_dir.join("filename-id.jsonl"),
+            [
+                "{".to_string(),
+                json!({"type": "user.message", "data": {"content": "Valid message without recoverable identity"}}).to_string(),
+                json!({"type": "assistant.message", "data": {"content": "Response"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = CopilotCliAdapter { sessions_dir };
+        let mut known = KnownSessions::new();
+        known.insert(("copilot-cli".to_string(), "embedded-id".to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
