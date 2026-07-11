@@ -159,7 +159,7 @@ fn load_agent_protocols(
         let Ok(image) = reader.decode() else {
             continue;
         };
-        let image = compensate_logo_aspect(agent, image, compensate_ghostty_aspect);
+        let image = compensate_logo_aspect(image, compensate_ghostty_aspect);
         if let Ok(protocol) =
             picker.new_protocol(image, size, Resize::Fit(Some(FilterType::Lanczos3)))
         {
@@ -170,11 +170,10 @@ fn load_agent_protocols(
 }
 
 fn compensate_logo_aspect(
-    agent: &str,
     image: image::DynamicImage,
     compensate_ghostty_aspect: bool,
 ) -> image::DynamicImage {
-    if agent != "codex" || !compensate_ghostty_aspect {
+    if !compensate_ghostty_aspect {
         return image;
     }
 
@@ -241,20 +240,21 @@ mod tests {
     }
 
     #[test]
-    fn ghostty_codex_logo_has_a_more_square_visible_footprint() {
-        let image = ImageReader::new(Cursor::new(
-            agent_asset_bytes("codex").expect("codex asset"),
-        ))
-        .with_guessed_format()
-        .expect("image format")
-        .decode()
-        .expect("image");
-        let before = visible_size(&image);
-        let corrected = compensate_logo_aspect("codex", image, true);
-        let after = visible_size(&corrected);
+    fn ghostty_logos_receive_the_same_vertical_compensation() {
+        for agent in AGENT_ORDER {
+            let image =
+                ImageReader::new(Cursor::new(agent_asset_bytes(agent).expect("agent asset")))
+                    .with_guessed_format()
+                    .expect("image format")
+                    .decode()
+                    .expect("image");
+            let before = visible_size(&image);
+            let corrected = compensate_logo_aspect(image, true);
+            let after = visible_size(&corrected);
 
-        assert_eq!(corrected.width(), 64);
-        assert_eq!(corrected.height(), 64);
-        assert!(after.0.abs_diff(after.1) < before.0.abs_diff(before.1));
+            assert_eq!(corrected.width(), 64, "{agent}");
+            assert_eq!(corrected.height(), 64, "{agent}");
+            assert!(after.1 > before.1, "{agent}");
+        }
     }
 }
