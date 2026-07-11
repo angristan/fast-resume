@@ -62,6 +62,9 @@ jobs:
   python-wheel:
     name: Python wheel (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.runner }}
+    env:
+      SCCACHE_GHA_CACHE_FROM: ${{ matrix.platform.target }}
+      SCCACHE_GHA_CACHE_TO: ${{ matrix.platform.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -251,6 +254,9 @@ jobs:
     needs: [release]
     if: needs.release.outputs.new_release_version != ''
     runs-on: ${{ matrix.platform.runner }}
+    env:
+      SCCACHE_GHA_CACHE_FROM: ${{ matrix.platform.target }}
+      SCCACHE_GHA_CACHE_TO: ${{ matrix.platform.target }}
     strategy:
       fail-fast: false
       matrix:
