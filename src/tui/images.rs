@@ -5,8 +5,8 @@ use std::io::Cursor;
 use image::{ImageReader, imageops::FilterType};
 use ratatui::layout::Size;
 use ratatui_image::{
-    Resize,
-    picker::{Picker, ProtocolType},
+    FontSize, Resize,
+    picker::{Capability, Picker, ProtocolType},
     protocol::Protocol,
 };
 
@@ -28,7 +28,7 @@ pub(super) struct AgentImages {
 
 impl AgentImages {
     pub(super) fn load(protocol: ImageProtocol) -> Option<Self> {
-        let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+        let mut picker = terminal_picker();
         let protocol_type = match protocol {
             ImageProtocol::Auto => {
                 let queried = picker.protocol_type();
@@ -52,6 +52,51 @@ impl AgentImages {
 
         Some(Self { row, preview })
     }
+}
+
+fn terminal_picker() -> Picker {
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    let has_reported_cell_size = picker
+        .capabilities()
+        .iter()
+        .any(|capability| matches!(capability, Capability::CellSize(Some(_))));
+    if has_reported_cell_size {
+        return picker;
+    }
+
+    let Ok(window) = crossterm::terminal::window_size() else {
+        return picker;
+    };
+    let Some(font_size) =
+        cell_size_from_window(window.columns, window.rows, window.width, window.height)
+    else {
+        return picker;
+    };
+
+    let protocol_type = picker.protocol_type();
+    #[allow(deprecated)]
+    let mut picker = Picker::from_fontsize(font_size);
+    picker.set_protocol_type(protocol_type);
+    picker
+}
+
+fn cell_size_from_window(
+    columns: u16,
+    rows: u16,
+    pixel_width: u16,
+    pixel_height: u16,
+) -> Option<FontSize> {
+    if columns == 0 || rows == 0 || pixel_width == 0 || pixel_height == 0 {
+        return None;
+    }
+
+    let cell_width = (u32::from(pixel_width) + u32::from(columns) / 2) / u32::from(columns);
+    let cell_height = (u32::from(pixel_height) + u32::from(rows) / 2) / u32::from(rows);
+    if cell_width == 0 || cell_height == 0 {
+        return None;
+    }
+
+    Some(FontSize::new(cell_width as u16, cell_height as u16))
 }
 
 fn detect_image_protocol(protocol: ImageProtocol) -> Option<ProtocolType> {
@@ -127,5 +172,24 @@ fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
         "opencode" => Some(include_bytes!("../../assets/agents/opencode.png")),
         "vibe" => Some(include_bytes!("../../assets/agents/vibe.png")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derives_rounded_cell_size_from_window_pixels() {
+        let size = cell_size_from_window(120, 48, 1_080, 816).expect("cell size");
+
+        assert_eq!(size.width, 9);
+        assert_eq!(size.height, 17);
+    }
+
+    #[test]
+    fn rejects_missing_window_pixel_metrics() {
+        assert!(cell_size_from_window(120, 48, 0, 0).is_none());
+        assert!(cell_size_from_window(0, 0, 1_080, 816).is_none());
     }
 }
