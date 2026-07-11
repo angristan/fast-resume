@@ -10,10 +10,10 @@ pub const AGENT_ORDER: [&str; 7] = [
     "claude",
     "codex",
     "copilot-cli",
-    "copilot-vscode",
     "crush",
     "opencode",
     "vibe",
+    "copilot-vscode",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -162,4 +162,21 @@ pub fn vscode_empty_window_chat_dir() -> PathBuf {
 
 pub fn vscode_workspace_storage_dir() -> PathBuf {
     vscode_storage_dir().join("User").join("workspaceStorage")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_order_is_alphabetical_by_visible_badge() {
+        let badges: Vec<_> = AGENT_ORDER
+            .iter()
+            .map(|agent| AGENTS.get(agent).expect("known agent").badge)
+            .collect();
+        let mut sorted = badges.clone();
+        sorted.sort_unstable();
+
+        assert_eq!(badges, sorted);
+    }
 }
