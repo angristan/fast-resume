@@ -168,36 +168,137 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     let active_agents = state.active_agent_filters();
+    let tabs: Vec<_> = AGENT_ORDER
+        .iter()
+        .map(|agent| {
+            let config = AGENTS.get(agent).expect("known agent");
+            AgentFilterTab {
+                label: config.badge,
+                count: state.engine.count_for_agent(Some(agent)),
+                has_icon: state
+                    .images
+                    .as_ref()
+                    .is_some_and(|images| images.row.contains_key(*agent)),
+                active: active_agents.iter().any(|active| active == agent),
+            }
+        })
+        .collect();
+    let filter_layout = plan_filter_layout(area.width, &tabs, state.all_agent_filter_active());
     let mut x = area.x;
-    x = draw_filter_tab(
-        frame,
-        area,
-        x,
-        "All",
-        None,
-        state.all_agent_filter_active(),
-        Color::White,
-        None,
-    );
-    for agent in AGENT_ORDER {
+    if filter_layout.show_all {
+        x = draw_filter_tab(
+            frame,
+            area,
+            x,
+            "All",
+            None,
+            state.all_agent_filter_active(),
+            Color::White,
+            None,
+        );
+    }
+    for (index, agent) in AGENT_ORDER.iter().enumerate() {
+        if !filter_layout.visible_agents.contains(&index) {
+            continue;
+        }
         let config = AGENTS.get(agent).expect("known agent");
-        let count = state.engine.count_for_agent(Some(agent));
+        let count = filter_layout.show_counts.then_some(tabs[index].count);
         let active = active_agents.iter().any(|active| active == agent);
-        let icon = state
-            .images
-            .as_ref()
-            .and_then(|images| images.row.get(agent));
+        let icon = filter_layout
+            .show_icons
+            .then(|| {
+                state
+                    .images
+                    .as_ref()
+                    .and_then(|images| images.row.get(*agent))
+            })
+            .flatten();
         x = draw_filter_tab(
             frame,
             area,
             x,
             config.badge,
-            Some(count),
+            count,
             active,
             config.color,
             icon,
         );
     }
+}
+
+#[derive(Clone, Copy)]
+struct AgentFilterTab<'a> {
+    label: &'a str,
+    count: usize,
+    has_icon: bool,
+    active: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct FilterLayout {
+    show_all: bool,
+    show_counts: bool,
+    show_icons: bool,
+    visible_agents: std::ops::Range<usize>,
+}
+
+fn plan_filter_layout(width: u16, tabs: &[AgentFilterTab<'_>], all_active: bool) -> FilterLayout {
+    for (show_counts, show_icons) in [(true, true), (false, true), (false, false)] {
+        let total_width = filter_tab_width("All", None, false)
+            + tabs
+                .iter()
+                .map(|tab| {
+                    filter_tab_width(
+                        tab.label,
+                        show_counts.then_some(tab.count),
+                        show_icons && tab.has_icon,
+                    )
+                })
+                .sum::<u16>();
+        if total_width <= width {
+            return FilterLayout {
+                show_all: true,
+                show_counts,
+                show_icons,
+                visible_agents: 0..tabs.len(),
+            };
+        }
+    }
+
+    let show_counts = false;
+    let show_icons = false;
+    let tab_widths: Vec<_> = tabs
+        .iter()
+        .map(|tab| filter_tab_width(tab.label, None, false))
+        .collect();
+    let all_width = filter_tab_width("All", None, false);
+    let active_index = tabs.iter().position(|tab| tab.active);
+    let show_all =
+        all_active || active_index.is_none_or(|index| all_width + tab_widths[index] <= width);
+    let available = width.saturating_sub(if show_all { all_width } else { 0 });
+    let anchor = active_index.unwrap_or(0);
+    let mut start = anchor;
+    let mut used = tab_widths.get(anchor).copied().unwrap_or(0);
+    while start > 0 && used.saturating_add(tab_widths[start - 1]) <= available {
+        start -= 1;
+        used = used.saturating_add(tab_widths[start]);
+    }
+    let mut end = (anchor + 1).min(tabs.len());
+    while end < tabs.len() && used.saturating_add(tab_widths[end]) <= available {
+        used = used.saturating_add(tab_widths[end]);
+        end += 1;
+    }
+
+    FilterLayout {
+        show_all,
+        show_counts,
+        show_icons,
+        visible_agents: start..end,
+    }
+}
+
+fn filter_tab_width(label: &str, count: Option<usize>, has_icon: bool) -> u16 {
+    (label.width() + count_suffix(count).width()) as u16 + if has_icon { 5 } else { 3 }
 }
 
 fn compact_count(count: usize) -> String {
@@ -238,7 +339,7 @@ fn draw_filter_tab(
     let has_icon = icon.is_some();
     let suffix = count_suffix(count);
     let label_width = (label.width() + suffix.width()) as u16;
-    let tab_width = label_width + if has_icon { 5 } else { 3 };
+    let tab_width = filter_tab_width(label, count, has_icon);
     if x >= area.right() {
         return x.saturating_add(tab_width);
     }
@@ -728,6 +829,79 @@ fn button_span(label: &'static str, selected: bool) -> Span<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn filter_tabs(active: Option<usize>) -> Vec<AgentFilterTab<'static>> {
+        [
+            "claude", "codex", "copilot", "crush", "opencode", "vibe", "vscode",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, label)| AgentFilterTab {
+            label,
+            count: 124,
+            has_icon: true,
+            active: active == Some(index),
+        })
+        .collect()
+    }
+
+    fn filter_layout_width(
+        tabs: &[AgentFilterTab<'_>],
+        show_counts: bool,
+        show_icons: bool,
+    ) -> u16 {
+        filter_tab_width("All", None, false)
+            + tabs
+                .iter()
+                .map(|tab| {
+                    filter_tab_width(tab.label, show_counts.then_some(tab.count), show_icons)
+                })
+                .sum::<u16>()
+    }
+
+    #[test]
+    fn filter_layout_drops_counts_before_icons() {
+        let tabs = filter_tabs(None);
+        let icons_only_width = filter_layout_width(&tabs, false, true);
+        let layout = plan_filter_layout(icons_only_width, &tabs, true);
+
+        assert!(!layout.show_counts);
+        assert!(layout.show_icons);
+        assert_eq!(layout.visible_agents, 0..tabs.len());
+    }
+
+    #[test]
+    fn filter_layout_drops_icons_after_counts() {
+        let tabs = filter_tabs(None);
+        let labels_only_width = filter_layout_width(&tabs, false, false);
+        let layout = plan_filter_layout(labels_only_width, &tabs, true);
+
+        assert!(!layout.show_counts);
+        assert!(!layout.show_icons);
+        assert_eq!(layout.visible_agents, 0..tabs.len());
+    }
+
+    #[test]
+    fn filter_layout_keeps_active_agent_visible_when_tabs_overflow() {
+        let tabs = filter_tabs(Some(6));
+        let width =
+            filter_tab_width("All", None, false) + filter_tab_width(tabs[6].label, None, false);
+        let layout = plan_filter_layout(width, &tabs, false);
+
+        assert!(layout.show_all);
+        assert!(layout.visible_agents.contains(&6));
+        assert!(!layout.visible_agents.contains(&0));
+    }
+
+    #[test]
+    fn filter_layout_prioritizes_active_agent_in_extreme_widths() {
+        let tabs = filter_tabs(Some(6));
+        let width = filter_tab_width(tabs[6].label, None, false);
+        let layout = plan_filter_layout(width, &tabs, false);
+
+        assert!(!layout.show_all);
+        assert_eq!(layout.visible_agents, 6..7);
+    }
 
     #[test]
     fn agent_filter_counts_are_compact_and_zero_is_hidden() {
