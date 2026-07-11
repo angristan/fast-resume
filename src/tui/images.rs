@@ -44,9 +44,8 @@ impl AgentImages {
         };
         picker.set_protocol_type(protocol_type);
 
-        let ghostty = is_ghostty();
-        let row = load_agent_protocols(&picker, Size::new(2, 1), ghostty);
-        let preview = load_agent_protocols(&picker, Size::new(8, 4), ghostty);
+        let row = load_agent_protocols(&picker, Size::new(2, 1));
+        let preview = load_agent_protocols(&picker, Size::new(8, 4));
         if preview.is_empty() {
             return None;
         }
@@ -143,11 +142,7 @@ fn env_contains(key: &str, needle: &str) -> bool {
     env::var(key).is_ok_and(|value| value.contains(needle))
 }
 
-fn load_agent_protocols(
-    picker: &Picker,
-    size: Size,
-    compensate_ghostty_aspect: bool,
-) -> HashMap<String, Protocol> {
+fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol> {
     let mut protocols = HashMap::new();
     for agent in AGENT_ORDER {
         let Some(bytes) = agent_asset_bytes(agent) else {
@@ -159,7 +154,7 @@ fn load_agent_protocols(
         let Ok(image) = reader.decode() else {
             continue;
         };
-        let image = compensate_logo_aspect(image, compensate_ghostty_aspect);
+        let image = compensate_logo_aspect(image);
         if let Ok(protocol) =
             picker.new_protocol(image, size, Resize::Fit(Some(FilterType::Lanczos3)))
         {
@@ -169,14 +164,7 @@ fn load_agent_protocols(
     protocols
 }
 
-fn compensate_logo_aspect(
-    image: image::DynamicImage,
-    compensate_ghostty_aspect: bool,
-) -> image::DynamicImage {
-    if !compensate_ghostty_aspect {
-        return image;
-    }
-
+fn compensate_logo_aspect(image: image::DynamicImage) -> image::DynamicImage {
     let width = image.width();
     let height = image.height();
     let stretched_height = height.saturating_mul(11) / 10;
@@ -240,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn ghostty_logos_receive_the_same_vertical_compensation() {
+    fn logos_receive_the_same_vertical_compensation() {
         for agent in AGENT_ORDER {
             let image =
                 ImageReader::new(Cursor::new(agent_asset_bytes(agent).expect("agent asset")))
@@ -249,7 +237,7 @@ mod tests {
                     .decode()
                     .expect("image");
             let before = visible_size(&image);
-            let corrected = compensate_logo_aspect(image, true);
+            let corrected = compensate_logo_aspect(image);
             let after = visible_size(&corrected);
 
             assert_eq!(corrected.width(), 64, "{agent}");
