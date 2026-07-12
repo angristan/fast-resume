@@ -38,6 +38,7 @@ impl ClaudeAdapter {
         let file = fs::File::open(path).ok()?;
         let mut directory = String::new();
         let mut first_user_message = String::new();
+        let mut ai_title = String::new();
         let mut messages = Vec::new();
         let mut turns = 0usize;
 
@@ -111,6 +112,11 @@ impl ClaudeAdapter {
                 if has_text {
                     turns += 1;
                 }
+            } else if msg_type == "ai-title" {
+                let title = string_at(&data, &["aiTitle"]);
+                if !title.trim().is_empty() {
+                    ai_title = title;
+                }
             }
         }
 
@@ -118,7 +124,9 @@ impl ClaudeAdapter {
             return None;
         }
 
-        let title_source = claude_index_title(path).unwrap_or(first_user_message);
+        let title_source = claude_index_title(path)
+            .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
+            .unwrap_or(first_user_message);
         let title = truncate_title(&title_source, 100, true);
         let mut session = Session::new(
             path.file_stem()?.to_string_lossy(),
@@ -359,6 +367,108 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+    }
+
+    #[test]
+    fn uses_ai_title_before_first_user_message() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-ai-title.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Help me fix this bug in the login system"}
+                })
+                .to_string(),
+                json!({
+                    "type": "ai-title",
+                    "aiTitle": "Fix login token validation",
+                    "sessionId": "session-ai-title"
+                })
+                .to_string(),
+                json!({"type": "assistant", "message": {"content": "On it."}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = ClaudeAdapter::new(projects);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Fix login token validation");
+        assert!(sessions[0].content.contains("Help me fix this bug"));
+    }
+
+    #[test]
+    fn uses_latest_non_empty_ai_title() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-ai-latest.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Start working on something"}
+                })
+                .to_string(),
+                json!({"type": "ai-title", "aiTitle": "First guess at the topic"}).to_string(),
+                json!({"type": "ai-title", "aiTitle": ""}).to_string(),
+                json!({"type": "ai-title", "aiTitle": "What the session became"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = ClaudeAdapter::new(projects);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "What the session became");
+    }
+
+    #[test]
+    fn sessions_index_title_overrides_ai_title() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-rename-ai.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "ai-title", "aiTitle": "Auto-generated title"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.join("sessions-index.json"),
+            json!({
+                "version": 1,
+                "entries": [{
+                    "sessionId": "session-rename-ai",
+                    "summary": "Renamed Claude thread"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let adapter = ClaudeAdapter::new(projects);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Renamed Claude thread");
     }
 
     #[test]
