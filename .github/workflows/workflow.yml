@@ -43,7 +43,7 @@ jobs:
         with:
           components: rustfmt
       - name: Cache Cargo dependencies and build output
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -212,7 +212,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo dependencies and release build output
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
