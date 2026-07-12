@@ -341,7 +341,7 @@ jobs:
           & .\.wheel-test\Scripts\fr.exe --help
           & .\.wheel-test\Scripts\fast-resume.cmd --version
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform.artifact }}
           path: dist/*.whl
