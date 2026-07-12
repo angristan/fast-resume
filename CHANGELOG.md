@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/angristan/fast-resume/compare/v2.0.0...v2.1.0) (2026-07-12)
+
+
+### Features
+
+* use Claude generated session titles ([#70](https://github.com/angristan/fast-resume/issues/70)) ([773c281](https://github.com/angristan/fast-resume/commit/773c281b544b1c5a5a375e44c0ec448229aec5b5))
+
 # [2.0.0](https://github.com/angristan/fast-resume/compare/v1.18.0...v2.0.0) (2026-07-11)
 
 
