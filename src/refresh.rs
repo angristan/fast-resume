@@ -53,6 +53,13 @@ where
     F: FnMut(RefreshSummary),
 {
     let known = index.known_sessions()?;
+    if known.is_empty() {
+        let sessions = scan_all_sessions();
+        let summary = index.rebuild(sessions)?;
+        on_progress(summary.clone());
+        return Ok(summary);
+    }
+
     let (tx, rx) = mpsc::channel();
     let trace_refresh = env::var_os("FAST_RESUME_TRACE_REFRESH").is_some();
     for adapter in all_adapters() {
