@@ -189,18 +189,6 @@ impl PiAdapter {
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
         incremental_parse_jsonl(path, || self.parse_session(path))
     }
-
-    fn find_session_path(&self, session_id: &str) -> Option<PathBuf> {
-        WalkDir::new(&self.sessions_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|entry| entry.into_path())
-            .filter(|path| {
-                path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
-            })
-            .find(|path| self.session_id_from_file(path) == session_id)
-            .map(|path| fs::canonicalize(&path).unwrap_or(path))
-    }
 }
 
 impl Adapter for PiAdapter {
@@ -255,11 +243,16 @@ impl Adapter for PiAdapter {
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
-        let session_arg = self
-            .find_session_path(&session.id)
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| session.id.clone());
-        vec!["pi".to_string(), "--session".to_string(), session_arg]
+        // Pi's `--session <path|id>` accepts the session ID directly (even a
+        // partial UUID), and `Session.id` always holds the full UUID from the
+        // `session` row. `fr` only indexes sessions under the global
+        // `pi_sessions_dir()` — the same store `pi --session <id>` resolves
+        // against — so no path resolution is needed here.
+        vec![
+            "pi".to_string(),
+            "--session".to_string(),
+            session.id.clone(),
+        ]
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -386,10 +379,7 @@ mod tests {
             vec![
                 "pi".to_string(),
                 "--session".to_string(),
-                fs::canonicalize(&session_file)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned(),
+                session_id.to_string(),
             ]
         );
     }
