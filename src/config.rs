@@ -167,6 +167,10 @@ fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         return home_dir().join(rest);
     }
+    #[cfg(windows)]
+    if let Some(rest) = path.strip_prefix("~\\") {
+        return home_dir().join(rest);
+    }
     PathBuf::from(path)
 }
 
@@ -232,5 +236,20 @@ mod tests {
         sorted.sort_unstable();
 
         assert_eq!(badges, sorted);
+    }
+
+    #[test]
+    fn expands_pi_tilde_paths() {
+        assert_eq!(expand_tilde("~"), home_dir());
+        assert_eq!(
+            expand_tilde("~/pi-sessions"),
+            home_dir().join("pi-sessions")
+        );
+
+        #[cfg(windows)]
+        assert_eq!(
+            expand_tilde(r"~\pi-sessions"),
+            home_dir().join("pi-sessions")
+        );
     }
 }

@@ -142,7 +142,7 @@ impl PiAdapter {
                         messages.push(format!("{role_prefix}{text}"));
                     }
                 }
-                "custom_message" => {
+                "custom_message" if data.get("display").and_then(Value::as_bool) == Some(true) => {
                     for text in pi_content_texts(data.get("content").unwrap_or(&Value::Null)) {
                         messages.push(format!("  {text}"));
                     }
@@ -188,6 +188,18 @@ impl PiAdapter {
 
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
         incremental_parse_jsonl(path, || self.parse_session(path))
+    }
+
+    fn find_session_path(&self, session_id: &str) -> Option<PathBuf> {
+        WalkDir::new(&self.sessions_dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|entry| entry.into_path())
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+            })
+            .find(|path| self.session_id_from_file(path) == session_id)
+            .map(|path| fs::canonicalize(&path).unwrap_or(path))
     }
 }
 
@@ -243,11 +255,11 @@ impl Adapter for PiAdapter {
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
-        vec![
-            "pi".to_string(),
-            "--session".to_string(),
-            session.id.clone(),
-        ]
+        let session_arg = self
+            .find_session_path(&session.id)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| session.id.clone());
+        vec!["pi".to_string(), "--session".to_string(), session_arg]
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -345,7 +357,8 @@ mod tests {
                 json!({"type":"message","id":"a2","parentId":"a1","timestamp":"2026-07-15T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Added parser"},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"secret args"}}],"timestamp":1784110802000i64}}),
                 json!({"type":"message","id":"a3","parentId":"a2","timestamp":"2026-07-15T10:00:03.000Z","message":{"role":"toolResult","toolName":"bash","content":[{"type":"text","text":"tool output should stay out"}],"timestamp":1784110803000i64}}),
                 json!({"type":"custom_message","id":"a4","parentId":"a3","timestamp":"2026-07-15T10:00:04.000Z","customType":"note","content":[{"type":"text","text":"custom searchable note"}],"display":true}),
-                json!({"type":"compaction","id":"a5","parentId":"a4","timestamp":"2026-07-15T10:00:05.000Z","summary":"compacted context summary","firstKeptEntryId":"a2","tokensBefore":1000}),
+                json!({"type":"custom_message","id":"a4hidden","parentId":"a4","timestamp":"2026-07-15T10:00:04.500Z","customType":"hidden-note","content":[{"type":"text","text":"hidden extension context"}],"display":false}),
+                json!({"type":"compaction","id":"a5","parentId":"a4hidden","timestamp":"2026-07-15T10:00:05.000Z","summary":"compacted context summary","firstKeptEntryId":"a2","tokensBefore":1000}),
                 json!({"type":"bashExecution","id":"a6","parentId":"a5","timestamp":"2026-07-15T10:00:06.000Z","command":"ls","output":"bash output should stay out","exitCode":0,"cancelled":false,"truncated":false}),
                 json!({"type":"session_info","id":"a7","parentId":"a6","timestamp":"2026-07-15T10:00:07.000Z","name":"Named Pi session"}),
             ],
@@ -366,10 +379,18 @@ mod tests {
         assert!(session.content.contains("compacted context summary"));
         assert!(!session.content.contains("tool output should stay out"));
         assert!(!session.content.contains("bash output should stay out"));
+        assert!(!session.content.contains("hidden extension context"));
         assert!(!session.content.contains("secret args"));
         assert_eq!(
             adapter.resume_command(session, false),
-            vec!["pi", "--session", session_id]
+            vec![
+                "pi".to_string(),
+                "--session".to_string(),
+                fs::canonicalize(&session_file)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            ]
         );
     }
 
