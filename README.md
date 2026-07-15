@@ -4,7 +4,7 @@
 
 # fast-resume
 
-Search and resume conversations across Claude Code, Codex, and more, all from one terminal UI.
+Search and resume conversations across Claude Code, Codex, Pi, and more, all from one terminal UI.
 
 Coding agents can resume previous sessions, but searching those sessions is often limited or title-only. `fast-resume` builds a single full-text index over your local agent history so you can find a prompt, response, project, or session and jump straight back in.
 
@@ -21,7 +21,7 @@ Coding agents can resume previous sessions, but searching those sessions is ofte
 
 ## Supported agents
 
-Claude Code, Codex, Copilot CLI, Copilot in VS Code, Crush, OpenCode, and Vibe. See [how it works](docs/how-it-works.md#session-adapters) for storage formats and resume behavior.
+Claude Code, Codex, Copilot CLI, Copilot in VS Code, Crush, OpenCode, Pi, and Vibe. See [how it works](docs/how-it-works.md#session-adapters) for storage formats and resume behavior.
 
 ## Install
 

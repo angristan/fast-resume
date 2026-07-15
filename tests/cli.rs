@@ -52,6 +52,19 @@ fn write_claude_session(home: &Path, id: &str, directory: &str, prompt: &str) ->
     session_file
 }
 
+fn write_pi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home.join(".pi/agent/sessions/--repo-pi--");
+    fs::create_dir_all(&session_dir).unwrap();
+    let session_file = session_dir.join(format!("2026-07-15T10-00-00-000Z_{id}.jsonl"));
+    let rows = [
+        json!({"type": "session", "version": 3, "id": id, "timestamp": "2026-07-15T10:00:00.000Z", "cwd": directory}),
+        json!({"type": "message", "id": "a1", "parentId": null, "timestamp": "2026-07-15T10:00:01.000Z", "message": {"role": "user", "content": prompt}}),
+        json!({"type": "message", "id": "a2", "parentId": "a1", "timestamp": "2026-07-15T10:00:02.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done"}]}}),
+    ];
+    write_jsonl(&session_file, &rows);
+    session_file
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -152,22 +165,37 @@ fn list_footer_counts_filtered_matches() {
         "/repo/backend",
         "Claude backend architecture review",
     );
+    write_pi_session(
+        temp.path(),
+        "pi123",
+        "/repo/pi",
+        "Pi adapter integration coverage",
+    );
 
     let (query_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "Needle"]));
     assert!(query_stdout.contains("backend123"));
     assert!(!query_stdout.contains("frontend123"));
     assert!(!query_stdout.contains("claude123"));
+    assert!(!query_stdout.contains("pi123"));
     assert!(query_stdout.contains("Showing 1 of 1 sessions"));
 
     let (directory_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-d", "backend"]));
     assert!(directory_stdout.contains("backend123"));
     assert!(directory_stdout.contains("claude123"));
     assert!(!directory_stdout.contains("frontend123"));
+    assert!(!directory_stdout.contains("pi123"));
     assert!(directory_stdout.contains("Showing 2 of 2 sessions"));
 
     let (agent_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-a", "claude"]));
     assert!(agent_stdout.contains("claude123"));
     assert!(!agent_stdout.contains("backend123"));
     assert!(!agent_stdout.contains("frontend123"));
+    assert!(!agent_stdout.contains("pi123"));
     assert!(agent_stdout.contains("Showing 1 of 1 sessions"));
+
+    let (pi_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "agent:pi"]));
+    assert!(pi_stdout.contains("pi123"));
+    assert!(pi_stdout.contains("Pi adapter integration coverage"));
+    assert!(!pi_stdout.contains("backend123"));
+    assert!(pi_stdout.contains("Showing 1 of 1 sessions"));
 }
