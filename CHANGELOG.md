@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/angristan/fast-resume/compare/v2.1.0...v2.2.0) (2026-07-16)
+
+
+### Features
+
+* **pi:** add Pi session support ([#71](https://github.com/angristan/fast-resume/issues/71)) ([6971510](https://github.com/angristan/fast-resume/commit/6971510fc95d4dbe2ac658ffaba4e3c041890a22))
+
 # [2.1.0](https://github.com/angristan/fast-resume/compare/v2.0.0...v2.1.0) (2026-07-12)
 
 

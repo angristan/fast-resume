@@ -1,6 +1,6 @@
 [package]
 name = "fast-resume"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2024"
 description = "Fast fuzzy finder for coding agent session history"
 license = "MIT"
