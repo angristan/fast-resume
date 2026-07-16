@@ -1,17 +1,22 @@
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::path::PathBuf;
+
+use serde_json::Value;
 
 use once_cell::sync::Lazy;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 23;
 
-pub const AGENT_ORDER: [&str; 7] = [
+pub const AGENT_ORDER: [&str; 8] = [
     "claude",
     "codex",
     "copilot-cli",
     "crush",
     "opencode",
+    "pi",
     "vibe",
     "copilot-vscode",
 ];
@@ -47,6 +52,14 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "opencode",
                 badge: "opencode",
                 color: ratatui::style::Color::Rgb(207, 206, 205),
+            },
+        ),
+        (
+            "pi",
+            AgentConfig {
+                name: "pi",
+                badge: "pi",
+                color: ratatui::style::Color::Rgb(151, 118, 255),
             },
         ),
         (
@@ -116,6 +129,51 @@ pub fn opencode_dir() -> PathBuf {
     home_dir().join(".local").join("share").join("opencode")
 }
 
+pub fn pi_sessions_dir() -> PathBuf {
+    if let Some(path) = env_path("PI_CODING_AGENT_SESSION_DIR") {
+        return path;
+    }
+
+    let agent_dir = pi_agent_dir();
+    let settings_path = agent_dir.join("settings.json");
+    if let Ok(settings_bytes) = fs::read(settings_path)
+        && let Ok(settings) = serde_json::from_slice::<Value>(&settings_bytes)
+        && let Some(session_dir) = settings
+            .get("sessionDir")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        return expand_tilde(session_dir);
+    }
+
+    agent_dir.join("sessions")
+}
+
+fn pi_agent_dir() -> PathBuf {
+    env_path("PI_CODING_AGENT_DIR").unwrap_or_else(|| home_dir().join(".pi").join("agent"))
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_tilde(&value))
+}
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        return home_dir();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return home_dir().join(rest);
+    }
+    #[cfg(windows)]
+    if let Some(rest) = path.strip_prefix("~\\") {
+        return home_dir().join(rest);
+    }
+    PathBuf::from(path)
+}
+
 pub fn opencode_db() -> PathBuf {
     opencode_dir().join("opencode.db")
 }
@@ -178,5 +236,20 @@ mod tests {
         sorted.sort_unstable();
 
         assert_eq!(badges, sorted);
+    }
+
+    #[test]
+    fn expands_pi_tilde_paths() {
+        assert_eq!(expand_tilde("~"), home_dir());
+        assert_eq!(
+            expand_tilde("~/pi-sessions"),
+            home_dir().join("pi-sessions")
+        );
+
+        #[cfg(windows)]
+        assert_eq!(
+            expand_tilde(r"~\pi-sessions"),
+            home_dir().join("pi-sessions")
+        );
     }
 }

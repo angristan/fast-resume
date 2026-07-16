@@ -8,6 +8,7 @@ mod copilot_cli;
 mod copilot_vscode;
 mod crush;
 mod opencode;
+mod pi;
 mod shared;
 mod vibe;
 
@@ -17,6 +18,7 @@ pub use copilot_cli::CopilotCliAdapter;
 pub use copilot_vscode::CopilotVsCodeAdapter;
 pub use crush::CrushAdapter;
 pub use opencode::OpenCodeAdapter;
+pub use pi::PiAdapter;
 pub use vibe::VibeAdapter;
 
 pub const MTIME_TOLERANCE: f64 = 0.001;
@@ -75,6 +77,7 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(CopilotVsCodeAdapter::default()),
         Box::new(CrushAdapter::default()),
         Box::new(OpenCodeAdapter::default()),
+        Box::new(PiAdapter::default()),
         Box::new(VibeAdapter::default()),
     ]
 }

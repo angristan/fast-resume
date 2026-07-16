@@ -24,7 +24,10 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
+| Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
+
+Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 
 The normalized model contains:
 
@@ -114,6 +117,7 @@ Each adapter returns the command needed to continue its session:
 | Copilot CLI | `copilot --resume <id>` | `copilot --yolo --resume <id>` |
 | Copilot in VS Code | `code <directory>` | No change |
 | OpenCode | `opencode <directory> --session <id>` | No change |
+| Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
 | Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 
