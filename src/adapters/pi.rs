@@ -122,21 +122,27 @@ impl PiAdapter {
                 "message" => {
                     let message = data.get("message").unwrap_or(&Value::Null);
                     let role = string_at(message, &["role"]);
-                    if role != "user" && role != "assistant" {
+                    let is_user = role == "user";
+                    let is_assistant = role == "assistant";
+                    let is_visible_custom = matches!(role.as_str(), "custom" | "hookMessage")
+                        && message.get("display").and_then(Value::as_bool) == Some(true);
+                    if !is_user && !is_assistant && !is_visible_custom {
                         continue;
                     }
-                    if role == "user" {
+                    if is_user {
                         message_count += 1;
                     }
-                    update_latest_timestamp(
-                        &mut last_activity,
-                        message_timestamp(message)
-                            .or_else(|| parse_datetime(&string_at(&data, &["timestamp"]))),
-                    );
+                    if is_user || is_assistant {
+                        update_latest_timestamp(
+                            &mut last_activity,
+                            message_timestamp(message)
+                                .or_else(|| parse_datetime(&string_at(&data, &["timestamp"]))),
+                        );
+                    }
 
-                    let role_prefix = if role == "user" { "» " } else { "  " };
+                    let role_prefix = if is_user { "» " } else { "  " };
                     for text in pi_content_texts(message.get("content").unwrap_or(&Value::Null)) {
-                        if role == "user" && first_user_message.is_empty() {
+                        if is_user && first_user_message.is_empty() {
                             first_user_message = text.clone();
                         }
                         messages.push(format!("{role_prefix}{text}"));
@@ -349,10 +355,13 @@ mod tests {
                 json!({"type":"message","id":"a1","parentId":null,"timestamp":"2026-07-15T10:00:01.000Z","message":{"role":"user","content":"Implement Pi adapter","timestamp":1784110801000i64}}),
                 json!({"type":"message","id":"a2","parentId":"a1","timestamp":"2026-07-15T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Added parser"},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"secret args"}}],"timestamp":1784110802000i64}}),
                 json!({"type":"message","id":"a3","parentId":"a2","timestamp":"2026-07-15T10:00:03.000Z","message":{"role":"toolResult","toolName":"bash","content":[{"type":"text","text":"tool output should stay out"}],"timestamp":1784110803000i64}}),
-                json!({"type":"custom_message","id":"a4","parentId":"a3","timestamp":"2026-07-15T10:00:04.000Z","customType":"note","content":[{"type":"text","text":"custom searchable note"}],"display":true}),
+                json!({"type":"message","id":"a3custom","parentId":"a3","timestamp":"2026-07-15T10:00:03.100Z","message":{"role":"custom","customType":"message-note","content":[{"type":"text","text":"nested custom searchable note"}],"display":true,"timestamp":1784110803100i64}}),
+                json!({"type":"message","id":"a3legacy","parentId":"a3custom","timestamp":"2026-07-15T10:00:03.200Z","message":{"role":"hookMessage","hookName":"legacy-note","content":"legacy hook searchable note","display":true,"timestamp":1784110803200i64}}),
+                json!({"type":"message","id":"a3customhidden","parentId":"a3legacy","timestamp":"2026-07-15T10:00:03.300Z","message":{"role":"custom","customType":"hidden-message-note","content":"hidden nested extension context","display":false,"timestamp":1784110803300i64}}),
+                json!({"type":"custom_message","id":"a4","parentId":"a3customhidden","timestamp":"2026-07-15T10:00:04.000Z","customType":"note","content":[{"type":"text","text":"top-level custom searchable note"}],"display":true}),
                 json!({"type":"custom_message","id":"a4hidden","parentId":"a4","timestamp":"2026-07-15T10:00:04.500Z","customType":"hidden-note","content":[{"type":"text","text":"hidden extension context"}],"display":false}),
                 json!({"type":"compaction","id":"a5","parentId":"a4hidden","timestamp":"2026-07-15T10:00:05.000Z","summary":"compacted context summary","firstKeptEntryId":"a2","tokensBefore":1000}),
-                json!({"type":"bashExecution","id":"a6","parentId":"a5","timestamp":"2026-07-15T10:00:06.000Z","command":"ls","output":"bash output should stay out","exitCode":0,"cancelled":false,"truncated":false}),
+                json!({"type":"message","id":"a6","parentId":"a5","timestamp":"2026-07-15T10:00:06.000Z","message":{"role":"bashExecution","command":"ls","output":"bash output should stay out","exitCode":0,"cancelled":false,"truncated":false,"timestamp":1784110806000i64}}),
                 json!({"type":"session_info","id":"a7","parentId":"a6","timestamp":"2026-07-15T10:00:07.000Z","name":"Named Pi session"}),
             ],
         );
@@ -368,10 +377,13 @@ mod tests {
         assert_eq!(session.message_count, 1);
         assert!(session.content.contains("» Implement Pi adapter"));
         assert!(session.content.contains("Added parser"));
-        assert!(session.content.contains("custom searchable note"));
+        assert!(session.content.contains("nested custom searchable note"));
+        assert!(session.content.contains("legacy hook searchable note"));
+        assert!(session.content.contains("top-level custom searchable note"));
         assert!(session.content.contains("compacted context summary"));
         assert!(!session.content.contains("tool output should stay out"));
         assert!(!session.content.contains("bash output should stay out"));
+        assert!(!session.content.contains("hidden nested extension context"));
         assert!(!session.content.contains("hidden extension context"));
         assert!(!session.content.contains("secret args"));
         assert_eq!(

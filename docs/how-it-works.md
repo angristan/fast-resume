@@ -117,7 +117,7 @@ Each adapter returns the command needed to continue its session:
 | Copilot CLI | `copilot --resume <id>` | `copilot --yolo --resume <id>` |
 | Copilot in VS Code | `code <directory>` | No change |
 | OpenCode | `opencode <directory> --session <id>` | No change |
-| Pi | `pi --session <path>` | No change |
+| Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
 | Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 
