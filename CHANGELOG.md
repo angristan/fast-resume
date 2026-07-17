@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/angristan/fast-resume/compare/v2.2.0...v2.3.0) (2026-07-17)
+
+
+### Features
+
+* **tui:** hide agents without sessions ([#77](https://github.com/angristan/fast-resume/issues/77)) ([4d0a89e](https://github.com/angristan/fast-resume/commit/4d0a89e0888d72170faadc3cece29e64f964d09a))
+
 # [2.2.0](https://github.com/angristan/fast-resume/compare/v2.1.0...v2.2.0) (2026-07-16)
 
 
