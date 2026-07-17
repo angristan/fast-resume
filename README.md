@@ -78,6 +78,10 @@ rm -rf ~/.cache/fast-resume
 fr --rebuild
 ```
 
+Preferences that you change from the TUI — currently the preview pane size
+(`Ctrl+←` / `Ctrl+→`) — are remembered in `~/.config/fast-resume/settings.json`.
+Delete the file to restore defaults; a missing or malformed file is ignored.
+
 ## License
 
 MIT

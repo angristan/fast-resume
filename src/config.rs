@@ -109,6 +109,10 @@ pub fn cache_dir() -> PathBuf {
     home_dir().join(".cache").join("fast-resume")
 }
 
+pub fn config_dir() -> PathBuf {
+    home_dir().join(".config").join("fast-resume")
+}
+
 pub fn index_dir() -> PathBuf {
     cache_dir().join("tantivy_index")
 }

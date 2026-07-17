@@ -581,7 +581,20 @@ fn elapsed_label(elapsed: Duration) -> String {
 }
 
 fn adjusted_preview_ratio(current: u16, delta: i16) -> u16 {
-    (current as i16 + delta).clamp(MIN_PREVIEW_RATIO as i16, MAX_PREVIEW_RATIO as i16) as u16
+    let next = (current as i16 + delta).max(0) as u16;
+    clamp_preview_ratio(next)
+}
+
+pub(super) fn clamp_preview_ratio(value: u16) -> u16 {
+    value.clamp(MIN_PREVIEW_RATIO, MAX_PREVIEW_RATIO)
+}
+
+/// Resolve the preview ratio to start with from a saved (possibly out-of-range
+/// or absent) value, falling back to the default.
+pub(super) fn initial_preview_ratio(saved: Option<u16>) -> u16 {
+    saved
+        .map(clamp_preview_ratio)
+        .unwrap_or(DEFAULT_PREVIEW_RATIO)
 }
 
 #[cfg(test)]
@@ -616,5 +629,21 @@ mod tests {
             adjusted_preview_ratio(22, -PREVIEW_RATIO_STEP),
             MIN_PREVIEW_RATIO
         );
+    }
+
+    #[test]
+    fn initial_ratio_defaults_when_unset() {
+        assert_eq!(initial_preview_ratio(None), DEFAULT_PREVIEW_RATIO);
+    }
+
+    #[test]
+    fn initial_ratio_uses_a_saved_value() {
+        assert_eq!(initial_preview_ratio(Some(50)), 50);
+    }
+
+    #[test]
+    fn initial_ratio_clamps_saved_values_out_of_range() {
+        assert_eq!(initial_preview_ratio(Some(200)), MAX_PREVIEW_RATIO);
+        assert_eq!(initial_preview_ratio(Some(3)), MIN_PREVIEW_RATIO);
     }
 }
