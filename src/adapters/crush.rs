@@ -221,6 +221,7 @@ fn load_crush_db_checked(
         if rendered.is_empty() || first_user.is_empty() {
             continue;
         }
+        let named = !title.is_empty();
         let final_title = if title.is_empty() {
             truncate_title(&first_user, 100, true)
         } else {
@@ -239,6 +240,7 @@ fn load_crush_db_checked(
             activity_at.unwrap_or_else(|| session.timestamp.timestamp() as f64),
             &session,
         );
+        session.named = named;
         sessions.push(session);
     }
     Some(CrushLoad {

@@ -22,6 +22,7 @@ pub(super) struct IndexFields {
     pub(super) message_count: Field,
     pub(super) mtime: Field,
     pub(super) yolo: Field,
+    pub(super) named: Field,
 }
 
 impl IndexFields {
@@ -37,6 +38,7 @@ impl IndexFields {
             message_count: schema.get_field("message_count")?,
             mtime: schema.get_field("mtime")?,
             yolo: schema.get_field("yolo")?,
+            named: schema.get_field("named")?,
         })
     }
 }
@@ -59,6 +61,7 @@ pub(super) fn build_schema() -> Schema {
     schema.add_i64_field("message_count", STORED);
     schema.add_f64_field("mtime", STORED);
     schema.add_bool_field("yolo", STORED);
+    schema.add_bool_field("named", STORED);
     schema.build()
 }
 

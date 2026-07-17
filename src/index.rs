@@ -357,6 +357,26 @@ mod tests {
     }
 
     #[test]
+    fn named_flag_round_trips_through_the_index() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        let mut named = session("a", "claude", "Renamed thread", "/work/api", "token");
+        named.named = true;
+        let unnamed = session("b", "codex", "first message", "/work/api", "token");
+        index.update_sessions(&[named, unnamed]).unwrap();
+
+        let sessions = index.all_sessions().unwrap();
+        assert_eq!(
+            sessions.iter().find(|s| s.id == "a").map(|s| s.named),
+            Some(true)
+        );
+        assert_eq!(
+            sessions.iter().find(|s| s.id == "b").map(|s| s.named),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn known_sessions_reads_mtime_from_tantivy() {
         let temp = tempdir().unwrap();
         let index = SessionIndex::open(temp.path().join("index")).unwrap();

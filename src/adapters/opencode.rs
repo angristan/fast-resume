@@ -190,6 +190,7 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
         }
         let timestamp =
             timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
+        let named = !title.is_empty();
         let mut session = Session::new(
             id,
             agent,
@@ -204,6 +205,7 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
             session_messages.len(),
         );
         session.mtime = session.timestamp.timestamp() as f64;
+        session.named = named;
         sessions.push(session);
     }
     sessions
@@ -347,6 +349,7 @@ fn load_opencode_db_incremental(
         }
         let timestamp =
             timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
+        let named = !title.is_empty();
         let mut session = Session::new(
             id,
             agent,
@@ -361,6 +364,7 @@ fn load_opencode_db_incremental(
             session_messages.len(),
         );
         session.mtime = mtime;
+        session.named = named;
         new_or_modified.push(session);
     }
 
@@ -665,6 +669,7 @@ fn load_opencode_legacy_with_health(agent: &'static str, legacy_dir: &Path) -> L
             }
         }
 
+        let named = !title.is_empty();
         let mut session = Session::new(
             id,
             agent,
@@ -676,6 +681,7 @@ fn load_opencode_legacy_with_health(agent: &'static str, legacy_dir: &Path) -> L
         );
         session.mtime = opencode_legacy_mtime(&data, path)
             .max(activity_mtimes.get(&session.id).copied().unwrap_or(0.0));
+        session.named = named;
         sessions.push(session);
     }
     LegacyLoad {

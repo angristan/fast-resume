@@ -170,6 +170,7 @@ impl PiAdapter {
             return None;
         }
 
+        let named = session_name.is_some();
         let title_source = session_name.unwrap_or_else(|| {
             if first_user_message.is_empty() {
                 "(no messages)".to_string()
@@ -189,6 +190,7 @@ impl PiAdapter {
             message_count,
         );
         session.mtime = file_mtime_seconds(path);
+        session.named = named;
         Some(session)
     }
 

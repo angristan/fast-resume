@@ -123,6 +123,7 @@ impl CodexAdapter {
             return None;
         }
 
+        let named = thread_names.contains_key(&session_id);
         let title_source = thread_names
             .get(&session_id)
             .cloned()
@@ -138,6 +139,7 @@ impl CodexAdapter {
         );
         session.mtime = file_mtime_seconds(path);
         session.yolo = yolo;
+        session.named = named;
         Some(session)
     }
 
@@ -405,6 +407,7 @@ mod tests {
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Codex thread");
+        assert!(sessions[0].named);
         assert_eq!(sessions[0].message_count, 1);
         assert!(sessions[0].yolo);
         assert!(!sessions[0].content.contains("<environment_context>"));

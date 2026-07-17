@@ -21,6 +21,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
             }
         }
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => state.show_preview = !state.show_preview,
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => state.toggle_named_only(),
         (KeyCode::Esc, _) => return Ok(Some(TuiExit::Quit)),
         (KeyCode::Enter, _) => {
             if let Some(exit) = begin_action(state, PendingAction::Resume)? {

@@ -221,6 +221,7 @@ impl CopilotCliAdapter {
             return None;
         }
 
+        let named = !session_title.is_empty();
         let title = truncate_title(
             if session_title.is_empty() {
                 &first_user_message
@@ -240,6 +241,7 @@ impl CopilotCliAdapter {
             turns,
         );
         session.mtime = file_mtime_seconds(path);
+        session.named = named;
         Some(session)
     }
 
