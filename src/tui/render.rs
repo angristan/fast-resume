@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui_image::{Image as TuiImage, protocol::Protocol};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::config::{AGENT_ORDER, AGENTS, VERSION};
+use crate::config::{AGENTS, VERSION};
 use crate::model::Session;
 
 use super::layout::{self, MainLayout};
@@ -168,13 +168,14 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     let active_agents = state.active_agent_filters();
-    let tabs: Vec<_> = AGENT_ORDER
+    let available_agents = state.agent_filters_with_sessions();
+    let tabs: Vec<_> = available_agents
         .iter()
-        .map(|agent| {
+        .map(|(agent, count)| {
             let config = AGENTS.get(agent).expect("known agent");
             AgentFilterTab {
                 label: config.badge,
-                count: state.engine.count_for_agent(Some(agent)),
+                count: *count,
                 has_icon: state
                     .images
                     .as_ref()
@@ -197,7 +198,7 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
             None,
         );
     }
-    for (index, agent) in AGENT_ORDER.iter().enumerate() {
+    for (index, (agent, _)) in available_agents.iter().enumerate() {
         if !filter_layout.visible_agents.contains(&index) {
             continue;
         }

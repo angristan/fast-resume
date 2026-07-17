@@ -351,9 +351,13 @@ mod tests {
     }
 
     fn session_in(id: &str, directory: &str) -> Session {
+        session_for_agent(id, "codex", directory)
+    }
+
+    fn session_for_agent(id: &str, agent: &str, directory: &str) -> Session {
         Session::new(
             id,
-            "codex",
+            agent,
             format!("Session {id}"),
             directory,
             Local::now(),
@@ -504,8 +508,17 @@ mod tests {
     }
 
     #[test]
-    fn tab_cycles_filter_into_query_when_there_is_no_suggestion() {
-        let mut state = test_state(Vec::new());
+    fn filter_tabs_and_cycle_include_only_agents_with_sessions() {
+        let mut state = test_state(vec![
+            session_for_agent("codex-1", "codex", "/tmp/codex"),
+            session_for_agent("claude-1", "claude", "/tmp/claude"),
+            session_for_agent("codex-2", "codex", "/tmp/codex"),
+        ]);
+
+        assert_eq!(
+            state.agent_filters_with_sessions(),
+            vec![("claude", 1), ("codex", 2)]
+        );
 
         handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
 
@@ -518,11 +531,23 @@ mod tests {
     }
 
     #[test]
-    fn deleting_cycled_filter_keyword_clears_filter() {
+    fn filter_cycle_stays_on_all_when_no_agent_has_sessions() {
         let mut state = test_state(Vec::new());
 
         handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
-        for _ in 0.."agent:claude".chars().count() {
+
+        assert!(state.agent_filters_with_sessions().is_empty());
+        assert!(state.query.is_empty());
+        assert!(state.all_agent_filter_active());
+    }
+
+    #[test]
+    fn deleting_cycled_filter_keyword_clears_filter() {
+        let mut state = test_state(vec![session("codex-1")]);
+
+        handle_key(&mut state, key(KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+        let query_len = state.query.chars().count();
+        for _ in 0..query_len {
             handle_key(&mut state, key(KeyCode::Backspace, KeyModifiers::NONE)).unwrap();
         }
 
