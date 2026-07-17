@@ -275,6 +275,16 @@ impl AppState {
         self.agent_filter.is_none() && !query_has_agent_filter(&self.query)
     }
 
+    pub(super) fn agent_filters_with_sessions(&self) -> Vec<(&'static str, usize)> {
+        AGENT_ORDER
+            .iter()
+            .filter_map(|agent| {
+                let count = self.engine.count_for_agent(Some(agent));
+                (count > 0).then_some((*agent, count))
+            })
+            .collect()
+    }
+
     pub(super) fn count_agent_filter(&self) -> Option<String> {
         if let Some(agent) = single_query_agent_filter(&self.query) {
             return Some(agent);
@@ -305,13 +315,18 @@ impl AppState {
     }
 
     pub(super) fn cycle_agent(&mut self, reverse: bool) {
+        let available = self.agent_filters_with_sessions();
         let active = self.active_agent_filter();
         let current = active
             .as_deref()
-            .and_then(|agent| AGENT_ORDER.iter().position(|candidate| *candidate == agent))
+            .and_then(|agent| {
+                available
+                    .iter()
+                    .position(|(candidate, _)| *candidate == agent)
+            })
             .map(|idx| idx + 1)
             .unwrap_or(0);
-        let len = AGENT_ORDER.len() + 1;
+        let len = available.len() + 1;
         let next = if reverse {
             (current + len - 1) % len
         } else {
@@ -320,7 +335,7 @@ impl AppState {
         let next_agent = if next == 0 {
             None
         } else {
-            Some(AGENT_ORDER[next - 1].to_string())
+            Some(available[next - 1].0.to_string())
         };
         self.query = update_agent_in_query(&self.query, next_agent.as_deref());
         self.cursor = self.query.chars().count();
