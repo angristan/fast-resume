@@ -9,7 +9,6 @@ mod copilot_cli;
 mod copilot_vscode;
 mod crush;
 mod cursor;
-mod gemini;
 mod grok;
 mod opencode;
 mod pi;
@@ -23,7 +22,6 @@ pub use copilot_cli::CopilotCliAdapter;
 pub use copilot_vscode::CopilotVsCodeAdapter;
 pub use crush::CrushAdapter;
 pub use cursor::CursorAdapter;
-pub use gemini::GeminiAdapter;
 pub use grok::GrokAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::PiAdapter;
@@ -86,7 +84,6 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(CopilotVsCodeAdapter::default()),
         Box::new(CrushAdapter::default()),
         Box::new(CursorAdapter::default()),
-        Box::new(GeminiAdapter::default()),
         Box::new(GrokAdapter::default()),
         Box::new(OpenCodeAdapter::default()),
         Box::new(PiAdapter::default()),

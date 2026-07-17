@@ -25,13 +25,12 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
-| Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.{json,jsonl}` | Replays messages, metadata updates, checkpoints, and rewinds from legacy and current recordings |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata and combines streamed ACP user and agent message chunks |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
 
-Grok discovery respects `GROK_HOME`. Gemini resolves project directories from `.project_root` markers or `~/.gemini/projects.json`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
+Grok discovery respects `GROK_HOME`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 
 The normalized model contains:
 
@@ -123,7 +122,6 @@ Each adapter returns the command needed to continue its session:
 | Copilot in VS Code | `code <directory>` | No change |
 | Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 | Cursor CLI | `agent --resume <id>` | `agent --yolo --resume <id>` |
-| Gemini CLI | `gemini --resume <id>` | `gemini --approval-mode=yolo --resume <id>` |
 | Grok Build | `grok --resume <id>` | `grok --always-approve --resume <id>` |
 | OpenCode | `opencode <directory> --session <id>` | No change |
 | Pi | `pi --session <id>` | No change |

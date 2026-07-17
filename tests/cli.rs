@@ -66,18 +66,6 @@ fn write_pi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> Pat
 }
 
 fn write_new_agent_sessions(home: &Path) {
-    let gemini_project = home.join(".gemini/tmp/project");
-    let gemini_chats = gemini_project.join("chats");
-    fs::create_dir_all(&gemini_chats).unwrap();
-    fs::write(gemini_project.join(".project_root"), "/repo/gemini").unwrap();
-    write_jsonl(
-        &gemini_chats.join("session-gemini.jsonl"),
-        &[
-            json!({"sessionId":"gemini123","projectHash":"project","startTime":"2026-07-17T10:00:00Z"}),
-            json!({"id":"u1","type":"user","content":"Gemini binary coverage"}),
-        ],
-    );
-
     let antigravity_id = "52d82992-7695-4d38-8d02-9747eecba839";
     let antigravity = home
         .join(".gemini/antigravity-cli/brain")
@@ -262,7 +250,7 @@ fn list_footer_counts_filtered_matches() {
 }
 
 #[test]
-fn lists_gemini_antigravity_cursor_and_grok_sessions() {
+fn lists_antigravity_cursor_and_grok_sessions() {
     let temp = TempDir::new().unwrap();
     write_new_agent_sessions(temp.path());
 
@@ -274,8 +262,6 @@ fn lists_gemini_antigravity_cursor_and_grok_sessions() {
         "Antigravity binary coverage",
         "cursor",
         "Cursor binary coverage",
-        "gemini",
-        "Gemini binary coverage",
         "grok",
         "Grok binary coverage",
     ] {
@@ -284,5 +270,5 @@ fn lists_gemini_antigravity_cursor_and_grok_sessions() {
             "missing {expected} in:\n{stdout}"
         );
     }
-    assert!(stdout.contains("Showing 4 of 4 sessions"));
+    assert!(stdout.contains("Showing 3 of 3 sessions"));
 }
