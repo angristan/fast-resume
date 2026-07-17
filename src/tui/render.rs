@@ -969,6 +969,7 @@ mod tests {
 
     #[test]
     fn result_rows_use_short_agent_badges() {
+        assert_eq!(agent_badge("antigravity"), "agy");
         assert_eq!(agent_badge("copilot-cli"), "copilot");
         assert_eq!(agent_badge("copilot-vscode"), "vscode");
         assert_eq!(agent_badge("unknown-agent"), "unknown-agent");
