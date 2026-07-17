@@ -39,6 +39,7 @@ impl ClaudeAdapter {
         let mut directory = String::new();
         let mut first_user_message = String::new();
         let mut ai_title = String::new();
+        let mut custom_title = String::new();
         let mut messages = Vec::new();
         let mut turns = 0usize;
 
@@ -117,6 +118,11 @@ impl ClaudeAdapter {
                 if !title.trim().is_empty() {
                     ai_title = title;
                 }
+            } else if msg_type == "custom-title" {
+                let title = string_at(&data, &["customTitle"]);
+                if !title.trim().is_empty() {
+                    custom_title = title;
+                }
             }
         }
 
@@ -125,10 +131,14 @@ impl ClaudeAdapter {
         }
 
         let index_title = claude_index_title(path);
-        let named = index_title.is_some() || !ai_title.is_empty();
-        let title_source = index_title
-            .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
-            .unwrap_or(first_user_message);
+        let named = !custom_title.is_empty() || index_title.is_some() || !ai_title.is_empty();
+        let title_source = if !custom_title.is_empty() {
+            custom_title
+        } else {
+            index_title
+                .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
+                .unwrap_or(first_user_message)
+        };
         let title = truncate_title(&title_source, 100, true);
         let mut session = Session::new(
             path.file_stem()?.to_string_lossy(),
@@ -370,6 +380,35 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+        assert!(sessions[0].named);
+    }
+
+    #[test]
+    fn uses_custom_title_over_ai_title() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-custom.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "ai-title", "aiTitle": "AI guessed topic"}).to_string(),
+                json!({"type": "custom-title", "customTitle": "My renamed session"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = ClaudeAdapter::new(projects);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "My renamed session");
         assert!(sessions[0].named);
     }
 
