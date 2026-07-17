@@ -22,6 +22,10 @@ use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 type SessionFiles = HashMap<String, (PathBuf, f64)>;
 
+fn cursor_store_mtime(path: &Path) -> f64 {
+    file_mtime_seconds(path).max(file_mtime_seconds(&path.with_extension("db-wal")))
+}
+
 #[derive(Debug, Clone)]
 pub struct CursorAdapter {
     chats_dir: PathBuf,
@@ -69,7 +73,7 @@ impl CursorAdapter {
             };
             files.insert(
                 id.to_string(),
-                (path.to_path_buf(), file_mtime_seconds(path)),
+                (path.to_path_buf(), cursor_store_mtime(path)),
             );
         }
         Some((files, complete))
@@ -151,7 +155,7 @@ impl CursorAdapter {
             content,
             user_turns,
         );
-        session.mtime = file_mtime_seconds(path);
+        session.mtime = cursor_store_mtime(path);
         Ok(Some(session))
     }
 
@@ -410,7 +414,7 @@ fn cursor_content_text(value: &Value) -> String {
 
 fn cursor_plain_user_message(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
-    let (content, id) = text.trim_matches(char::from(0)).trim().split_once('$')?;
+    let (content, id) = text.trim_matches(char::from(0)).trim().rsplit_once('$')?;
     let id = id.trim_matches(|character: char| character.is_control() || character.is_whitespace());
     if content.trim().is_empty() || id.len() < 8 || !id.contains('-') {
         return None;
@@ -473,7 +477,7 @@ fn percent_decode(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, thread, time::Duration};
 
     use rusqlite::Connection;
     use serde_json::json;
@@ -537,9 +541,63 @@ mod tests {
     }
 
     #[test]
+    fn incremental_scan_detects_wal_writes() {
+        let temp = tempdir().unwrap();
+        let id = "cursor-wal-session";
+        let session_dir = temp.path().join("%2Fwork%2Fcursor").join(id);
+        fs::create_dir_all(&session_dir).unwrap();
+        let db_path = session_dir.join("store.db");
+        let connection = Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; \
+                 CREATE TABLE meta (key TEXT, value BLOB); \
+                 CREATE TABLE blobs (key TEXT, value BLOB);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO blobs (key, value) VALUES (?1, ?2)",
+                (
+                    "u1",
+                    json!({"role":"user","content":"Initial prompt"}).to_string(),
+                ),
+            )
+            .unwrap();
+
+        let adapter = CursorAdapter::new(temp.path().to_path_buf());
+        let initial = adapter.find_sessions().pop().unwrap();
+        let mut known = KnownSessions::new();
+        known.insert(("cursor".to_string(), id.to_string()), initial.mtime);
+
+        thread::sleep(Duration::from_millis(10));
+        connection
+            .execute(
+                "INSERT INTO blobs (key, value) VALUES (?1, ?2)",
+                (
+                    "a1",
+                    json!({"role":"assistant","content":"Written to the WAL"}).to_string(),
+                ),
+            )
+            .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Written to the WAL")
+        );
+        assert!(scan.new_or_modified[0].mtime > initial.mtime);
+    }
+
+    #[test]
     fn parses_plain_user_blob_format() {
-        let message =
-            cursor_plain_user_message(b"hello Cursor$027f8b2f-d09c-4a69-98b0-b53f0118605d");
+        let id = "027f8b2f-d09c-4a69-98b0-b53f0118605d";
+        let message = cursor_plain_user_message(format!("hello Cursor${id}").as_bytes());
         assert_eq!(message.as_deref(), Some("hello Cursor"));
+
+        let message = cursor_plain_user_message(format!("price is $5${id}").as_bytes());
+        assert_eq!(message.as_deref(), Some("price is $5"));
     }
 }
