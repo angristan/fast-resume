@@ -2,21 +2,29 @@ use std::collections::{HashMap, HashSet};
 
 use crate::model::{RawAdapterStats, Session};
 
+mod antigravity;
 mod claude;
 mod codex;
 mod copilot_cli;
 mod copilot_vscode;
 mod crush;
+mod cursor;
+mod gemini;
+mod grok;
 mod opencode;
 mod pi;
 mod shared;
 mod vibe;
 
+pub use antigravity::AntigravityAdapter;
 pub use claude::ClaudeAdapter;
 pub use codex::CodexAdapter;
 pub use copilot_cli::CopilotCliAdapter;
 pub use copilot_vscode::CopilotVsCodeAdapter;
 pub use crush::CrushAdapter;
+pub use cursor::CursorAdapter;
+pub use gemini::GeminiAdapter;
+pub use grok::GrokAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::PiAdapter;
 pub use vibe::VibeAdapter;
@@ -71,11 +79,15 @@ pub trait Adapter: Send {
 
 pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
     vec![
+        Box::new(AntigravityAdapter::default()),
         Box::new(ClaudeAdapter::default()),
         Box::new(CodexAdapter::default()),
         Box::new(CopilotCliAdapter::default()),
         Box::new(CopilotVsCodeAdapter::default()),
         Box::new(CrushAdapter::default()),
+        Box::new(CursorAdapter::default()),
+        Box::new(GeminiAdapter::default()),
+        Box::new(GrokAdapter::default()),
         Box::new(OpenCodeAdapter::default()),
         Box::new(PiAdapter::default()),
         Box::new(VibeAdapter::default()),

@@ -180,11 +180,15 @@ fn compensate_logo_aspect(image: image::DynamicImage) -> image::DynamicImage {
 
 fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
     match agent {
+        "antigravity" => Some(include_bytes!("../../assets/agents/antigravity.png")),
         "claude" => Some(include_bytes!("../../assets/agents/claude.png")),
         "codex" => Some(include_bytes!("../../assets/agents/codex.png")),
         "copilot-cli" => Some(include_bytes!("../../assets/agents/copilot-cli.png")),
         "copilot-vscode" => Some(include_bytes!("../../assets/agents/copilot-vscode.png")),
         "crush" => Some(include_bytes!("../../assets/agents/crush.png")),
+        "cursor" => Some(include_bytes!("../../assets/agents/cursor.png")),
+        "gemini" => Some(include_bytes!("../../assets/agents/gemini.png")),
+        "grok" => Some(include_bytes!("../../assets/agents/grok.png")),
         "opencode" => Some(include_bytes!("../../assets/agents/opencode.png")),
         "pi" => Some(include_bytes!("../../assets/agents/pi.png")),
         "vibe" => Some(include_bytes!("../../assets/agents/vibe.png")),

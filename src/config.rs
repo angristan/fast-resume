@@ -10,11 +10,15 @@ use once_cell::sync::Lazy;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 23;
 
-pub const AGENT_ORDER: [&str; 8] = [
+pub const AGENT_ORDER: [&str; 12] = [
+    "antigravity",
     "claude",
     "codex",
     "copilot-cli",
     "crush",
+    "cursor",
+    "gemini",
+    "grok",
     "opencode",
     "pi",
     "vibe",
@@ -31,6 +35,14 @@ pub struct AgentConfig {
 pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
     HashMap::from([
         (
+            "antigravity",
+            AgentConfig {
+                name: "antigravity",
+                badge: "antigravity",
+                color: ratatui::style::Color::Rgb(66, 133, 244),
+            },
+        ),
+        (
             "claude",
             AgentConfig {
                 name: "claude",
@@ -44,6 +56,30 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "codex",
                 badge: "codex",
                 color: ratatui::style::Color::Rgb(0, 166, 126),
+            },
+        ),
+        (
+            "cursor",
+            AgentConfig {
+                name: "cursor",
+                badge: "cursor",
+                color: ratatui::style::Color::Rgb(255, 255, 255),
+            },
+        ),
+        (
+            "gemini",
+            AgentConfig {
+                name: "gemini",
+                badge: "gemini",
+                color: ratatui::style::Color::Rgb(139, 157, 255),
+            },
+        ),
+        (
+            "grok",
+            AgentConfig {
+                name: "grok",
+                badge: "grok",
+                color: ratatui::style::Color::Rgb(255, 255, 255),
             },
         ),
         (
@@ -123,6 +159,28 @@ pub fn codex_dir() -> PathBuf {
 
 pub fn codex_session_index_file() -> PathBuf {
     home_dir().join(".codex").join("session_index.jsonl")
+}
+
+pub fn gemini_dir() -> PathBuf {
+    home_dir().join(".gemini")
+}
+
+pub fn gemini_sessions_dir() -> PathBuf {
+    gemini_dir().join("tmp")
+}
+
+pub fn antigravity_dir() -> PathBuf {
+    gemini_dir().join("antigravity-cli")
+}
+
+pub fn cursor_chats_dir() -> PathBuf {
+    home_dir().join(".cursor").join("chats")
+}
+
+pub fn grok_sessions_dir() -> PathBuf {
+    env_path("GROK_HOME")
+        .unwrap_or_else(|| home_dir().join(".grok"))
+        .join("sessions")
 }
 
 pub fn opencode_dir() -> PathBuf {

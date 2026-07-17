@@ -65,6 +65,67 @@ fn write_pi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> Pat
     session_file
 }
 
+fn write_new_agent_sessions(home: &Path) {
+    let gemini_project = home.join(".gemini/tmp/project");
+    let gemini_chats = gemini_project.join("chats");
+    fs::create_dir_all(&gemini_chats).unwrap();
+    fs::write(gemini_project.join(".project_root"), "/repo/gemini").unwrap();
+    write_jsonl(
+        &gemini_chats.join("session-gemini.jsonl"),
+        &[
+            json!({"sessionId":"gemini123","projectHash":"project","startTime":"2026-07-17T10:00:00Z"}),
+            json!({"id":"u1","type":"user","content":"Gemini binary coverage"}),
+        ],
+    );
+
+    let antigravity_id = "52d82992-7695-4d38-8d02-9747eecba839";
+    let antigravity = home
+        .join(".gemini/antigravity-cli/brain")
+        .join(antigravity_id)
+        .join(".system_generated/logs");
+    fs::create_dir_all(&antigravity).unwrap();
+    write_jsonl(
+        &antigravity.join("transcript.jsonl"),
+        &[
+            json!({"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>Antigravity binary coverage</USER_REQUEST>"}),
+        ],
+    );
+
+    let grok_id = "019edf9c-0000-7000-8000-000000000001";
+    let grok = home.join(".grok/sessions/%2Frepo%2Fgrok").join(grok_id);
+    fs::create_dir_all(&grok).unwrap();
+    fs::write(
+        grok.join("summary.json"),
+        json!({"info":{"id":grok_id,"cwd":"/repo/grok"},"created_at":"2026-07-17T10:00:00Z"})
+            .to_string(),
+    )
+    .unwrap();
+    write_jsonl(
+        &grok.join("updates.jsonl"),
+        &[
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"Grok binary coverage"}}}}),
+        ],
+    );
+
+    let cursor = home.join(".cursor/chats/%2Frepo%2Fcursor/cursor123");
+    fs::create_dir_all(&cursor).unwrap();
+    let connection = rusqlite::Connection::open(cursor.join("store.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE meta (key TEXT, value BLOB); CREATE TABLE blobs (key TEXT, value BLOB);",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO blobs (key, value) VALUES (?1, ?2)",
+            (
+                "u1",
+                json!({"role":"user","content":"Cursor binary coverage"}).to_string(),
+            ),
+        )
+        .unwrap();
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -198,4 +259,30 @@ fn list_footer_counts_filtered_matches() {
     assert!(pi_stdout.contains("Pi adapter integration coverage"));
     assert!(!pi_stdout.contains("backend123"));
     assert!(pi_stdout.contains("Showing 1 of 1 sessions"));
+}
+
+#[test]
+fn lists_gemini_antigravity_cursor_and_grok_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_new_agent_sessions(temp.path());
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list"]));
+
+    assert!(stderr.is_empty());
+    for expected in [
+        "antigravity",
+        "Antigravity binary coverage",
+        "cursor",
+        "Cursor binary coverage",
+        "gemini",
+        "Gemini binary coverage",
+        "grok",
+        "Grok binary coverage",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected} in:\n{stdout}"
+        );
+    }
+    assert!(stdout.contains("Showing 4 of 4 sessions"));
 }
