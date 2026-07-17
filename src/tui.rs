@@ -237,7 +237,13 @@ fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
         _ => return false,
     };
 
-    match layout::scroll_target(area, state.show_preview, mouse.column, mouse.row) {
+    match layout::scroll_target(
+        area,
+        state.show_preview,
+        state.preview_ratio,
+        mouse.column,
+        mouse.row,
+    ) {
         Some(ScrollTarget::Results) => {
             state.move_selection(delta);
             true
@@ -1042,6 +1048,24 @@ mod tests {
             }
             super::TuiExit::Quit => panic!("expected resume exit"),
         }
+    }
+
+    #[test]
+    fn ctrl_arrows_resize_the_preview() {
+        let mut state = test_state(vec![session("a")]);
+        let default = state.preview_ratio;
+
+        handle_key(&mut state, key(KeyCode::Left, KeyModifiers::CONTROL)).unwrap();
+        assert!(
+            state.preview_ratio > default,
+            "ctrl+left should grow the preview"
+        );
+
+        handle_key(&mut state, key(KeyCode::Right, KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(
+            state.preview_ratio, default,
+            "ctrl+right should shrink it back"
+        );
     }
 
     #[test]

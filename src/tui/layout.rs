@@ -36,7 +36,7 @@ pub(super) enum ScrollTarget {
     Preview,
 }
 
-pub(super) fn app(area: Rect, show_preview: bool) -> AppLayout {
+pub(super) fn app(area: Rect, show_preview: bool, preview_ratio: u16) -> AppLayout {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -52,7 +52,7 @@ pub(super) fn app(area: Rect, show_preview: bool) -> AppLayout {
         header: outer[0],
         search: outer[1],
         filters: outer[2],
-        main: main(outer[3], show_preview),
+        main: main(outer[3], show_preview, preview_ratio),
         footer: outer[4],
     }
 }
@@ -60,10 +60,11 @@ pub(super) fn app(area: Rect, show_preview: bool) -> AppLayout {
 pub(super) fn scroll_target(
     area: Rect,
     show_preview: bool,
+    preview_ratio: u16,
     column: u16,
     row: u16,
 ) -> Option<ScrollTarget> {
-    let main = app(area, show_preview).main;
+    let main = app(area, show_preview, preview_ratio).main;
     if contains(main.results(), column, row) {
         return Some(ScrollTarget::Results);
     }
@@ -76,7 +77,7 @@ pub(super) fn scroll_target(
     None
 }
 
-fn main(area: Rect, show_preview: bool) -> MainLayout {
+fn main(area: Rect, show_preview: bool, preview_ratio: u16) -> MainLayout {
     if !show_preview {
         return MainLayout::ResultsOnly { results: area };
     }
@@ -84,7 +85,10 @@ fn main(area: Rect, show_preview: bool) -> MainLayout {
     if area.width >= 116 {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .constraints([
+                Constraint::Percentage(100 - preview_ratio),
+                Constraint::Percentage(preview_ratio),
+            ])
             .split(area);
         MainLayout::Split {
             results: chunks[0],
@@ -110,16 +114,18 @@ fn contains(area: Rect, column: u16, row: u16) -> bool {
 mod tests {
     use super::*;
 
+    const RATIO: u16 = 38;
+
     #[test]
     fn hit_tests_horizontal_results_and_preview() {
         let area = Rect::new(0, 0, 120, 40);
 
         assert_eq!(
-            scroll_target(area, true, 10, 6),
+            scroll_target(area, true, RATIO, 10, 6),
             Some(ScrollTarget::Results)
         );
         assert_eq!(
-            scroll_target(area, true, 100, 6),
+            scroll_target(area, true, RATIO, 100, 6),
             Some(ScrollTarget::Preview)
         );
     }
@@ -129,11 +135,11 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
 
         assert_eq!(
-            scroll_target(area, true, 10, 8),
+            scroll_target(area, true, RATIO, 10, 8),
             Some(ScrollTarget::Results)
         );
         assert_eq!(
-            scroll_target(area, true, 10, 30),
+            scroll_target(area, true, RATIO, 10, 30),
             Some(ScrollTarget::Preview)
         );
     }
@@ -143,9 +149,25 @@ mod tests {
         let area = Rect::new(0, 0, 120, 40);
 
         assert_eq!(
-            scroll_target(area, false, 100, 6),
+            scroll_target(area, false, RATIO, 100, 6),
             Some(ScrollTarget::Results)
         );
-        assert_eq!(scroll_target(area, false, 100, 1), None);
+        assert_eq!(scroll_target(area, false, RATIO, 100, 1), None);
+    }
+
+    #[test]
+    fn horizontal_split_width_follows_preview_ratio() {
+        let area = Rect::new(0, 0, 120, 40);
+        let MainLayout::Split { results, preview } = main(area, true, 50) else {
+            panic!("expected a split layout");
+        };
+
+        assert_eq!(results.width + preview.width, area.width);
+        // A 50% ratio should give the preview roughly half of the 120-wide area.
+        assert!(
+            preview.width.abs_diff(60) <= 1,
+            "preview width {} not near 50% of 120",
+            preview.width
+        );
     }
 }

@@ -12,6 +12,13 @@ const DATE_SUGGESTIONS: [&str; 4] = ["today", "yesterday", "week", "month"];
 
 pub(super) const PENDING_SEARCH_STATUS: &str = "searching; press again when results update";
 
+/// Share of the side-by-side layout given to the preview pane, in percent.
+pub(super) const DEFAULT_PREVIEW_RATIO: u16 = 38;
+const MIN_PREVIEW_RATIO: u16 = 20;
+const MAX_PREVIEW_RATIO: u16 = 80;
+/// Percentage points added or removed per resize keypress.
+pub(super) const PREVIEW_RATIO_STEP: i16 = 6;
+
 pub(super) enum ScanMessage {
     Progress {
         elapsed: Duration,
@@ -60,6 +67,7 @@ pub(super) struct AppState {
     pub(super) cursor: usize,
     pub(super) selected: usize,
     pub(super) preview_scroll: u16,
+    pub(super) preview_ratio: u16,
     pub(super) agent_filter: Option<String>,
     pub(super) directory_filter: Option<String>,
     pub(super) yolo: bool,
@@ -93,6 +101,7 @@ impl AppState {
             query,
             selected: 0,
             preview_scroll: 0,
+            preview_ratio: DEFAULT_PREVIEW_RATIO,
             agent_filter,
             directory_filter,
             yolo,
@@ -243,6 +252,10 @@ impl AppState {
         let max = self.visible.len() as isize - 1;
         self.selected = (self.selected as isize + delta).clamp(0, max) as usize;
         self.preview_scroll = 0;
+    }
+
+    pub(super) fn resize_preview(&mut self, delta: i16) {
+        self.preview_ratio = adjusted_preview_ratio(self.preview_ratio, delta);
     }
 
     pub(super) fn scroll_preview(&mut self, delta: isize) {
@@ -564,5 +577,44 @@ fn elapsed_label(elapsed: Duration) -> String {
         format!("{seconds:.1}s")
     } else {
         format!("{:.0}ms", seconds * 1000.0)
+    }
+}
+
+fn adjusted_preview_ratio(current: u16, delta: i16) -> u16 {
+    (current as i16 + delta).clamp(MIN_PREVIEW_RATIO as i16, MAX_PREVIEW_RATIO as i16) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resize_grows_and_shrinks_by_the_delta() {
+        assert_eq!(adjusted_preview_ratio(38, PREVIEW_RATIO_STEP), 44);
+        assert_eq!(adjusted_preview_ratio(38, -PREVIEW_RATIO_STEP), 32);
+    }
+
+    #[test]
+    fn resize_clamps_to_the_maximum() {
+        assert_eq!(
+            adjusted_preview_ratio(MAX_PREVIEW_RATIO, PREVIEW_RATIO_STEP),
+            MAX_PREVIEW_RATIO
+        );
+        assert_eq!(
+            adjusted_preview_ratio(78, PREVIEW_RATIO_STEP),
+            MAX_PREVIEW_RATIO
+        );
+    }
+
+    #[test]
+    fn resize_clamps_to_the_minimum() {
+        assert_eq!(
+            adjusted_preview_ratio(MIN_PREVIEW_RATIO, -PREVIEW_RATIO_STEP),
+            MIN_PREVIEW_RATIO
+        );
+        assert_eq!(
+            adjusted_preview_ratio(22, -PREVIEW_RATIO_STEP),
+            MIN_PREVIEW_RATIO
+        );
     }
 }
