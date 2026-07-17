@@ -18,14 +18,14 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 
 | Agent | Format | Parsing strategy |
 | --- | --- | --- |
-| Antigravity CLI | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/*.jsonl` | Reads user and model transcript steps and joins workspace metadata from Antigravity history |
+| Antigravity CLI | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/*.jsonl` | Reads user inputs and planner responses, excludes tool results, and joins workspace metadata from Antigravity history |
 | Claude Code | `~/.claude/projects/<project>/*.jsonl` | Reads user and assistant entries and skips agent subprocess files |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records |
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
-| Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata and combines streamed ACP user and agent message chunks |
+| Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
@@ -115,7 +115,7 @@ Each adapter returns the command needed to continue its session:
 
 | Agent | Resume command | Yolo variant |
 | --- | --- | --- |
-| Antigravity CLI | `agy --conversation <id>` | No change |
+| Antigravity CLI | `agy --conversation <id>` | `agy --dangerously-skip-permissions --conversation <id>` |
 | Claude | `claude --resume <id>` | `claude --dangerously-skip-permissions --resume <id>` |
 | Codex | `codex resume <id>` | `codex --dangerously-bypass-approvals-and-sandbox resume <id>` |
 | Copilot CLI | `copilot --resume <id>` | `copilot --yolo --resume <id>` |

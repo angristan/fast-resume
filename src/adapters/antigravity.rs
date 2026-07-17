@@ -143,7 +143,7 @@ impl AntigravityAdapter {
                 continue;
             }
             let is_user = matches!(source.as_str(), "USER_EXPLICIT" | "USER");
-            let is_assistant = source == "MODEL";
+            let is_assistant = source == "MODEL" && step_type == "PLANNER_RESPONSE";
             if !is_user && !is_assistant {
                 continue;
             }
@@ -199,6 +199,10 @@ impl Adapter for AntigravityAdapter {
         "antigravity"
     }
 
+    fn supports_yolo(&self) -> bool {
+        true
+    }
+
     fn find_sessions(&self) -> Vec<Session> {
         let workspaces = self.workspace_map();
         self.scan_session_files()
@@ -247,12 +251,13 @@ impl Adapter for AntigravityAdapter {
         scan
     }
 
-    fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
-        vec![
-            "agy".to_string(),
-            "--conversation".to_string(),
-            session.id.clone(),
-        ]
+    fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
+        let mut command = vec!["agy".to_string()];
+        if yolo {
+            command.push("--dangerously-skip-permissions".to_string());
+        }
+        command.extend(["--conversation".to_string(), session.id.clone()]);
+        command
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -321,6 +326,7 @@ mod tests {
         let rows = [
             json!({"source":"USER_EXPLICIT","type":"USER_INPUT","created_at":"2026-07-17T10:00:00Z","content":"<USER_REQUEST>\nAdd Antigravity support\n</USER_REQUEST>\n<ADDITIONAL_METADATA>ignored</ADDITIONAL_METADATA>"}),
             json!({"source":"SYSTEM","type":"CONVERSATION_HISTORY","content":"ignore"}),
+            json!({"source":"MODEL","type":"VIEW_FILE","content":"large tool result that should not be indexed"}),
             json!({"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-07-17T10:00:01Z","content":"Implemented the adapter"}),
         ];
         fs::write(
@@ -346,9 +352,20 @@ mod tests {
         assert_eq!(sessions[0].message_count, 1);
         assert!(sessions[0].content.contains("Implemented the adapter"));
         assert!(!sessions[0].content.contains("ADDITIONAL_METADATA"));
+        assert!(!sessions[0].content.contains("large tool result"));
+        assert!(adapter.supports_yolo());
         assert_eq!(
             adapter.resume_command(&sessions[0], false),
             vec!["agy", "--conversation", id]
+        );
+        assert_eq!(
+            adapter.resume_command(&sessions[0], true),
+            vec![
+                "agy",
+                "--dangerously-skip-permissions",
+                "--conversation",
+                id
+            ]
         );
     }
 

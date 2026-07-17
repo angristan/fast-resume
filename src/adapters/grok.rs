@@ -110,9 +110,10 @@ impl GrokAdapter {
 
         let file = fs::File::open(updates_path).ok()?;
         let mut messages: Vec<(bool, String)> = Vec::new();
+        let mut user_message_indices = Vec::new();
+        let mut pending_user: Option<(Option<usize>, usize)> = None;
         let mut pending_agent: Option<(String, usize)> = None;
-        let mut first_user = String::new();
-        let mut user_turns = 0usize;
+        let mut seen_prompt_index = false;
         let mut last_activity = None;
 
         for line in BufReader::new(file).lines().map_while(Result::ok) {
@@ -129,17 +130,41 @@ impl GrokAdapter {
             match string_at(update, &["sessionUpdate"]).as_str() {
                 "user_message_chunk" => {
                     pending_agent = None;
-                    let text = grok_content_text(update.get("content").unwrap_or(&Value::Null));
-                    if text.trim().is_empty() {
+                    let content = update.get("content").unwrap_or(&Value::Null);
+                    if content.pointer("/_meta/bashCommand").is_some() {
+                        pending_user = None;
                         continue;
                     }
-                    user_turns += 1;
-                    if first_user.is_empty() {
-                        first_user = text.trim().to_string();
+                    let text = grok_content_text(content);
+                    if text.is_empty() {
+                        continue;
                     }
-                    messages.push((true, text.trim().to_string()));
+                    let prompt_index = update
+                        .pointer("/_meta/promptIndex")
+                        .and_then(Value::as_u64)
+                        .map(|index| index as usize);
+                    if prompt_index.is_some() {
+                        seen_prompt_index = true;
+                    }
+                    let counts_as_user = !seen_prompt_index || prompt_index.is_some();
+                    if !counts_as_user {
+                        pending_user = None;
+                        continue;
+                    }
+                    if let Some((pending_index, message_index)) = &pending_user
+                        && pending_index == &prompt_index
+                        && let Some((true, current)) = messages.get_mut(*message_index)
+                    {
+                        current.push_str(&text);
+                        continue;
+                    }
+                    let message_index = messages.len();
+                    user_message_indices.push(message_index);
+                    messages.push((true, text));
+                    pending_user = Some((prompt_index, message_index));
                 }
                 "agent_message_chunk" => {
+                    pending_user = None;
                     let text = grok_content_text(update.get("content").unwrap_or(&Value::Null));
                     if text.trim().is_empty() {
                         continue;
@@ -160,12 +185,30 @@ impl GrokAdapter {
                     messages.push((false, text));
                     pending_agent = Some((prompt_id, index));
                 }
-                _ => {}
+                "rewind_marker" => {
+                    if let Some(target) = update
+                        .get("target_prompt_index")
+                        .or_else(|| update.get("targetPromptIndex"))
+                        .and_then(Value::as_u64)
+                        .map(|index| index as usize)
+                        && let Some(message_index) = user_message_indices.get(target).copied()
+                    {
+                        messages.truncate(message_index);
+                        user_message_indices.truncate(target);
+                    }
+                    pending_user = None;
+                    pending_agent = None;
+                }
+                _ => {
+                    pending_user = None;
+                }
             }
         }
-        if first_user.is_empty() {
-            return None;
-        }
+        let first_user = messages
+            .iter()
+            .find(|(user, text)| *user && !text.trim().is_empty())
+            .map(|(_, text)| text.trim().to_string())?;
+        let user_turns = messages.iter().filter(|(user, _)| *user).count();
 
         let title = ["generated_title", "session_summary"]
             .into_iter()
@@ -374,7 +417,8 @@ mod tests {
         )
         .unwrap();
         let rows = [
-            json!({"timestamp":"2026-07-17T10:00:01Z","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Add Grok support"}},"_meta":{"promptId":"p1"}}}),
+            json!({"timestamp":"2026-07-17T10:00:01Z","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Add Grok "},"_meta":{"promptIndex":0}}}}),
+            json!({"timestamp":"2026-07-17T10:00:01Z","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"support"},"_meta":{"promptIndex":0}}}}),
             json!({"timestamp":"2026-07-17T10:00:02Z","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Added "}},"_meta":{"promptId":"p1"}}}),
             json!({"timestamp":"2026-07-17T10:00:03Z","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"the adapter"}},"_meta":{"promptId":"p1"}}}),
         ];
@@ -394,11 +438,54 @@ mod tests {
         assert_eq!(sessions[0].title, "Grok adapter work");
         assert_eq!(sessions[0].directory, "/work/grok");
         assert_eq!(sessions[0].message_count, 1);
+        assert!(sessions[0].content.contains("Add Grok support"));
         assert!(sessions[0].content.contains("Added the adapter"));
         assert_eq!(
             adapter.resume_command(&sessions[0], true),
             vec!["grok", "--always-approve", "--resume", id]
         );
+    }
+
+    #[test]
+    fn rewinds_discard_abandoned_messages() {
+        let temp = tempdir().unwrap();
+        let id = "019edf9c-0000-7000-8000-000000000002";
+        let session_dir = temp.path().join("%2Fwork%2Fgrok").join(id);
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("summary.json"),
+            json!({"info":{"id":id,"cwd":"/work/grok"},"created_at":"2026-07-17T10:00:00Z"})
+                .to_string(),
+        )
+        .unwrap();
+        let rows = [
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Keep prompt"},"_meta":{"promptIndex":0}}}}),
+            json!({"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Keep response"}},"_meta":{"promptId":"p0"}}}),
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Discard prompt"},"_meta":{"promptIndex":1}}}}),
+            json!({"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Discard response"}},"_meta":{"promptId":"p1"}}}),
+            json!({"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"rewind_marker","target_prompt_index":1}}}),
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Replacement prompt"},"_meta":{"promptIndex":1}}}}),
+            json!({"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Replacement response"}},"_meta":{"promptId":"p2"}}}),
+        ];
+        fs::write(
+            session_dir.join("updates.jsonl"),
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = GrokAdapter::new(temp.path().to_path_buf());
+        let session = adapter.find_sessions().pop().unwrap();
+
+        assert_eq!(session.message_count, 2);
+        assert!(session.content.contains("Keep prompt"));
+        assert!(session.content.contains("Keep response"));
+        assert!(session.content.contains("Replacement prompt"));
+        assert!(session.content.contains("Replacement response"));
+        assert!(!session.content.contains("Discard prompt"));
+        assert!(!session.content.contains("Discard response"));
     }
 
     #[test]
