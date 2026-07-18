@@ -160,7 +160,7 @@ impl KimiAdapter {
         }
 
         let last_prompt = string_at(&state, &["lastPrompt"]);
-        if messages.is_empty() && !last_prompt.trim().is_empty() {
+        if message_count == 0 && !last_prompt.trim().is_empty() {
             add_message(
                 &mut messages,
                 &mut first_user_message,
@@ -169,6 +169,9 @@ impl KimiAdapter {
                 &Value::String(last_prompt.clone()),
                 true,
             );
+        }
+        if message_count == 0 {
+            return None;
         }
 
         let title = kimi_state_title(&state)
@@ -361,8 +364,7 @@ fn parse_wire_messages(
     let Ok(file) = fs::File::open(wire_file) else {
         return;
     };
-    let mut assistant_steps: HashMap<String, Vec<String>> = HashMap::new();
-    let mut step_order = Vec::new();
+    let mut open_assistant: Option<Vec<String>> = None;
 
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -390,30 +392,19 @@ fn parse_wire_messages(
                 let event = record.get("event").unwrap_or(&Value::Null);
                 match string_at(event, &["type"]).as_str() {
                     "step.begin" => {
-                        let step_id = string_at(event, &["uuid"]);
-                        if !step_id.is_empty() && !assistant_steps.contains_key(&step_id) {
-                            assistant_steps.insert(step_id.clone(), Vec::new());
-                            step_order.push(step_id);
-                        }
+                        // Kimi settles a failed partial attempt before opening its retry.
+                        flush_open_assistant(messages, &mut open_assistant);
+                        open_assistant = Some(Vec::new());
                     }
                     "content.part" => {
-                        let step_id = string_at(event, &["stepUuid"]);
                         if let Some(text) =
                             kimi_text_part(event.get("part").unwrap_or(&Value::Null))
-                            && !step_id.is_empty()
+                            && let Some(parts) = open_assistant.as_mut()
                         {
-                            if !assistant_steps.contains_key(&step_id) {
-                                step_order.push(step_id.clone());
-                            }
-                            assistant_steps.entry(step_id).or_default().push(text);
+                            parts.push(text);
                         }
                     }
-                    "step.end" => {
-                        let step_id = string_at(event, &["uuid"]);
-                        if let Some(parts) = assistant_steps.remove(&step_id) {
-                            add_assistant_parts(messages, parts);
-                        }
-                    }
+                    "step.end" => flush_open_assistant(messages, &mut open_assistant),
                     _ => {}
                 }
             }
@@ -422,10 +413,12 @@ fn parse_wire_messages(
     }
 
     // A session can be indexed while the last streamed step is still open.
-    for step_id in step_order {
-        if let Some(parts) = assistant_steps.remove(&step_id) {
-            add_assistant_parts(messages, parts);
-        }
+    flush_open_assistant(messages, &mut open_assistant);
+}
+
+fn flush_open_assistant(messages: &mut Vec<String>, open_assistant: &mut Option<Vec<String>>) {
+    if let Some(parts) = open_assistant.take() {
+        add_assistant_parts(messages, parts);
     }
 }
 
@@ -594,6 +587,34 @@ mod tests {
     }
 
     #[test]
+    fn preserves_failed_attempt_before_successful_retry() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Retry this request", "origin": {"kind": "user"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "step.begin", "uuid": "failed-step"}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "content.part", "stepUuid": "failed-step", "part": {"type": "text", "text": "Partial failed response"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "step.begin", "uuid": "retry-step"}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "content.part", "stepUuid": "retry-step", "part": {"type": "text", "text": "Successful retry response"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "step.end", "uuid": "retry-step"}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+        let content = &sessions[0].content;
+
+        let partial = content.find("Partial failed response").unwrap();
+        let successful = content.find("Successful retry response").unwrap();
+        assert!(
+            partial < successful,
+            "failed attempt must precede its retry"
+        );
+    }
+
+    #[test]
     fn parses_legacy_nested_state_path() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");
@@ -752,7 +773,7 @@ mod tests {
         write_jsonl(
             &session_dir.join("agents/main/wire.jsonl"),
             &[
-                json!({"type": "context.append_message", "message": {"role": "user", "content": "Background task completed", "origin": {"kind": "background_task"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Background task completed", "origin": {"kind": "task"}}}),
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "Sensitive shell output", "origin": {"kind": "shell_command", "phase": "output"}}}),
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "Hook context", "origin": {"kind": "hook_result"}}}),
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "!git status", "origin": {"kind": "shell_command", "phase": "input"}}}),
@@ -768,6 +789,60 @@ mod tests {
         assert!(sessions[0].content.contains("Hook context"));
         assert!(sessions[0].content.contains("!git status"));
         assert!(!sessions[0].content.contains("Sensitive shell output"));
+    }
+
+    #[test]
+    fn excludes_empty_sessions_and_recovers_last_prompt() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+
+        let state_only = sessions_dir.join("--repo-kimi--").join("state-only");
+        fs::create_dir_all(&state_only).unwrap();
+        fs::write(
+            state_only.join("state.json"),
+            json!({"title": "Unused empty session", "createdAt": 1784110800000i64}).to_string(),
+        )
+        .unwrap();
+
+        let internal_only = sessions_dir.join("--repo-kimi--").join("internal-only");
+        fs::create_dir_all(internal_only.join("agents/main")).unwrap();
+        fs::write(
+            internal_only.join("state.json"),
+            json!({"title": "Internal events only", "createdAt": 1784110800000i64}).to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &internal_only.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Task notification", "origin": {"kind": "task"}}}),
+            ],
+        );
+
+        let recovered = sessions_dir.join("--repo-kimi--").join("recovered");
+        fs::create_dir_all(recovered.join("agents/main")).unwrap();
+        fs::write(
+            recovered.join("state.json"),
+            json!({
+                "lastPrompt": "Recovered user prompt",
+                "createdAt": 1784110800000i64
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &recovered.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Task notification", "origin": {"kind": "task"}}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "recovered");
+        assert_eq!(sessions[0].title, "Recovered user prompt");
+        assert_eq!(sessions[0].message_count, 1);
+        assert!(sessions[0].content.contains("Recovered user prompt"));
     }
 
     #[test]
