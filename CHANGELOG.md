@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/angristan/fast-resume/compare/v2.4.0...v2.5.0) (2026-07-18)
+
+
+### Features
+
+* add Kimi Code session support ([#78](https://github.com/angristan/fast-resume/issues/78)) ([638a229](https://github.com/angristan/fast-resume/commit/638a2299574440e96327f26e2f95c3a42ee4ead5))
+
 # [2.4.0](https://github.com/angristan/fast-resume/compare/v2.3.0...v2.4.0) (2026-07-18)
 
 
