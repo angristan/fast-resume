@@ -175,6 +175,12 @@ pub fn grok_sessions_dir() -> PathBuf {
         .join("sessions")
 }
 
+pub fn kimi_sessions_dir() -> PathBuf {
+    env_path("KIMI_CODE_HOME")
+        .unwrap_or_else(|| home_dir().join(".kimi-code"))
+        .join("sessions")
+}
+
 pub fn opencode_dir() -> PathBuf {
     home_dir().join(".local").join("share").join("opencode")
 }
