@@ -10,6 +10,7 @@ mod copilot_vscode;
 mod crush;
 mod cursor;
 mod grok;
+mod kimi;
 mod opencode;
 mod pi;
 mod shared;
@@ -23,6 +24,7 @@ pub use copilot_vscode::CopilotVsCodeAdapter;
 pub use crush::CrushAdapter;
 pub use cursor::CursorAdapter;
 pub use grok::GrokAdapter;
+pub use kimi::KimiAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::PiAdapter;
 pub use vibe::VibeAdapter;
@@ -85,6 +87,7 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(CrushAdapter::default()),
         Box::new(CursorAdapter::default()),
         Box::new(GrokAdapter::default()),
+        Box::new(KimiAdapter::default()),
         Box::new(OpenCodeAdapter::default()),
         Box::new(PiAdapter::default()),
         Box::new(VibeAdapter::default()),

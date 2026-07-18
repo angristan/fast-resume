@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 23;
 
-pub const AGENT_ORDER: [&str; 11] = [
+pub const AGENT_ORDER: [&str; 12] = [
     "antigravity",
     "claude",
     "codex",
@@ -18,6 +18,7 @@ pub const AGENT_ORDER: [&str; 11] = [
     "crush",
     "cursor",
     "grok",
+    "kimi",
     "opencode",
     "pi",
     "vibe",
@@ -71,6 +72,14 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "grok",
                 badge: "grok",
                 color: ratatui::style::Color::Rgb(255, 255, 255),
+            },
+        ),
+        (
+            "kimi",
+            AgentConfig {
+                name: "kimi",
+                badge: "kimi",
+                color: ratatui::style::Color::Rgb(56, 189, 248),
             },
         ),
         (
