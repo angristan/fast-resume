@@ -18,7 +18,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 
 | Agent | Format | Parsing strategy |
 | --- | --- | --- |
-| Antigravity CLI | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/*.jsonl` | Reads user inputs and planner responses, excludes tool results, and joins workspace metadata from Antigravity history |
+| Antigravity CLI | `~/.gemini/antigravity-cli/conversations/<id>.db` or `brain/<id>/.system_generated/logs/*.jsonl` | Reads native protobuf-backed SQLite conversations with WAL support, falls back to generated transcripts, and excludes tool results |
 | Claude Code | `~/.claude/projects/<project>/*.jsonl` | Reads user and assistant entries and skips agent subprocess files |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records |
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
@@ -67,7 +67,7 @@ On an incremental refresh, fast-resume:
 5. Infers deletions only when the relevant scan is complete.
 6. Commits changes in batches and reports progress to the TUI.
 
-File-backed adapters normally use modification times. Database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
+File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
 
 JSONL sources distinguish three states:
 

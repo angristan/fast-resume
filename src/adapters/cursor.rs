@@ -12,19 +12,15 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::config;
-use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
+use crate::model::{RawAdapterStats, Session, file_timestamp, truncate_title};
 
 use super::shared::{
     IncrementalParse, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming,
+    incremental_from_files_streaming, sqlite_file_stats, sqlite_mtime,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 type SessionFiles = HashMap<String, (PathBuf, f64)>;
-
-fn cursor_store_mtime(path: &Path) -> f64 {
-    file_mtime_seconds(path).max(file_mtime_seconds(&path.with_extension("db-wal")))
-}
 
 #[derive(Debug, Clone)]
 pub struct CursorAdapter {
@@ -71,10 +67,7 @@ impl CursorAdapter {
             else {
                 continue;
             };
-            files.insert(
-                id.to_string(),
-                (path.to_path_buf(), cursor_store_mtime(path)),
-            );
+            files.insert(id.to_string(), (path.to_path_buf(), sqlite_mtime(path)));
         }
         Some((files, complete))
     }
@@ -155,7 +148,7 @@ impl CursorAdapter {
             content,
             user_turns,
         );
-        session.mtime = cursor_store_mtime(path);
+        session.mtime = sqlite_mtime(path);
         Ok(Some(session))
     }
 
@@ -248,8 +241,9 @@ impl Adapter for CursorAdapter {
             .filter_map(Result::ok)
         {
             if entry.path().file_name().and_then(|name| name.to_str()) == Some("store.db") {
-                file_count += 1;
-                total_bytes += entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                let (files, bytes) = sqlite_file_stats(entry.path());
+                file_count += files;
+                total_bytes += bytes;
             }
         }
         RawAdapterStats {
@@ -537,6 +531,14 @@ mod tests {
         assert_eq!(
             adapter.resume_command(&sessions[0], true),
             vec!["agent", "--yolo", "--resume", id]
+        );
+        fs::write(db_path.with_file_name("store.db-wal"), b"wal").unwrap();
+        fs::write(db_path.with_file_name("store.db-shm"), b"shm").unwrap();
+        let stats = adapter.raw_stats();
+        assert_eq!(stats.file_count, 3);
+        assert_eq!(
+            stats.total_bytes,
+            db_path.metadata().unwrap().len() + b"wal".len() as u64 + b"shm".len() as u64
         );
     }
 

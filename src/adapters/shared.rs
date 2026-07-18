@@ -7,7 +7,7 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::model::{RawAdapterStats, Session};
+use crate::model::{RawAdapterStats, Session, file_mtime_seconds};
 
 use super::{IncrementalScan, KnownSessions, MTIME_TOLERANCE, SessionCallback};
 
@@ -54,6 +54,31 @@ pub(super) fn failed_incremental_scan(agent: &'static str) -> IncrementalScan {
         new_or_modified: Vec::new(),
         deleted_ids: Vec::new(),
     }
+}
+
+pub(super) fn sqlite_mtime(path: &Path) -> f64 {
+    file_mtime_seconds(path).max(file_mtime_seconds(&sqlite_sidecar_path(path, "-wal")))
+}
+
+pub(super) fn sqlite_file_stats(path: &Path) -> (usize, u64) {
+    [
+        path.to_path_buf(),
+        sqlite_sidecar_path(path, "-wal"),
+        sqlite_sidecar_path(path, "-shm"),
+    ]
+    .into_iter()
+    .filter_map(|path| path.metadata().ok())
+    .fold((0, 0), |(files, bytes), metadata| {
+        (files + 1, bytes + metadata.len())
+    })
+}
+
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    path.with_file_name(format!(
+        "{}{}",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        suffix
+    ))
 }
 
 pub(super) fn incremental_from_files<F>(
