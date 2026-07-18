@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Component, Path, PathBuf};
@@ -24,6 +24,20 @@ type SessionIndex = HashMap<String, IndexedSession>;
 struct IndexedSession {
     session_dir: PathBuf,
     work_dir: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TranscriptEntry {
+    rendered: Vec<String>,
+    user_turn_text: Option<String>,
+    undo_anchor: bool,
+    compaction_summary: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ParsedTranscript {
+    entries: Vec<TranscriptEntry>,
+    allow_last_prompt_fallback: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -165,36 +179,46 @@ impl KimiAdapter {
             })
             .or_else(|| indexed_work_dir(state_file, &session_id, session_index))
             .unwrap_or_default();
-        let mut messages = Vec::new();
-        let mut first_user_message = String::new();
-        let mut message_count = 0usize;
         let wire_file = kimi_wire_file(state_file);
-        if wire_file.exists() {
-            parse_wire_messages(
-                &wire_file,
-                &mut messages,
-                &mut first_user_message,
-                &mut message_count,
-            );
-        }
+        let mut transcript = if wire_file.exists() {
+            parse_wire_messages(&wire_file)
+        } else {
+            ParsedTranscript {
+                entries: Vec::new(),
+                allow_last_prompt_fallback: true,
+            }
+        };
 
         let last_prompt = string_at(&state, &["lastPrompt"]);
-        if message_count == 0 && !last_prompt.trim().is_empty() {
-            add_message(
-                &mut messages,
-                &mut first_user_message,
-                &mut message_count,
-                "user",
-                &Value::String(last_prompt.clone()),
-                true,
-            );
+        if transcript_user_turn_count(&transcript.entries) == 0
+            && transcript.allow_last_prompt_fallback
+            && !last_prompt.trim().is_empty()
+        {
+            transcript
+                .entries
+                .push(user_transcript_entry(vec![last_prompt.clone()], true, true));
         }
+        let message_count = transcript_user_turn_count(&transcript.entries);
         if message_count == 0 {
             return None;
         }
+        let allow_last_prompt_fallback = transcript.allow_last_prompt_fallback;
+        let first_user_message = transcript
+            .entries
+            .iter()
+            .find_map(|entry| entry.user_turn_text.clone())
+            .unwrap_or_default();
+        let messages = transcript
+            .entries
+            .into_iter()
+            .flat_map(|entry| entry.rendered)
+            .collect::<Vec<_>>();
 
         let title = kimi_state_title(&state)
-            .or_else(|| (!last_prompt.trim().is_empty()).then_some(last_prompt))
+            .or_else(|| {
+                (allow_last_prompt_fallback && !last_prompt.trim().is_empty())
+                    .then_some(last_prompt)
+            })
             .or_else(|| (!first_user_message.is_empty()).then_some(first_user_message))
             .unwrap_or_else(|| "Kimi session".to_string());
         let timestamp = state_timestamp(&state, "updatedAt")
@@ -460,17 +484,19 @@ fn state_timestamp(state: &Value, key: &str) -> Option<chrono::DateTime<chrono::
     })
 }
 
-fn parse_wire_messages(
-    wire_file: &Path,
-    messages: &mut Vec<String>,
-    first_user_message: &mut String,
-    message_count: &mut usize,
-) {
+fn parse_wire_messages(wire_file: &Path) -> ParsedTranscript {
     let Ok(file) = fs::File::open(wire_file) else {
-        return;
+        return ParsedTranscript {
+            entries: Vec::new(),
+            allow_last_prompt_fallback: true,
+        };
     };
-    let mut open_assistant: Option<Vec<String>> = None;
-    let mut deferred_messages = Vec::new();
+    let mut entries = Vec::new();
+    let mut clear_floor = 0usize;
+    let mut open_steps: HashMap<String, usize> = HashMap::new();
+    let mut pending_tool_results = HashSet::new();
+    let mut deferred_entries = Vec::new();
+    let mut allow_last_prompt_fallback = true;
 
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -482,64 +508,151 @@ fn parse_wire_messages(
         match string_at(&record, &["type"]).as_str() {
             "context.append_message" => {
                 let message = record.get("message").unwrap_or(&Value::Null);
-                if !kimi_message_is_searchable(message) {
-                    continue;
+                if let Some(entry) = kimi_transcript_entry(message) {
+                    if entry.user_turn_text.is_some() {
+                        allow_last_prompt_fallback = true;
+                    }
+                    if pending_tool_results.is_empty() {
+                        entries.push(entry);
+                    } else {
+                        deferred_entries.push(entry);
+                    }
                 }
-                let role = string_at(message, &["role"]);
-                let count_as_user_turn = kimi_message_is_user_turn(message);
-                let destination = if open_assistant.is_some() {
-                    &mut deferred_messages
-                } else {
-                    &mut *messages
-                };
-                add_message_texts(
-                    destination,
-                    first_user_message,
-                    message_count,
-                    &role,
-                    kimi_message_texts(message),
-                    count_as_user_turn,
-                );
             }
             "context.append_loop_event" => {
                 let event = record.get("event").unwrap_or(&Value::Null);
                 match string_at(event, &["type"]).as_str() {
                     "step.begin" => {
-                        // Kimi settles a failed partial attempt before opening its retry.
-                        flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages);
-                        open_assistant = Some(Vec::new());
+                        pending_tool_results.clear();
+                        entries.append(&mut deferred_entries);
+                        let step_id = string_at(event, &["uuid"]);
+                        if !step_id.is_empty() {
+                            entries.push(TranscriptEntry::default());
+                            open_steps.insert(step_id, entries.len() - 1);
+                        }
                     }
                     "content.part" => {
+                        let step_id = string_at(event, &["stepUuid"]);
                         if let Some(text) =
                             kimi_text_part(event.get("part").unwrap_or(&Value::Null))
-                            && let Some(parts) = open_assistant.as_mut()
+                            && let Some(index) = open_steps.get(&step_id).copied()
+                            && let Some(entry) = entries.get_mut(index)
                         {
-                            parts.push(text);
+                            append_assistant_text(entry, &text);
+                        }
+                    }
+                    "tool.call" => {
+                        let step_id = string_at(event, &["stepUuid"]);
+                        let tool_call_id = string_at(event, &["toolCallId"]);
+                        if !tool_call_id.is_empty() && open_steps.contains_key(&step_id) {
+                            pending_tool_results.insert(tool_call_id);
+                        }
+                    }
+                    "tool.result" => {
+                        let tool_call_id = string_at(event, &["toolCallId"]);
+                        if pending_tool_results.remove(&tool_call_id)
+                            && pending_tool_results.is_empty()
+                        {
+                            entries.append(&mut deferred_entries);
                         }
                     }
                     "step.end" => {
-                        flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages)
+                        open_steps.remove(&string_at(event, &["uuid"]));
+                        if pending_tool_results.is_empty() {
+                            entries.append(&mut deferred_entries);
+                        }
                     }
                     _ => {}
                 }
+            }
+            "context.apply_compaction" => {
+                entries.push(compaction_summary_entry(&record));
+                open_steps.clear();
+                pending_tool_results.clear();
+                deferred_entries.clear();
+            }
+            "context.undo" => {
+                let count = value_i64_at(&record, &["count"]).unwrap_or(0);
+                apply_transcript_undo(&mut entries, clear_floor, count);
+                open_steps.clear();
+                pending_tool_results.clear();
+                deferred_entries.clear();
+                if count > 0 {
+                    allow_last_prompt_fallback = false;
+                }
+            }
+            "context.clear" => {
+                clear_floor = entries.len();
+                open_steps.clear();
+                pending_tool_results.clear();
+                deferred_entries.clear();
+                allow_last_prompt_fallback = false;
             }
             _ => {}
         }
     }
 
-    // A session can be indexed while the last streamed step is still open.
-    flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages);
+    ParsedTranscript {
+        entries,
+        allow_last_prompt_fallback,
+    }
 }
 
-fn flush_open_assistant(
-    messages: &mut Vec<String>,
-    open_assistant: &mut Option<Vec<String>>,
-    deferred_messages: &mut Vec<String>,
-) {
-    if let Some(parts) = open_assistant.take() {
-        add_assistant_parts(messages, parts);
+fn apply_transcript_undo(entries: &mut Vec<TranscriptEntry>, clear_floor: usize, count: i64) {
+    if count <= 0 {
+        return;
     }
-    messages.append(deferred_messages);
+    let mut removed_user_count = 0i64;
+    let mut index = entries.len();
+    while index > clear_floor {
+        index -= 1;
+        if entries[index].compaction_summary {
+            break;
+        }
+        let undo_anchor = entries[index].undo_anchor;
+        entries.remove(index);
+        if undo_anchor {
+            removed_user_count += 1;
+            if removed_user_count >= count {
+                break;
+            }
+        }
+    }
+}
+
+fn append_assistant_text(entry: &mut TranscriptEntry, text: &str) {
+    if let Some(rendered) = entry.rendered.last_mut() {
+        rendered.push_str(text);
+    } else {
+        entry.rendered.push(format!("  {text}"));
+    }
+}
+
+fn compaction_summary_entry(record: &Value) -> TranscriptEntry {
+    let summary = record.get("summary").unwrap_or(&Value::Null);
+    let text = summary
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| {
+            record
+                .get("contextSummary")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            let texts = content_texts(summary.get("content").unwrap_or(&Value::Null));
+            (!texts.is_empty()).then(|| texts.join(""))
+        })
+        .unwrap_or_default();
+    TranscriptEntry {
+        rendered: if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("» {text}")]
+        },
+        compaction_summary: true,
+        ..TranscriptEntry::default()
+    }
 }
 
 fn kimi_message_is_searchable(message: &Value) -> bool {
@@ -638,55 +751,58 @@ fn kimi_shell_input(text: &str) -> Option<String> {
     )
 }
 
-fn add_message(
-    messages: &mut Vec<String>,
-    first_user_message: &mut String,
-    message_count: &mut usize,
-    role: &str,
-    content: &Value,
-    count_as_user_turn: bool,
-) {
-    if !matches!(role, "user" | "assistant") {
-        return;
+fn kimi_transcript_entry(message: &Value) -> Option<TranscriptEntry> {
+    if !kimi_message_is_searchable(message) {
+        return None;
     }
-    add_message_texts(
-        messages,
-        first_user_message,
-        message_count,
-        role,
-        content_texts(content),
-        count_as_user_turn,
-    );
+    let role = string_at(message, &["role"]);
+    if !matches!(role.as_str(), "user" | "assistant") {
+        return None;
+    }
+    let texts = kimi_message_texts(message);
+    let user_turn = role == "user" && kimi_message_is_user_turn(message);
+    let undo_anchor = kimi_message_is_undo_anchor(message);
+    let compaction_summary = string_at(message, &["origin", "kind"]) == "compaction_summary";
+    let prefix = if role == "user" { "» " } else { "  " };
+    Some(TranscriptEntry {
+        rendered: texts.iter().map(|text| format!("{prefix}{text}")).collect(),
+        user_turn_text: user_turn.then(|| texts.first().cloned()).flatten(),
+        undo_anchor,
+        compaction_summary,
+    })
 }
 
-fn add_message_texts(
-    messages: &mut Vec<String>,
-    first_user_message: &mut String,
-    message_count: &mut usize,
-    role: &str,
+fn kimi_message_is_undo_anchor(message: &Value) -> bool {
+    if string_at(message, &["role"]) != "user" {
+        return false;
+    }
+    match string_at(message, &["origin", "kind"]).as_str() {
+        "" | "user" => true,
+        "skill_activation" | "plugin_command" => {
+            string_at(message, &["origin", "trigger"]) == "user-slash"
+        }
+        _ => false,
+    }
+}
+
+fn user_transcript_entry(
     texts: Vec<String>,
     count_as_user_turn: bool,
-) {
-    if !matches!(role, "user" | "assistant") {
-        return;
-    }
-    if role == "user" && count_as_user_turn && !texts.is_empty() {
-        *message_count += 1;
-        if first_user_message.is_empty() {
-            *first_user_message = texts[0].clone();
-        }
-    }
-    let prefix = if role == "user" { "» " } else { "  " };
-    for text in texts {
-        messages.push(format!("{prefix}{text}"));
+    undo_anchor: bool,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        rendered: texts.iter().map(|text| format!("» {text}")).collect(),
+        user_turn_text: count_as_user_turn.then(|| texts.first().cloned()).flatten(),
+        undo_anchor,
+        compaction_summary: false,
     }
 }
 
-fn add_assistant_parts(messages: &mut Vec<String>, parts: Vec<String>) {
-    let text = parts.join("");
-    if !text.is_empty() {
-        messages.push(format!("  {text}"));
-    }
+fn transcript_user_turn_count(entries: &[TranscriptEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| entry.user_turn_text.is_some())
+        .count()
 }
 
 #[cfg(test)]
@@ -850,6 +966,66 @@ mod tests {
         let notification = content.find("Task notification").unwrap();
         assert!(assistant < notification, "assistant output must stay first");
         assert_eq!(sessions[0].message_count, 1);
+    }
+
+    #[test]
+    fn applies_undo_boundaries_and_indexes_compaction_summaries() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Keep prompt", "origin": {"kind": "user"}}}),
+                json!({"type": "context.append_message", "message": {"role": "assistant", "content": "Keep response"}}),
+                json!({"type": "context.apply_compaction", "summary": "Compacted context summary", "compactedCount": 2}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Discard before clear", "origin": {"kind": "user"}}}),
+                json!({"type": "context.append_message", "message": {"role": "assistant", "content": "Discarded response"}}),
+                json!({"type": "context.undo", "count": 1}),
+                json!({"type": "context.clear"}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Discard after clear", "origin": {"kind": "user"}}}),
+                json!({"type": "context.undo", "count": 2}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].message_count, 1);
+        assert!(sessions[0].content.contains("Keep prompt"));
+        assert!(sessions[0].content.contains("Keep response"));
+        assert!(sessions[0].content.contains("Compacted context summary"));
+        assert!(!sessions[0].content.contains("Discard before clear"));
+        assert!(!sessions[0].content.contains("Discarded response"));
+        assert!(!sessions[0].content.contains("Discard after clear"));
+    }
+
+    #[test]
+    fn fully_undone_prompt_is_not_restored_from_state() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        fs::write(
+            session_dir.join("state.json"),
+            json!({
+                "lastPrompt": "Undone prompt",
+                "createdAt": 1784110800000i64,
+                "updatedAt": 1784110807000i64
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Undone prompt", "origin": {"kind": "user"}}}),
+                json!({"type": "context.undo", "count": 1}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert!(sessions.is_empty());
     }
 
     #[test]
