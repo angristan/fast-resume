@@ -26,7 +26,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
-| Kimi Code | `$KIMI_CODE_HOME/sessions/**/state.json` and `agents/main/wire.jsonl` | Reads session metadata, user messages, and streamed assistant text |
+| Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |

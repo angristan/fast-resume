@@ -123,7 +123,6 @@ fn write_kimi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> P
         json!({
             "id": id,
             "title": prompt,
-            "cwd": directory,
             "createdAt": 1784110800000i64,
             "updatedAt": 1784110801000i64
         })
@@ -135,8 +134,16 @@ fn write_kimi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> P
         &wire_file,
         &[
             json!({"type": "metadata", "protocol_version": "1.4", "created_at": 1784110800000i64}),
-            json!({"type": "context.append_message", "time": 1784110801000i64, "message": {"role": "user", "content": prompt}}),
+            json!({"type": "context.append_message", "time": 1784110801000i64, "message": {"role": "user", "content": prompt, "origin": {"kind": "user"}}}),
         ],
+    );
+    write_jsonl(
+        &home.join(".kimi-code/session_index.jsonl"),
+        &[json!({
+            "sessionId": id,
+            "sessionDir": session_dir.to_string_lossy(),
+            "workDir": directory
+        })],
     );
     wire_file
 }
