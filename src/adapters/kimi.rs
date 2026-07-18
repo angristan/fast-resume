@@ -353,7 +353,7 @@ fn validated_index_session_dir(
     }
     let sessions_root = sessions_root?;
     let session_dir = normalized_absolute_path(session_dir)?;
-    if !session_dir.starts_with(sessions_root)
+    if !path_is_within(sessions_root, &session_dir)
         || session_dir.file_name().and_then(|name| name.to_str()) != Some(session_id)
     {
         return None;
@@ -372,7 +372,34 @@ fn indexed_work_dir(
     }
     let session_dir = kimi_session_dir_from_state_file(state_file)?;
     let session_dir = normalized_absolute_path(session_dir)?;
-    (session_dir == indexed.session_dir).then(|| indexed.work_dir.clone())
+    paths_equal(&session_dir, &indexed.session_dir).then(|| indexed.work_dir.clone())
+}
+
+fn path_is_within(parent: &Path, child: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        windows_path_key(child).starts_with(windows_path_key(parent))
+    }
+    #[cfg(not(windows))]
+    {
+        child.starts_with(parent)
+    }
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        windows_path_key(left) == windows_path_key(right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+#[cfg(windows)]
+fn windows_path_key(path: &Path) -> PathBuf {
+    PathBuf::from(path.to_string_lossy().to_lowercase())
 }
 
 fn kimi_state_file_is_legacy(state_file: &Path) -> bool {
@@ -459,27 +486,20 @@ fn parse_wire_messages(
                     continue;
                 }
                 let role = string_at(message, &["role"]);
-                let content = message.get("content").unwrap_or(&Value::Null);
                 let count_as_user_turn = kimi_message_is_user_turn(message);
-                if open_assistant.is_some() {
-                    add_message(
-                        &mut deferred_messages,
-                        first_user_message,
-                        message_count,
-                        &role,
-                        content,
-                        count_as_user_turn,
-                    );
+                let destination = if open_assistant.is_some() {
+                    &mut deferred_messages
                 } else {
-                    add_message(
-                        messages,
-                        first_user_message,
-                        message_count,
-                        &role,
-                        content,
-                        count_as_user_turn,
-                    );
-                }
+                    &mut *messages
+                };
+                add_message_texts(
+                    destination,
+                    first_user_message,
+                    message_count,
+                    &role,
+                    kimi_message_texts(message),
+                    count_as_user_turn,
+                );
             }
             "context.append_loop_event" => {
                 let event = record.get("event").unwrap_or(&Value::Null);
@@ -548,6 +568,76 @@ fn kimi_text_part(part: &Value) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+fn kimi_message_texts(message: &Value) -> Vec<String> {
+    let content = message.get("content").unwrap_or(&Value::Null);
+    match string_at(message, &["origin", "kind"]).as_str() {
+        "skill_activation" => kimi_skill_activation_text(message)
+            .map_or_else(|| content_texts(content), |text| vec![text]),
+        "plugin_command" => kimi_plugin_command_text(message)
+            .map_or_else(|| content_texts(content), |text| vec![text]),
+        "shell_command" if string_at(message, &["origin", "phase"]) == "input" => {
+            content_texts(content)
+                .into_iter()
+                .map(|text| kimi_shell_input(&text).unwrap_or(text))
+                .filter(|text| !text.is_empty())
+                .collect()
+        }
+        _ => content_texts(content),
+    }
+}
+
+fn kimi_skill_activation_text(message: &Value) -> Option<String> {
+    let skill_name = string_at(message, &["origin", "skillName"]);
+    if skill_name.is_empty() {
+        return None;
+    }
+    if string_at(message, &["origin", "trigger"]) == "user-slash" {
+        Some(kimi_slash_command(
+            format!("/{skill_name}"),
+            string_at(message, &["origin", "skillArgs"]),
+        ))
+    } else {
+        Some(format!("Activated skill: {skill_name}"))
+    }
+}
+
+fn kimi_plugin_command_text(message: &Value) -> Option<String> {
+    let plugin_id = string_at(message, &["origin", "pluginId"]);
+    let command_name = string_at(message, &["origin", "commandName"]);
+    if plugin_id.is_empty() || command_name.is_empty() {
+        return None;
+    }
+    Some(kimi_slash_command(
+        format!("/{plugin_id}:{command_name}"),
+        string_at(message, &["origin", "commandArgs"]),
+    ))
+}
+
+fn kimi_slash_command(command: String, args: String) -> String {
+    let args = args.trim();
+    if args.is_empty() {
+        command
+    } else {
+        format!("{command} {args}")
+    }
+}
+
+fn kimi_shell_input(text: &str) -> Option<String> {
+    const OPEN: &str = "<bash-input>";
+    const CLOSE: &str = "</bash-input>";
+    let start = text.find(OPEN)? + OPEN.len();
+    let end = start + text[start..].find(CLOSE)?;
+    Some(
+        text[start..end]
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .trim()
+            .to_string(),
+    )
+}
+
 fn add_message(
     messages: &mut Vec<String>,
     first_user_message: &mut String,
@@ -559,7 +649,27 @@ fn add_message(
     if !matches!(role, "user" | "assistant") {
         return;
     }
-    let texts = content_texts(content);
+    add_message_texts(
+        messages,
+        first_user_message,
+        message_count,
+        role,
+        content_texts(content),
+        count_as_user_turn,
+    );
+}
+
+fn add_message_texts(
+    messages: &mut Vec<String>,
+    first_user_message: &mut String,
+    message_count: &mut usize,
+    role: &str,
+    texts: Vec<String>,
+    count_as_user_turn: bool,
+) {
+    if !matches!(role, "user" | "assistant") {
+        return;
+    }
     if role == "user" && count_as_user_turn && !texts.is_empty() {
         *message_count += 1;
         if first_user_message.is_empty() {
@@ -890,6 +1000,29 @@ mod tests {
         assert_eq!(sessions[0].directory, "/repo/valid");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn accepts_case_variants_in_windows_index_paths() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_id = "kimi-123";
+        let session_dir = write_kimi_session(&sessions_dir, session_id);
+        let case_variant = PathBuf::from(
+            session_dir
+                .parent()
+                .unwrap()
+                .to_string_lossy()
+                .to_uppercase(),
+        )
+        .join(session_id);
+        write_session_index(&sessions_dir, session_id, &case_variant, r"C:\repo\kimi");
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].directory, r"C:\repo\kimi");
+    }
+
     #[test]
     fn ignores_injected_messages_for_fallback_title() {
         let temp = tempdir().unwrap();
@@ -914,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_user_turn_origins_and_omits_shell_output() {
+    fn classifies_user_turn_origins_and_projects_shell_input() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");
         let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
@@ -934,19 +1067,54 @@ mod tests {
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "Background task completed", "origin": {"kind": "task"}}}),
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "Sensitive shell output", "origin": {"kind": "shell_command", "phase": "output"}}}),
                 json!({"type": "context.append_message", "message": {"role": "user", "content": "Hook context", "origin": {"kind": "hook_result"}}}),
-                json!({"type": "context.append_message", "message": {"role": "user", "content": "!git status", "origin": {"kind": "shell_command", "phase": "input"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "<bash-input>\nprintf '&lt;ok&gt; &amp; done'\n</bash-input>", "origin": {"kind": "shell_command", "phase": "input"}}}),
             ],
         );
 
         let sessions = KimiAdapter::new(sessions_dir).find_sessions();
 
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].title, "!git status");
+        assert_eq!(sessions[0].title, "printf '<ok> & done'");
         assert_eq!(sessions[0].message_count, 1);
         assert!(sessions[0].content.contains("Background task completed"));
         assert!(sessions[0].content.contains("Hook context"));
-        assert!(sessions[0].content.contains("!git status"));
+        assert!(sessions[0].content.contains("printf '<ok> & done'"));
+        assert!(!sessions[0].content.contains("bash-input"));
         assert!(!sessions[0].content.contains("Sensitive shell output"));
+    }
+
+    #[test]
+    fn projects_skill_and_plugin_invocations_instead_of_expanded_prompts() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        fs::write(
+            session_dir.join("state.json"),
+            json!({
+                "createdAt": 1784110800000i64,
+                "updatedAt": 1784110807000i64,
+                "archived": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "INTERNAL_SKILL_TEMPLATE", "origin": {"kind": "skill_activation", "skillName": "review", "skillArgs": "  src  ", "trigger": "user-slash"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "INTERNAL_PLUGIN_TEMPLATE", "origin": {"kind": "plugin_command", "pluginId": "github", "commandName": "issue", "commandArgs": "  42  ", "trigger": "user-slash"}}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "/review src");
+        assert_eq!(sessions[0].message_count, 2);
+        assert!(sessions[0].content.contains("» /review src"));
+        assert!(sessions[0].content.contains("» /github:issue 42"));
+        assert!(!sessions[0].content.contains("INTERNAL_SKILL_TEMPLATE"));
+        assert!(!sessions[0].content.contains("INTERNAL_PLUGIN_TEMPLATE"));
     }
 
     #[test]
