@@ -114,6 +114,40 @@ fn write_new_agent_sessions(home: &Path) {
         .unwrap();
 }
 
+fn write_kimi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home.join(".kimi-code/sessions/--repo-kimi--").join(id);
+    let wire_dir = session_dir.join("agents/main");
+    fs::create_dir_all(&wire_dir).unwrap();
+    fs::write(
+        session_dir.join("state.json"),
+        json!({
+            "id": id,
+            "title": prompt,
+            "createdAt": 1784110800000i64,
+            "updatedAt": 1784110801000i64
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let wire_file = wire_dir.join("wire.jsonl");
+    write_jsonl(
+        &wire_file,
+        &[
+            json!({"type": "metadata", "protocol_version": "1.4", "created_at": 1784110800000i64}),
+            json!({"type": "context.append_message", "time": 1784110801000i64, "message": {"role": "user", "content": prompt, "origin": {"kind": "user"}}}),
+        ],
+    );
+    write_jsonl(
+        &home.join(".kimi-code/session_index.jsonl"),
+        &[json!({
+            "sessionId": id,
+            "sessionDir": session_dir.to_string_lossy(),
+            "workDir": directory
+        })],
+    );
+    wire_file
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -220,12 +254,19 @@ fn list_footer_counts_filtered_matches() {
         "/repo/pi",
         "Pi adapter integration coverage",
     );
+    write_kimi_session(
+        temp.path(),
+        "kimi123",
+        "/repo/kimi",
+        "Kimi adapter integration coverage",
+    );
 
     let (query_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "Needle"]));
     assert!(query_stdout.contains("backend123"));
     assert!(!query_stdout.contains("frontend123"));
     assert!(!query_stdout.contains("claude123"));
     assert!(!query_stdout.contains("pi123"));
+    assert!(!query_stdout.contains("kimi123"));
     assert!(query_stdout.contains("Showing 1 of 1 sessions"));
 
     let (directory_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-d", "backend"]));
@@ -233,6 +274,7 @@ fn list_footer_counts_filtered_matches() {
     assert!(directory_stdout.contains("claude123"));
     assert!(!directory_stdout.contains("frontend123"));
     assert!(!directory_stdout.contains("pi123"));
+    assert!(!directory_stdout.contains("kimi123"));
     assert!(directory_stdout.contains("Showing 2 of 2 sessions"));
 
     let (agent_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "-a", "claude"]));
@@ -240,13 +282,21 @@ fn list_footer_counts_filtered_matches() {
     assert!(!agent_stdout.contains("backend123"));
     assert!(!agent_stdout.contains("frontend123"));
     assert!(!agent_stdout.contains("pi123"));
+    assert!(!agent_stdout.contains("kimi123"));
     assert!(agent_stdout.contains("Showing 1 of 1 sessions"));
 
     let (pi_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "agent:pi"]));
     assert!(pi_stdout.contains("pi123"));
     assert!(pi_stdout.contains("Pi adapter integration coverage"));
     assert!(!pi_stdout.contains("backend123"));
+    assert!(!pi_stdout.contains("kimi123"));
     assert!(pi_stdout.contains("Showing 1 of 1 sessions"));
+
+    let (kimi_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "agent:kimi"]));
+    assert!(kimi_stdout.contains("kimi123"));
+    assert!(kimi_stdout.contains("Kimi adapter integration coverage"));
+    assert!(!kimi_stdout.contains("pi123"));
+    assert!(kimi_stdout.contains("Showing 1 of 1 sessions"));
 }
 
 #[test]
