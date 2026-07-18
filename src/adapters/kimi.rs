@@ -167,10 +167,11 @@ impl KimiAdapter {
                 &mut message_count,
                 "user",
                 &Value::String(last_prompt.clone()),
+                true,
             );
         }
 
-        let title = non_empty_string(&state, "title")
+        let title = kimi_state_title(&state)
             .or_else(|| (!last_prompt.trim().is_empty()).then_some(last_prompt))
             .or_else(|| (!first_user_message.is_empty()).then_some(first_user_message))
             .unwrap_or_else(|| "Kimi session".to_string());
@@ -337,6 +338,14 @@ fn non_empty_string(value: &Value, key: &str) -> Option<String> {
     (!value.trim().is_empty()).then_some(value)
 }
 
+fn kimi_state_title(state: &Value) -> Option<String> {
+    // Modern states use `isCustomTitle` as the title-schema discriminator.
+    if state.get("isCustomTitle").is_some_and(Value::is_boolean) {
+        return non_empty_string(state, "title");
+    }
+    non_empty_string(state, "customTitle").or_else(|| non_empty_string(state, "title"))
+}
+
 fn state_timestamp(state: &Value, key: &str) -> Option<chrono::DateTime<chrono::Local>> {
     timestamp_from_ms(value_i64_at(state, &[key])).or_else(|| {
         non_empty_string(state, key).and_then(|value| super::shared::parse_datetime(&value))
@@ -365,7 +374,7 @@ fn parse_wire_messages(
         match string_at(&record, &["type"]).as_str() {
             "context.append_message" => {
                 let message = record.get("message").unwrap_or(&Value::Null);
-                if string_at(message, &["origin", "kind"]) == "injection" {
+                if !kimi_message_is_searchable(message) {
                     continue;
                 }
                 add_message(
@@ -374,6 +383,7 @@ fn parse_wire_messages(
                     message_count,
                     &string_at(message, &["role"]),
                     message.get("content").unwrap_or(&Value::Null),
+                    kimi_message_is_user_turn(message),
                 );
             }
             "context.append_loop_event" => {
@@ -419,6 +429,26 @@ fn parse_wire_messages(
     }
 }
 
+fn kimi_message_is_searchable(message: &Value) -> bool {
+    let kind = string_at(message, &["origin", "kind"]);
+    kind != "injection"
+        && !(kind == "shell_command" && string_at(message, &["origin", "phase"]) == "output")
+}
+
+fn kimi_message_is_user_turn(message: &Value) -> bool {
+    if string_at(message, &["role"]) != "user" {
+        return false;
+    }
+    match string_at(message, &["origin", "kind"]).as_str() {
+        "" | "user" => true,
+        "skill_activation" | "plugin_command" => {
+            string_at(message, &["origin", "trigger"]) == "user-slash"
+        }
+        "shell_command" => string_at(message, &["origin", "phase"]) == "input",
+        _ => false,
+    }
+}
+
 fn kimi_text_part(part: &Value) -> Option<String> {
     (string_at(part, &["type"]) == "text")
         .then(|| string_at(part, &["text"]))
@@ -431,12 +461,13 @@ fn add_message(
     message_count: &mut usize,
     role: &str,
     content: &Value,
+    count_as_user_turn: bool,
 ) {
     if !matches!(role, "user" | "assistant") {
         return;
     }
     let texts = content_texts(content);
-    if role == "user" && !texts.is_empty() {
+    if role == "user" && count_as_user_turn && !texts.is_empty() {
         *message_count += 1;
         if first_user_message.is_empty() {
             *first_user_message = texts[0].clone();
@@ -635,6 +666,8 @@ mod tests {
             session_dir.join("state.json"),
             json!({
                 "workDir": "/repo/legacy",
+                "title": "Generated legacy title",
+                "customTitle": "Pinned legacy title",
                 "lastPrompt": "Resume a legacy Kimi session",
                 "createdAt": "2026-07-15T10:00:00Z"
             })
@@ -646,10 +679,21 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "kimi-legacy");
-        assert_eq!(sessions[0].title, "Resume a legacy Kimi session");
+        assert_eq!(sessions[0].title, "Pinned legacy title");
         assert_eq!(sessions[0].directory, "/repo/legacy");
         assert_eq!(sessions[0].message_count, 1);
         assert!(sessions[0].content.contains("Resume a legacy Kimi session"));
+    }
+
+    #[test]
+    fn modern_title_ignores_stale_legacy_custom_title() {
+        let state = json!({
+            "title": "Modern title",
+            "isCustomTitle": false,
+            "customTitle": "Stale legacy title"
+        });
+
+        assert_eq!(kimi_state_title(&state).as_deref(), Some("Modern title"));
     }
 
     #[test]
@@ -688,6 +732,42 @@ mod tests {
         assert_eq!(sessions[0].title, "Implement the Kimi adapter");
         assert_eq!(sessions[0].message_count, 1);
         assert!(!sessions[0].content.contains("hidden system reminder"));
+    }
+
+    #[test]
+    fn classifies_user_turn_origins_and_omits_shell_output() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        fs::write(
+            session_dir.join("state.json"),
+            json!({
+                "createdAt": 1784110800000i64,
+                "updatedAt": 1784110807000i64,
+                "archived": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Background task completed", "origin": {"kind": "background_task"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Sensitive shell output", "origin": {"kind": "shell_command", "phase": "output"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Hook context", "origin": {"kind": "hook_result"}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "!git status", "origin": {"kind": "shell_command", "phase": "input"}}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "!git status");
+        assert_eq!(sessions[0].message_count, 1);
+        assert!(sessions[0].content.contains("Background task completed"));
+        assert!(sessions[0].content.contains("Hook context"));
+        assert!(sessions[0].content.contains("!git status"));
+        assert!(!sessions[0].content.contains("Sensitive shell output"));
     }
 
     #[test]
