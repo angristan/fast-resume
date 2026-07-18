@@ -124,7 +124,7 @@ Each adapter returns the command needed to continue its session:
 | Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 | Cursor CLI | `agent --resume <id>` | `agent --yolo --resume <id>` |
 | Grok Build | `grok --resume <id>` | `grok --always-approve --resume <id>` |
-| Kimi Code | `kimi --session <id>` | No change |
+| Kimi Code | `kimi --session <id>` | `kimi --yolo --session <id>` |
 | OpenCode | `opencode <directory> --session <id>` | No change |
 | Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |

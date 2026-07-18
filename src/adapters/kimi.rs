@@ -61,8 +61,15 @@ impl KimiAdapter {
                 continue;
             };
             let session_id = string_at(&entry, &["sessionId"]);
+            if session_id.is_empty() {
+                continue;
+            }
+            if entry.get("deleted").and_then(Value::as_bool) == Some(true) {
+                work_dirs.remove(&session_id);
+                continue;
+            }
             let work_dir = string_at(&entry, &["workDir"]);
-            if !session_id.is_empty() && !work_dir.trim().is_empty() {
+            if !work_dir.trim().is_empty() {
                 work_dirs.insert(session_id, work_dir);
             }
         }
@@ -92,7 +99,15 @@ impl KimiAdapter {
                 complete = false;
                 continue;
             }
-            let session_id = kimi_session_id_from_state_file(state_file)?;
+            let Some(session_id) = kimi_session_id_from_state_file(state_file) else {
+                complete = false;
+                continue;
+            };
+            if current_files.get(&session_id).is_some_and(|(existing, _)| {
+                !kimi_state_file_is_legacy(existing) && kimi_state_file_is_legacy(state_file)
+            }) {
+                continue;
+            }
             current_files.insert(
                 session_id,
                 (
@@ -118,12 +133,18 @@ impl KimiAdapter {
             return None;
         }
 
-        let directory = work_dirs
-            .get(&session_id)
-            .filter(|value| !value.trim().is_empty())
-            .cloned()
-            .or_else(|| non_empty_string(&state, "cwd"))
+        let directory = non_empty_string(&state, "cwd")
             .or_else(|| non_empty_string(&state, "workDir"))
+            .or_else(|| {
+                let custom = state.get("custom").unwrap_or(&Value::Null);
+                non_empty_string(custom, "cwd")
+            })
+            .or_else(|| {
+                work_dirs
+                    .get(&session_id)
+                    .filter(|value| !value.trim().is_empty())
+                    .cloned()
+            })
             .unwrap_or_default();
         let mut messages = Vec::new();
         let mut first_user_message = String::new();
@@ -197,18 +218,22 @@ impl Adapter for KimiAdapter {
         "kimi"
     }
 
+    fn supports_yolo(&self) -> bool {
+        true
+    }
+
     fn find_sessions(&self) -> Vec<Session> {
         if !self.sessions_dir.exists() {
             return Vec::new();
         }
         let index_mtime = file_mtime_seconds(&self.session_index_file());
         let work_dirs = self.read_session_index().unwrap_or_default();
-        WalkDir::new(&self.sessions_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|entry| entry.into_path())
-            .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("state.json"))
-            .filter_map(|state_file| self.parse_session(&state_file, &work_dirs, index_mtime))
+        let Some((current_files, _)) = self.scan_session_files(index_mtime) else {
+            return Vec::new();
+        };
+        current_files
+            .into_values()
+            .filter_map(|(state_file, _)| self.parse_session(&state_file, &work_dirs, index_mtime))
             .collect()
     }
 
@@ -254,12 +279,13 @@ impl Adapter for KimiAdapter {
         scan
     }
 
-    fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
-        vec![
-            "kimi".to_string(),
-            "--session".to_string(),
-            session.id.clone(),
-        ]
+    fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
+        let mut command = vec!["kimi".to_string()];
+        if yolo {
+            command.push("--yolo".to_string());
+        }
+        command.extend(["--session".to_string(), session.id.clone()]);
+        command
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -267,9 +293,25 @@ impl Adapter for KimiAdapter {
     }
 }
 
-fn kimi_session_id_from_state_file(state_file: &Path) -> Option<String> {
+fn kimi_state_file_is_legacy(state_file: &Path) -> bool {
     state_file
-        .parent()?
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        == Some("session-meta")
+}
+
+fn kimi_session_dir_from_state_file(state_file: &Path) -> Option<&Path> {
+    let metadata_dir = state_file.parent()?;
+    if kimi_state_file_is_legacy(state_file) {
+        metadata_dir.parent()
+    } else {
+        Some(metadata_dir)
+    }
+}
+
+fn kimi_session_id_from_state_file(state_file: &Path) -> Option<String> {
+    kimi_session_dir_from_state_file(state_file)?
         .file_name()?
         .to_str()
         .filter(|value| !value.is_empty())
@@ -277,8 +319,7 @@ fn kimi_session_id_from_state_file(state_file: &Path) -> Option<String> {
 }
 
 fn kimi_wire_file(state_file: &Path) -> PathBuf {
-    state_file
-        .parent()
+    kimi_session_dir_from_state_file(state_file)
         .unwrap_or_else(|| Path::new(""))
         .join("agents")
         .join("main")
@@ -510,10 +551,78 @@ mod tests {
         assert!(session.content.contains("  Added support"));
         assert!(!session.content.contains("hidden system reminder"));
         assert!(!session.content.contains("secret"));
+        assert!(adapter.supports_yolo());
         assert_eq!(
             adapter.resume_command(session, false),
             vec!["kimi", "--session", session_id]
         );
+        assert_eq!(
+            adapter.resume_command(session, true),
+            vec!["kimi", "--yolo", "--session", session_id]
+        );
+    }
+
+    #[test]
+    fn parses_legacy_nested_state_path() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_id = "kimi-legacy-v2";
+        let session_dir = sessions_dir.join("--repo-kimi--").join(session_id);
+        let wire_dir = session_dir.join("agents/main");
+        fs::create_dir_all(&wire_dir).unwrap();
+        fs::create_dir_all(session_dir.join("session-meta")).unwrap();
+        fs::write(
+            session_dir.join("session-meta/state.json"),
+            json!({
+                "id": session_id,
+                "title": "Legacy nested metadata",
+                "cwd": "/repo/legacy-v2",
+                "createdAt": 1784110800000i64,
+                "updatedAt": 1784110801000i64,
+                "archived": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &wire_dir.join("wire.jsonl"),
+            &[
+                json!({"type": "metadata", "protocol_version": "1.4", "created_at": 1784110800000i64}),
+                json!({"type": "context.append_message", "time": 1784110801000i64, "message": {"role": "user", "content": "Nested state prompt", "origin": {"kind": "user"}}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, session_id);
+        assert_eq!(sessions[0].directory, "/repo/legacy-v2");
+        assert!(sessions[0].content.contains("Nested state prompt"));
+    }
+
+    #[test]
+    fn state_directory_takes_precedence_over_stale_index() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        fs::write(
+            session_dir.join("state.json"),
+            json!({
+                "title": "State directory wins",
+                "cwd": "/repo/from-state",
+                "createdAt": 1784110800000i64,
+                "updatedAt": 1784110807000i64,
+                "archived": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_session_index(&sessions_dir, "kimi-123", &session_dir, "/repo/stale-index");
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].directory, "/repo/from-state");
     }
 
     #[test]
