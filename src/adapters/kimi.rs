@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 use walkdir::WalkDir;
@@ -18,6 +18,13 @@ use super::shared::{
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 type SessionFiles = HashMap<String, (PathBuf, f64)>;
+type SessionIndex = HashMap<String, IndexedSession>;
+
+#[derive(Debug, Clone)]
+struct IndexedSession {
+    session_dir: PathBuf,
+    work_dir: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct KimiAdapter {
@@ -45,13 +52,14 @@ impl KimiAdapter {
             .join("session_index.jsonl")
     }
 
-    fn read_session_index(&self) -> Option<HashMap<String, String>> {
+    fn read_session_index(&self) -> Option<SessionIndex> {
         let index_file = self.session_index_file();
         if !index_file.exists() {
             return Some(HashMap::new());
         }
         let file = fs::File::open(index_file).ok()?;
-        let mut work_dirs = HashMap::new();
+        let sessions_root = normalized_absolute_path(&self.sessions_dir);
+        let mut sessions = HashMap::new();
         for line in BufReader::new(file).lines() {
             let line = line.ok()?;
             if line.trim().is_empty() {
@@ -65,15 +73,31 @@ impl KimiAdapter {
                 continue;
             }
             if entry.get("deleted").and_then(Value::as_bool) == Some(true) {
-                work_dirs.remove(&session_id);
+                sessions.remove(&session_id);
                 continue;
             }
-            let work_dir = string_at(&entry, &["workDir"]);
-            if !work_dir.trim().is_empty() {
-                work_dirs.insert(session_id, work_dir);
-            }
+            let Some(session_dir) = entry.get("sessionDir").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(work_dir) = entry.get("workDir").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(session_dir) = validated_index_session_dir(
+                sessions_root.as_deref(),
+                &session_id,
+                Path::new(session_dir),
+            ) else {
+                continue;
+            };
+            sessions.insert(
+                session_id,
+                IndexedSession {
+                    session_dir,
+                    work_dir: work_dir.to_string(),
+                },
+            );
         }
-        Some(work_dirs)
+        Some(sessions)
     }
 
     fn scan_session_files(&self, index_mtime: f64) -> Option<(SessionFiles, bool)> {
@@ -123,7 +147,7 @@ impl KimiAdapter {
     fn parse_session(
         &self,
         state_file: &Path,
-        work_dirs: &HashMap<String, String>,
+        session_index: &SessionIndex,
         index_mtime: f64,
     ) -> Option<Session> {
         let state: Value = serde_json::from_slice(&fs::read(state_file).ok()?).ok()?;
@@ -139,12 +163,7 @@ impl KimiAdapter {
                 let custom = state.get("custom").unwrap_or(&Value::Null);
                 non_empty_string(custom, "cwd")
             })
-            .or_else(|| {
-                work_dirs
-                    .get(&session_id)
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-            })
+            .or_else(|| indexed_work_dir(state_file, &session_id, session_index))
             .unwrap_or_default();
         let mut messages = Vec::new();
         let mut first_user_message = String::new();
@@ -198,7 +217,7 @@ impl KimiAdapter {
     fn parse_session_incremental(
         &self,
         state_file: &Path,
-        work_dirs: &HashMap<String, String>,
+        session_index: &SessionIndex,
         index_mtime: f64,
     ) -> IncrementalParse {
         if json_file_has_parse_errors(state_file) {
@@ -208,11 +227,15 @@ impl KimiAdapter {
         if wire_file.exists() {
             incremental_parse_jsonl_with_partial_check(
                 &wire_file,
-                || self.parse_session(state_file, work_dirs, index_mtime),
+                || self.parse_session(state_file, session_index, index_mtime),
                 |session| session.message_count > 0,
             )
         } else {
-            incremental_parse_from_option(self.parse_session(state_file, work_dirs, index_mtime))
+            incremental_parse_from_option(self.parse_session(
+                state_file,
+                session_index,
+                index_mtime,
+            ))
         }
     }
 }
@@ -297,6 +320,61 @@ impl Adapter for KimiAdapter {
     }
 }
 
+fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    Some(normalized)
+}
+
+fn validated_index_session_dir(
+    sessions_root: Option<&Path>,
+    session_id: &str,
+    session_dir: &Path,
+) -> Option<PathBuf> {
+    if !session_dir.is_absolute() {
+        return None;
+    }
+    let sessions_root = sessions_root?;
+    let session_dir = normalized_absolute_path(session_dir)?;
+    if !session_dir.starts_with(sessions_root)
+        || session_dir.file_name().and_then(|name| name.to_str()) != Some(session_id)
+    {
+        return None;
+    }
+    Some(session_dir)
+}
+
+fn indexed_work_dir(
+    state_file: &Path,
+    session_id: &str,
+    session_index: &SessionIndex,
+) -> Option<String> {
+    let indexed = session_index.get(session_id)?;
+    if indexed.work_dir.trim().is_empty() {
+        return None;
+    }
+    let session_dir = kimi_session_dir_from_state_file(state_file)?;
+    let session_dir = normalized_absolute_path(session_dir)?;
+    (session_dir == indexed.session_dir).then(|| indexed.work_dir.clone())
+}
+
 fn kimi_state_file_is_legacy(state_file: &Path) -> bool {
     state_file
         .parent()
@@ -365,6 +443,7 @@ fn parse_wire_messages(
         return;
     };
     let mut open_assistant: Option<Vec<String>> = None;
+    let mut deferred_messages = Vec::new();
 
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -379,21 +458,35 @@ fn parse_wire_messages(
                 if !kimi_message_is_searchable(message) {
                     continue;
                 }
-                add_message(
-                    messages,
-                    first_user_message,
-                    message_count,
-                    &string_at(message, &["role"]),
-                    message.get("content").unwrap_or(&Value::Null),
-                    kimi_message_is_user_turn(message),
-                );
+                let role = string_at(message, &["role"]);
+                let content = message.get("content").unwrap_or(&Value::Null);
+                let count_as_user_turn = kimi_message_is_user_turn(message);
+                if open_assistant.is_some() {
+                    add_message(
+                        &mut deferred_messages,
+                        first_user_message,
+                        message_count,
+                        &role,
+                        content,
+                        count_as_user_turn,
+                    );
+                } else {
+                    add_message(
+                        messages,
+                        first_user_message,
+                        message_count,
+                        &role,
+                        content,
+                        count_as_user_turn,
+                    );
+                }
             }
             "context.append_loop_event" => {
                 let event = record.get("event").unwrap_or(&Value::Null);
                 match string_at(event, &["type"]).as_str() {
                     "step.begin" => {
                         // Kimi settles a failed partial attempt before opening its retry.
-                        flush_open_assistant(messages, &mut open_assistant);
+                        flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages);
                         open_assistant = Some(Vec::new());
                     }
                     "content.part" => {
@@ -404,7 +497,9 @@ fn parse_wire_messages(
                             parts.push(text);
                         }
                     }
-                    "step.end" => flush_open_assistant(messages, &mut open_assistant),
+                    "step.end" => {
+                        flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages)
+                    }
                     _ => {}
                 }
             }
@@ -413,13 +508,18 @@ fn parse_wire_messages(
     }
 
     // A session can be indexed while the last streamed step is still open.
-    flush_open_assistant(messages, &mut open_assistant);
+    flush_open_assistant(messages, &mut open_assistant, &mut deferred_messages);
 }
 
-fn flush_open_assistant(messages: &mut Vec<String>, open_assistant: &mut Option<Vec<String>>) {
+fn flush_open_assistant(
+    messages: &mut Vec<String>,
+    open_assistant: &mut Option<Vec<String>>,
+    deferred_messages: &mut Vec<String>,
+) {
     if let Some(parts) = open_assistant.take() {
         add_assistant_parts(messages, parts);
     }
+    messages.append(deferred_messages);
 }
 
 fn kimi_message_is_searchable(message: &Value) -> bool {
@@ -615,6 +715,34 @@ mod tests {
     }
 
     #[test]
+    fn preserves_assistant_output_before_interleaved_notifications() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_dir = write_kimi_session(&sessions_dir, "kimi-123");
+        write_jsonl(
+            &session_dir.join("agents/main/wire.jsonl"),
+            &[
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Run the background task", "origin": {"kind": "user"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "step.begin", "uuid": "step-1"}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "content.part", "stepUuid": "step-1", "part": {"type": "text", "text": "Assistant before "}}}),
+                json!({"type": "context.append_message", "message": {"role": "user", "content": "Task notification", "origin": {"kind": "task"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "content.part", "stepUuid": "step-1", "part": {"type": "text", "text": "and after notification"}}}),
+                json!({"type": "context.append_loop_event", "event": {"type": "step.end", "uuid": "step-1"}}),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+        let content = &sessions[0].content;
+
+        let assistant = content
+            .find("Assistant before and after notification")
+            .unwrap();
+        let notification = content.find("Task notification").unwrap();
+        assert!(assistant < notification, "assistant output must stay first");
+        assert_eq!(sessions[0].message_count, 1);
+    }
+
+    #[test]
     fn parses_legacy_nested_state_path() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");
@@ -730,6 +858,36 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].directory, "/repo/kimi");
+    }
+
+    #[test]
+    fn invalid_index_entry_does_not_override_valid_workdir() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let session_id = "kimi-123";
+        let session_dir = write_kimi_session(&sessions_dir, session_id);
+        let outside_dir = temp.path().join("outside").join(session_id);
+        fs::create_dir_all(&outside_dir).unwrap();
+        write_jsonl(
+            &temp.path().join("session_index.jsonl"),
+            &[
+                json!({
+                    "sessionId": session_id,
+                    "sessionDir": session_dir.to_string_lossy(),
+                    "workDir": "/repo/valid"
+                }),
+                json!({
+                    "sessionId": session_id,
+                    "sessionDir": outside_dir.to_string_lossy(),
+                    "workDir": "/repo/invalid"
+                }),
+            ],
+        );
+
+        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].directory, "/repo/valid");
     }
 
     #[test]
