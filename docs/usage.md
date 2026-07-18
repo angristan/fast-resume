@@ -141,16 +141,19 @@ Yolo mode resumes an agent with its auto-approve or skip-permissions option when
 
 | Agent | Added option | Detected from session |
 | --- | --- | --- |
+| Antigravity CLI | `--dangerously-skip-permissions` | No |
 | Claude | `--dangerously-skip-permissions` | No |
 | Codex | `--dangerously-bypass-approvals-and-sandbox` | Yes |
 | Copilot CLI | `--yolo` | No |
-| Vibe | `--agent auto-approve` | Yes |
 | Crush | `--yolo` | No |
+| Cursor CLI | `--yolo` | No |
+| Grok Build | `--always-approve` | No |
+| Vibe | `--agent auto-approve` | Yes |
 | OpenCode | Configuration-based | — |
 | Pi | Not applicable | — |
 | Copilot in VS Code | Not applicable | — |
 
-Codex and Vibe record their permission mode in session data, so fast-resume can preserve it automatically. Claude, Copilot CLI, and Crush do not; the TUI asks before resuming them. Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one.
+Codex and Vibe record their permission mode in session data, so fast-resume can preserve it automatically. Antigravity CLI, Claude, Copilot CLI, Crush, Cursor CLI, and Grok Build do not; the TUI asks before resuming them. Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one.
 
 ## Statistics
 

@@ -562,7 +562,7 @@ mod tests {
     fn reverse_filter_cycle_removes_agent_keyword_for_all() {
         let mut state = test_state(Vec::new());
 
-        type_query(&mut state, "api agent:claude");
+        type_query(&mut state, "api agent:antigravity");
         handle_key(&mut state, key(KeyCode::BackTab, KeyModifiers::SHIFT)).unwrap();
 
         assert_eq!(state.query, "api");

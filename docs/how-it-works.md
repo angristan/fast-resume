@@ -18,16 +18,19 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 
 | Agent | Format | Parsing strategy |
 | --- | --- | --- |
+| Antigravity CLI | `~/.gemini/antigravity-cli/conversations/<id>.db` or `brain/<id>/.system_generated/logs/*.jsonl` | Reads native protobuf-backed SQLite conversations with WAL support, falls back to generated transcripts, and excludes tool results |
 | Claude Code | `~/.claude/projects/<project>/*.jsonl` | Reads user and assistant entries and skips agent subprocess files |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records |
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
+| Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
+| Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
 
-Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
+Grok discovery respects `GROK_HOME`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 
 The normalized model contains:
 
@@ -64,7 +67,7 @@ On an incremental refresh, fast-resume:
 5. Infers deletions only when the relevant scan is complete.
 6. Commits changes in batches and reports progress to the TUI.
 
-File-backed adapters normally use modification times. Database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
+File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
 
 JSONL sources distinguish three states:
 
@@ -112,14 +115,17 @@ Each adapter returns the command needed to continue its session:
 
 | Agent | Resume command | Yolo variant |
 | --- | --- | --- |
+| Antigravity CLI | `agy --conversation <id>` | `agy --dangerously-skip-permissions --conversation <id>` |
 | Claude | `claude --resume <id>` | `claude --dangerously-skip-permissions --resume <id>` |
 | Codex | `codex resume <id>` | `codex --dangerously-bypass-approvals-and-sandbox resume <id>` |
 | Copilot CLI | `copilot --resume <id>` | `copilot --yolo --resume <id>` |
 | Copilot in VS Code | `code <directory>` | No change |
+| Crush | `crush --session <id>` | `crush --yolo --session <id>` |
+| Cursor CLI | `agent --resume <id>` | `agent --yolo --resume <id>` |
+| Grok Build | `grok --resume <id>` | `grok --always-approve --resume <id>` |
 | OpenCode | `opencode <directory> --session <id>` | No change |
 | Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
-| Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 
 On Unix, `exec()` replaces fast-resume with the agent process. On Windows, fast-resume waits for the child and exits with the same status. In both cases the agent receives the session's working directory.
 
