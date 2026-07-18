@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/angristan/fast-resume/compare/v2.3.0...v2.4.0) (2026-07-18)
+
+
+### Features
+
+* add Antigravity, Cursor, and Grok support ([#76](https://github.com/angristan/fast-resume/issues/76)) ([8c70a89](https://github.com/angristan/fast-resume/commit/8c70a899dd53a91e67c6a982822b3ae9686e8173))
+
 # [2.3.0](https://github.com/angristan/fast-resume/compare/v2.2.0...v2.3.0) (2026-07-17)
 
 
