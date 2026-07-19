@@ -121,6 +121,7 @@ Options:
 | --- | --- |
 | `Ctrl+P` | Toggle the preview pane |
 | `Alt`+`+` / `Alt`+`-` | Scroll the preview pane |
+| `Ctrl+←` / `Ctrl+→` | Grow or shrink the preview pane (side-by-side layout) |
 | Mouse wheel | Scroll the list or preview under the pointer |
 | `Ctrl+Y` | Copy the complete resume command |
 | `Esc` / `Ctrl+C` | Quit |

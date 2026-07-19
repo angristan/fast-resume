@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::adapters::adapter_for;
 
 use super::TuiExit;
-use super::state::{AppState, PENDING_SEARCH_STATUS, PendingAction, YoloModal};
+use super::state::{AppState, PENDING_SEARCH_STATUS, PREVIEW_RATIO_STEP, PendingAction, YoloModal};
 use super::text::{shell_join, shell_quote};
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExit>> {
@@ -39,6 +39,8 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
         (KeyCode::BackTab, _) => state.cycle_agent(true),
         (KeyCode::Backspace, _) => state.backspace(),
         (KeyCode::Delete, _) => state.delete(),
+        (KeyCode::Left, KeyModifiers::CONTROL) => state.resize_preview(PREVIEW_RATIO_STEP),
+        (KeyCode::Right, KeyModifiers::CONTROL) => state.resize_preview(-PREVIEW_RATIO_STEP),
         (KeyCode::Left, _) => state.cursor = state.cursor.saturating_sub(1),
         (KeyCode::Right, _) => state.cursor = (state.cursor + 1).min(state.query.chars().count()),
         (KeyCode::Home, _) => state.cursor = 0,
