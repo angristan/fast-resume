@@ -131,7 +131,9 @@ impl ClaudeAdapter {
         }
 
         let index_title = claude_index_title(path);
-        let named = !custom_title.is_empty() || index_title.is_some() || !ai_title.is_empty();
+        // "named" means a user-curated title (a /rename, or the session-list
+        // summary) — not an AI-generated title, which nearly every session has.
+        let named = !custom_title.is_empty() || index_title.is_some();
         let title_source = if !custom_title.is_empty() {
             custom_title
         } else {
@@ -443,7 +445,8 @@ mod tests {
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Fix login token validation");
-        assert!(sessions[0].named);
+        // An AI-generated title is shown, but it is not a user-curated name.
+        assert!(!sessions[0].named);
         assert!(sessions[0].content.contains("Help me fix this bug"));
     }
 
