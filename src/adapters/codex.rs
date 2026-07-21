@@ -54,7 +54,7 @@ impl CodexAdapter {
         let mut yolo = false;
 
         for line in BufReader::new(file).lines().map_while(Result::ok) {
-            if line.trim().is_empty() {
+            if !codex_line_may_affect_index(&line) {
                 continue;
             }
             let Ok(data) = serde_json::from_str::<Value>(&line) else {
@@ -227,6 +227,20 @@ impl CodexAdapter {
     }
 }
 
+fn codex_line_may_affect_index(line: &str) -> bool {
+    if line.trim().is_empty() {
+        return false;
+    }
+    if line.contains("session_meta") || line.contains("turn_context") {
+        return true;
+    }
+    if line.contains("response_item") {
+        return line.contains("role") && (line.contains("user") || line.contains("assistant"));
+    }
+    line.contains("event_msg")
+        && (line.contains("user_message") || line.contains("agent_reasoning"))
+}
+
 impl Adapter for CodexAdapter {
     fn name(&self) -> &'static str {
         "codex"
@@ -364,6 +378,30 @@ mod tests {
                 .join("\n"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn prefilter_keeps_only_rows_that_can_affect_index() {
+        assert!(codex_line_may_affect_index(
+            r#"{"type":"session_meta","payload":{"id":"abc","cwd":"/work"}}"#
+        ));
+        assert!(codex_line_may_affect_index(
+            r#"{"type":"turn_context","payload":{"approval_policy":"never"}}"#
+        ));
+        assert!(codex_line_may_affect_index(
+            r#"{"type":"response_item","payload":{"role":"assistant","content":[{"text":"answer"}]}}"#
+        ));
+        assert!(codex_line_may_affect_index(
+            r#"{"type":"event_msg","payload":{"type":"user_message","message":"prompt"}}"#
+        ));
+
+        assert!(!codex_line_may_affect_index(""));
+        assert!(!codex_line_may_affect_index(
+            r#"{"type":"event_msg","payload":{"type":"token_count"}}"#
+        ));
+        assert!(!codex_line_may_affect_index(
+            r#"{"type":"response_item","payload":{"type":"function_call_output","output":"large tool output"}}"#
+        ));
     }
 
     #[test]
