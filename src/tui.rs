@@ -1044,6 +1044,24 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_n_toggles_the_named_only_filter() {
+        let mut a = session("a");
+        a.named = true;
+        let b = session("b");
+        let mut state = test_state(vec![a, b]);
+        assert_eq!(state.visible.len(), 2);
+
+        handle_key(&mut state, key(KeyCode::Char('n'), KeyModifiers::CONTROL)).unwrap();
+        assert!(state.named_only);
+        assert_eq!(state.visible.len(), 1);
+        assert_eq!(state.visible[0].id, "a");
+
+        handle_key(&mut state, key(KeyCode::Char('n'), KeyModifiers::CONTROL)).unwrap();
+        assert!(!state.named_only);
+        assert_eq!(state.visible.len(), 2);
+    }
+
+    #[test]
     fn yolo_modal_confirms_original_session_after_selection_changes() {
         let mut state = test_state(vec![session("a"), session("b")]);
         let original_id = state.selected_session().unwrap().id.clone();

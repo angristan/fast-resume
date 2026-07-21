@@ -113,6 +113,7 @@ Options:
 | `Ctrl+J` / `Ctrl+K` | Move selection |
 | `Page Up` / `Page Down` | Move by 10 rows |
 | `Tab` / `Shift+Tab` | Accept a suggestion or cycle the agent filter |
+| `Ctrl+N` | Toggle showing only named sessions (renamed or AI-titled) |
 | `Enter` | Resume the selected session |
 
 ### Preview and actions

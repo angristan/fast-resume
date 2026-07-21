@@ -8,7 +8,7 @@ use serde_json::Value;
 use once_cell::sync::Lazy;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const INDEX_SCHEMA_VERSION: u32 = 23;
+pub const INDEX_SCHEMA_VERSION: u32 = 24;
 
 pub const AGENT_ORDER: [&str; 12] = [
     "antigravity",

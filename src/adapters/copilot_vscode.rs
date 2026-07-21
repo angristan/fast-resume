@@ -294,6 +294,7 @@ impl CopilotVsCodeAdapter {
         if messages.is_empty() {
             return None;
         }
+        let named = !title.is_empty();
         if title.is_empty() {
             title = truncate_title(messages[0].trim_start_matches("» ").trim(), 100, true);
         }
@@ -315,6 +316,7 @@ impl CopilotVsCodeAdapter {
             turns,
         );
         session.mtime = file_mtime_seconds(&file.path);
+        session.named = named;
         Some(session)
     }
 }
@@ -380,6 +382,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "vscode-1");
         assert_eq!(sessions[0].title, "VS Code thread");
+        assert!(sessions[0].named);
         assert_eq!(sessions[0].directory, "/work/vscode");
         assert_eq!(sessions[0].message_count, 2);
         assert_eq!(
