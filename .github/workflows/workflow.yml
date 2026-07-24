@@ -361,7 +361,7 @@ jobs:
           pattern: python-wheel-*
           path: dist
           merge-multiple: true
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Publish wheels
         run: uv publish dist/*.whl
 
