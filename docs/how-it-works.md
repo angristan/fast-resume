@@ -24,7 +24,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
-| Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
+| Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores, mapping hashed workspace directories through Cursor project logs |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
@@ -69,6 +69,8 @@ On an incremental refresh, fast-resume:
 6. Commits changes in batches and reports progress to the TUI.
 
 File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
+
+Cursor discovery maps the MD5 workspace hash used under `~/.cursor/chats/` back to a workspace path using `~/.cursor/projects/*/worker.log` when Cursor did not store the workspace directly in the chat database.
 
 JSONL sources distinguish three states:
 
