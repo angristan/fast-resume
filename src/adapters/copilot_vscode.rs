@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,8 +9,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    deleted_ids_for_agent, failed_incremental_scan, json_file_has_parse_errors,
-    session_needs_update, string_at, timestamp_from_ms,
+    deleted_ids_for_agent, failed_incremental_scan, session_needs_update, string_at,
+    timestamp_from_ms,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -27,9 +27,12 @@ struct VscodeSessionFile {
 }
 
 impl VscodeSessionFile {
-    fn session_id(&self) -> Option<String> {
-        let data: Value = serde_json::from_slice(&fs::read(&self.path).ok()?).ok()?;
-        let session_id = string_at(&data, &["sessionId"]);
+    fn read_data(&self) -> Option<Value> {
+        serde_json::from_slice(&fs::read(&self.path).ok()?).ok()
+    }
+
+    fn session_id(&self, data: &Value) -> Option<String> {
+        let session_id = string_at(data, &["sessionId"]);
         if !session_id.is_empty() {
             return Some(session_id);
         }
@@ -121,33 +124,35 @@ impl CopilotVsCodeAdapter {
     where
         F: FnMut(Session),
     {
-        let mut current_files = HashMap::new();
         let Some((files, mut complete)) = self.session_files() else {
             return failed_incremental_scan(self.name());
         };
-        for file in files {
-            if json_file_has_parse_errors(&file.path) {
-                complete = false;
-                continue;
-            }
-            let Some(session_id) = file.session_id() else {
-                complete = false;
-                continue;
-            };
-            let mtime = file_mtime_seconds(&file.path);
-            current_files.insert(session_id, (file, mtime));
-        }
 
         let mut current_ids = HashSet::new();
         let mut new_or_modified = Vec::new();
-        for (session_id, (file, mtime)) in current_files {
+        for file in files {
+            let mtime = file_mtime_seconds(&file.path);
+            if let Some(filename_id) = file.fallback_session_id()
+                && !session_needs_update(known, self.name(), &filename_id, mtime)
+            {
+                current_ids.insert(filename_id);
+                continue;
+            }
+
+            let Some(data) = file.read_data() else {
+                complete = false;
+                continue;
+            };
+            let Some(session_id) = file.session_id(&data) else {
+                complete = false;
+                continue;
+            };
             current_ids.insert(session_id.clone());
             if !session_needs_update(known, self.name(), &session_id, mtime) {
                 continue;
             }
-            if json_file_has_parse_errors(&file.path) {
-                continue;
-            } else if let Some(mut session) = self.parse_session(&file) {
+
+            if let Some(mut session) = self.parse_session_data(&file, &data) {
                 session.mtime = mtime;
                 on_session(session.clone());
                 new_or_modified.push(session);
@@ -235,16 +240,13 @@ impl CopilotVsCodeAdapter {
     }
 
     fn parse_session(&self, file: &VscodeSessionFile) -> Option<Session> {
-        let data: Value = serde_json::from_slice(&fs::read(&file.path).ok()?).ok()?;
-        let session_id = {
-            let id = string_at(&data, &["sessionId"]);
-            if id.is_empty() {
-                file.fallback_session_id()?
-            } else {
-                id
-            }
-        };
-        let mut title = string_at(&data, &["customTitle"]);
+        let data = file.read_data()?;
+        self.parse_session_data(file, &data)
+    }
+
+    fn parse_session_data(&self, file: &VscodeSessionFile, data: &Value) -> Option<Session> {
+        let session_id = file.session_id(data)?;
+        let mut title = string_at(data, &["customTitle"]);
         let requests = data.get("requests")?.as_array()?;
         if requests.is_empty() {
             return None;
@@ -478,6 +480,34 @@ mod tests {
         let scan = adapter.find_sessions_incremental(&known);
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn unchanged_filename_id_skips_json_parsing() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let path = chat_sessions_dir.join("stable-session.json");
+        fs::write(&path, "not parsed on the metadata fast path").unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("copilot-vscode".to_string(), "stable-session".to_string()),
+            file_mtime_seconds(&path),
+        );
+        known.insert(
+            ("copilot-vscode".to_string(), "deleted-session".to_string()),
+            1.0,
+        );
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["deleted-session"]);
     }
 
     #[test]
