@@ -253,10 +253,38 @@ mod tests {
             vec!["claude-recent", "codex-recent", "opencode-recent"]
         );
         assert_eq!(result_ids(&engine, "date:>3d"), vec!["vibe-old"]);
-        assert_eq!(result_ids(&engine, "date:!today"), vec!["vibe-old"]);
         assert_eq!(
             result_ids(&engine, "agent:claude,codex dir:web date:<5h"),
             vec!["claude-recent", "codex-recent"]
         );
+    }
+
+    #[test]
+    fn excludes_sessions_from_before_today() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .rebuild(vec![
+                session_at(
+                    "today",
+                    "codex",
+                    "Today",
+                    "/work/today",
+                    "current",
+                    ChronoDuration::zero(),
+                ),
+                session_at(
+                    "before-today",
+                    "vibe",
+                    "Before today",
+                    "/work/archive",
+                    "archive",
+                    ChronoDuration::days(2),
+                ),
+            ])
+            .unwrap();
+        let engine = SearchEngine::from_index(index);
+
+        assert_eq!(result_ids(&engine, "date:!today"), vec!["before-today"]);
     }
 }
