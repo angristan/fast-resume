@@ -1,3 +1,10 @@
+## [2.7.1](https://github.com/angristan/fast-resume/compare/v2.7.0...v2.7.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **packaging:** publish local npm tarballs ([254ad2c](https://github.com/angristan/fast-resume/commit/254ad2c453ce9fd5e16ced1c92aeb4c16794c33f))
+
 # [2.7.0](https://github.com/angristan/fast-resume/compare/v2.6.1...v2.7.0) (2026-08-05)
 
 
