@@ -1,0 +1,22 @@
+{
+  "name": "fast-resume",
+  "version": "2.6.1-darwin-arm64",
+  "description": "fast-resume native binary for macOS ARM64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/angristan/fast-resume.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

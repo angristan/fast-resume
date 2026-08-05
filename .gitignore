@@ -11,6 +11,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!npm/fast-resume/lib/
+!npm/fast-resume/lib/**
 lib64/
 parts/
 sdist/

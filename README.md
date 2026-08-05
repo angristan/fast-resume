@@ -32,13 +32,15 @@ brew tap angristan/tap
 brew install fast-resume
 ```
 
-You can also install a binary wheel with `uv`:
+You can also install with npm or a binary wheel with `uv`:
 
 ```bash
+npm install --global fast-resume
+# or
 uv tool install fast-resume
 ```
 
-See the [installation guide](docs/installation.md) for `uvx`, Cargo, supported platforms, and terminal recommendations.
+See the [installation guide](docs/installation.md) for npm, `uvx`, Cargo, supported platforms, and terminal recommendations.
 
 ## Quick start
 

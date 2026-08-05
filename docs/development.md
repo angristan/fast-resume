@@ -72,9 +72,24 @@ fast-resume/
 
 ## Packaging
 
-`maturin` builds PyPI wheels containing the Rust binary and compatibility commands. Release automation also builds standalone macOS and Linux archives and dispatches the Homebrew formula update.
+`maturin` builds PyPI wheels containing the Rust binary and compatibility commands. The same wheel builds supply npm's native variants. All variants use the `fast-resume` package name with platform prerelease versions such as `2.7.0-linux-x64`. The launcher selects one through an npm alias in `optionalDependencies`; it does not download code from an install script.
 
-Pull-request CI builds and installs wheels for macOS ARM64/Intel, Linux ARM64/x86_64, and Windows x86_64. Release and publishing jobs run only after a qualifying push to `master`.
+Release automation also builds standalone macOS and Linux archives and dispatches the Homebrew formula update. Pull-request CI builds and installs wheels for macOS ARM64/Intel, Linux ARM64/x86_64, and Windows x86_64. Release and publishing jobs run only after a qualifying push to `master`.
+
+### npm publishing setup
+
+npm requires a package to exist before it can have a trusted publisher. Claim the package once from an interactive npm session without making the bootstrap version `latest`:
+
+```bash
+npm login
+npm publish ./npm/fast-resume --access public --tag bootstrap
+npm trust github fast-resume \
+  --repo angristan/fast-resume \
+  --file workflow.yml \
+  --allow-publish
+```
+
+The account must use 2FA. The trusted publisher is organization or user `angristan`, repository `fast-resume`, and workflow filename `workflow.yml`. The release workflow then publishes every native variant and the launcher through GitHub OIDC with provenance. It does not use an npm token. After a successful OIDC release, disallow token publishing in the npm package settings.
 
 ## Documentation
 

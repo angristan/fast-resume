@@ -59,6 +59,24 @@ jobs:
       - name: Build
         run: cargo build --locked
 
+  npm-package:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test launcher
+        run: npm test --prefix npm/fast-resume
+      - name: Check package metadata synchronization
+        run: |
+          node npm/scripts/set-version.mjs "$(node -p "require('./npm/fast-resume/package.json').version")"
+          git diff --exit-code
+      - name: Inspect package contents
+        run: npm pack ./npm/fast-resume --dry-run
+
   python-wheel:
     name: Python wheel (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.runner }}
@@ -143,7 +161,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [commitlint, rust, python-wheel]
+    needs: [commitlint, rust, npm-package, python-wheel]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     # Prevent concurrent releases from racing (would cause "tag already exists" errors)
     concurrency:
@@ -265,24 +283,29 @@ jobs:
             runner: macos-26
             target: aarch64-apple-darwin
             artifact: python-wheel-macos-arm64
+            npm_package: fast-resume-darwin-arm64
           - name: macOS (Intel)
             runner: macos-26-intel
             target: x86_64-apple-darwin
             artifact: python-wheel-macos-x86_64
+            npm_package: fast-resume-darwin-x64
           - name: Linux (x86_64)
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             manylinux: '2014'
             artifact: python-wheel-linux-x86_64
+            npm_package: fast-resume-linux-x64
           - name: Linux (ARM64)
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: '2014'
             artifact: python-wheel-linux-arm64
+            npm_package: fast-resume-linux-arm64
           - name: Windows (x86_64)
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: python-wheel-windows-x86_64
+            npm_package: fast-resume-win32-x64
     permissions:
       contents: read
     steps:
@@ -347,6 +370,18 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+      - name: Extract npm binary
+        run: >-
+          python npm/scripts/extract_wheel_binary.py
+          --wheel-dir dist
+          --output npm-binary/${{ matrix.platform.npm_package }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-binary-${{ matrix.platform.npm_package }}
+          path: npm-binary/${{ matrix.platform.npm_package }}/
+          if-no-files-found: error
+
   publish-pypi:
     name: Publish PyPI wheels
     needs: [release, build-python-wheels]
@@ -364,6 +399,86 @@ jobs:
       - uses: astral-sh/setup-uv@v8.3.2
       - name: Publish wheels
         run: uv publish dist/*.whl
+
+  publish-npm:
+    name: Publish npm package
+    needs: [release, build-python-wheels]
+    if: needs.release.outputs.new_release_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.new_release_version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: npm-binary-*
+          path: npm-binaries
+      - name: Pack npm packages
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: |
+          set -eu
+          mkdir -p npm-dist npm-stage
+          for package_dir in npm/platforms/*; do
+            package=$(basename "$package_dir")
+            cp -R "$package_dir" "npm-stage/$package"
+            cp -R "npm-binaries/npm-binary-$package/bin" "npm-stage/$package/bin"
+            cp LICENSE "npm-stage/$package/LICENSE"
+            if [ "$package" != "fast-resume-win32-x64" ]; then
+              chmod +x "npm-stage/$package/bin/fr"
+            fi
+            npm pack "./npm-stage/$package" --pack-destination npm-dist
+          done
+          cp LICENSE npm/fast-resume/LICENSE
+          npm pack ./npm/fast-resume --pack-destination npm-dist
+          rm npm/fast-resume/LICENSE
+          test -f "npm-dist/fast-resume-$VERSION.tgz"
+      - name: Verify packaged launcher
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: |
+          mkdir .npm-test
+          npm install --prefix .npm-test --omit=optional \
+            "./npm-dist/fast-resume-$VERSION.tgz"
+          mkdir .npm-test/node_modules/fast-resume-linux-x64
+          tar -xzf "./npm-dist/fast-resume-$VERSION-linux-x64.tgz" \
+            -C .npm-test/node_modules/fast-resume-linux-x64 \
+            --strip-components=1
+          .npm-test/node_modules/.bin/fr --version
+          .npm-test/node_modules/.bin/fast-resume --help
+      - name: Publish native variants, then launcher
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: |
+          set -eu
+          publish_if_missing() {
+            package_version=$1
+            tarball=$2
+            tag=$3
+            if npm view "fast-resume@$package_version" version >/dev/null 2>&1; then
+              echo "fast-resume@$package_version is already published"
+            else
+              npm publish "$tarball" --access public --provenance --tag "$tag"
+            fi
+          }
+
+          for package_dir in npm/platforms/*; do
+            package_alias=$(basename "$package_dir")
+            variant=${package_alias#fast-resume-}
+            publish_if_missing \
+              "$VERSION-$variant" \
+              "npm-dist/fast-resume-$VERSION-$variant.tgz" \
+              native
+          done
+          publish_if_missing "$VERSION" "npm-dist/fast-resume-$VERSION.tgz" latest
 
   update-homebrew:
     name: Update Homebrew formula

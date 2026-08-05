@@ -22,6 +22,23 @@ brew update
 brew upgrade fast-resume
 ```
 
+## npm
+
+Install globally with npm:
+
+```bash
+npm install --global fast-resume
+fr
+```
+
+Or run without a permanent installation:
+
+```bash
+npx fast-resume
+```
+
+npm provides native binaries for macOS ARM64 and Intel, Linux glibc ARM64 and x86_64, and Windows x86_64.
+
 ## PyPI with uv
 
 Run without installing:

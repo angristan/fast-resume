@@ -1,0 +1,25 @@
+{
+  "name": "fast-resume",
+  "version": "2.6.1-linux-x64",
+  "description": "fast-resume native binary for Linux x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/angristan/fast-resume.git"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
