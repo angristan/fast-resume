@@ -214,12 +214,7 @@ fn validate_pagination_args(args: &Args) -> Result<()> {
 
 fn refreshed_index() -> Result<SessionIndex> {
     let index = SessionIndex::open_default()?;
-    if index.total_len()? == 0 {
-        let sessions = SessionIndex::scan_all_sessions();
-        index.rebuild(sessions)?;
-    } else {
-        index.refresh_incremental()?;
-    }
+    index.refresh_incremental()?;
     Ok(index)
 }
 

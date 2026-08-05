@@ -51,7 +51,7 @@ fn write_codex_session(home: &Path, id: &str, directory: &str, prompt: &str) -> 
 }
 
 #[test]
-fn parallel_list_calls_wait_for_the_index_writer() {
+fn parallel_list_calls_serialize_refreshes() {
     let temp = TempDir::new().unwrap();
     write_codex_session(
         temp.path(),
@@ -107,7 +107,7 @@ fn parallel_list_calls_wait_for_the_index_writer() {
 }
 
 #[test]
-fn list_uses_committed_snapshot_while_refresh_is_busy() {
+fn list_waits_for_the_refresh_lock_and_returns_fresh_data() {
     let temp = TempDir::new().unwrap();
     write_codex_session(
         temp.path(),
@@ -135,16 +135,21 @@ fn list_uses_committed_snapshot_while_refresh_is_busy() {
         .unwrap();
     lock_file.lock_exclusive().unwrap();
 
-    let started = Instant::now();
-    let (busy_stdout, busy_stderr) = assert_success(run_fr(temp.path(), &["--list"]));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert!(busy_stderr.is_empty());
-    assert!(busy_stdout.contains("committed123"));
-    assert!(!busy_stdout.contains("pending123"));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fr"))
+        .arg("--list")
+        .env_clear()
+        .env("HOME", temp.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_millis(100));
+    assert!(child.try_wait().unwrap().is_none());
 
     FileExt::unlock(&lock_file).unwrap();
-    let (refreshed_stdout, refreshed_stderr) = assert_success(run_fr(temp.path(), &["--list"]));
-    assert!(refreshed_stderr.is_empty());
-    assert!(refreshed_stdout.contains("committed123"));
-    assert!(refreshed_stdout.contains("pending123"));
+    let output = child.wait_with_output().unwrap();
+    let (stdout, stderr) = assert_success(output);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("committed123"));
+    assert!(stdout.contains("pending123"));
 }
