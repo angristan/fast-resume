@@ -466,7 +466,7 @@ jobs:
             if npm view "fast-resume@$package_version" version >/dev/null 2>&1; then
               echo "fast-resume@$package_version is already published"
             else
-              npm publish "$tarball" --access public --provenance --tag "$tag"
+              npm publish "./$tarball" --access public --provenance --tag "$tag"
             fi
           }
 
