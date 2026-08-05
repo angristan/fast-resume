@@ -1,3 +1,16 @@
+# [2.6.0](https://github.com/angristan/fast-resume/compare/v2.5.0...v2.6.0) (2026-08-05)
+
+
+### Bug Fixes
+
+* **index:** serialize concurrent refresh writes ([4a43ada](https://github.com/angristan/fast-resume/commit/4a43ada5862a94b70540d6409ec81845b0b51957))
+* **index:** serialize every incremental refresh ([870f581](https://github.com/angristan/fast-resume/commit/870f5817a437cefcb5e66413cf1d5aa175fb8699))
+
+
+### Features
+
+* **cli:** add paginated JSON output for agents ([f0d1937](https://github.com/angristan/fast-resume/commit/f0d1937c30a8c5a5a3c5d0d816fef8ac1ae9738c))
+
 # [2.5.0](https://github.com/angristan/fast-resume/compare/v2.4.0...v2.5.0) (2026-07-18)
 
 
