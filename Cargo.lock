@@ -777,6 +777,7 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "fs4",
  "image",
  "once_cell",
  "ratatui",

@@ -1,12 +1,18 @@
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use fs4::fs_std::FileExt;
 use tantivy::collector::{Count, TopDocs};
+use tantivy::directory::error::LockError;
 use tantivy::query::{AllQuery, TermQuery};
 use tantivy::schema::{IndexRecordOption, TantivyDocument};
-use tantivy::{DocAddress, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, Term};
+use tantivy::{
+    DocAddress, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, TantivyError, Term,
+};
 
 use crate::adapters::KnownSessions;
 use crate::config::index_dir;
@@ -21,6 +27,80 @@ mod stats;
 pub use stats::IndexStats;
 
 pub const INDEX_REFRESH_BATCH_SIZE: usize = 500;
+const REFRESH_LOCK_WAIT: Duration = Duration::from_millis(250);
+const REFRESH_LOCK_POLL: Duration = Duration::from_millis(10);
+
+struct IndexLock {
+    _file: File,
+}
+
+impl IndexLock {
+    fn acquire(index_path: &Path, purpose: &str) -> Result<Self> {
+        let lock_path = coordination_lock_path(index_path, purpose);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| {
+                format!(
+                    "failed to open index {purpose} lock {}",
+                    lock_path.display()
+                )
+            })?;
+        file.lock_exclusive().with_context(|| {
+            format!(
+                "failed to acquire index {purpose} lock {}",
+                lock_path.display()
+            )
+        })?;
+        Ok(Self { _file: file })
+    }
+
+    fn try_acquire_for(
+        index_path: &Path,
+        purpose: &str,
+        timeout: Duration,
+    ) -> Result<Option<Self>> {
+        let lock_path = coordination_lock_path(index_path, purpose);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| {
+                format!(
+                    "failed to open index {purpose} lock {}",
+                    lock_path.display()
+                )
+            })?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            if file.try_lock_exclusive().with_context(|| {
+                format!(
+                    "failed to acquire index {purpose} lock {}",
+                    lock_path.display()
+                )
+            })? {
+                return Ok(Some(Self { _file: file }));
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            thread::sleep(REFRESH_LOCK_POLL);
+        }
+    }
+}
+
+fn coordination_lock_path(index_path: &Path, purpose: &str) -> PathBuf {
+    let name = index_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("index");
+    index_path.with_file_name(format!("{name}.{purpose}.lock"))
+}
 
 #[derive(Debug, Clone)]
 pub struct SearchHit {
@@ -49,6 +129,12 @@ impl SessionIndex {
     }
 
     pub fn open(path: PathBuf) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let _initialization_lock = IndexLock::acquire(&path, "init")?;
+
         if path.exists() && !schema::schema_version_matches(&path) {
             fs::remove_dir_all(&path)
                 .with_context(|| format!("failed to clear stale index {}", path.display()))?;
@@ -81,6 +167,12 @@ impl SessionIndex {
     }
 
     pub fn rebuild(&self, sessions: Vec<Session>) -> Result<RefreshSummary> {
+        let _write_lock = self.acquire_write_lock()?;
+        self.reader.reload()?;
+        self.rebuild_unlocked(sessions)
+    }
+
+    fn rebuild_unlocked(&self, sessions: Vec<Session>) -> Result<RefreshSummary> {
         let mut writer: IndexWriter<TantivyDocument> =
             self.index.writer_with_num_threads(1, 128_000_000)?;
         writer.delete_all_documents()?;
@@ -97,7 +189,15 @@ impl SessionIndex {
     }
 
     pub fn refresh_incremental(&self) -> Result<RefreshSummary> {
-        crate::refresh::refresh_incremental(self)
+        let Some(_write_lock) = self.acquire_refresh_lock()? else {
+            return self.current_refresh_summary();
+        };
+        self.reader.reload()?;
+        match crate::refresh::refresh_incremental(self) {
+            Ok(summary) => Ok(summary),
+            Err(error) if is_writer_lock_busy(&error) => self.current_refresh_summary(),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn refresh_incremental_streaming<F>(
@@ -108,7 +208,15 @@ impl SessionIndex {
     where
         F: FnMut(RefreshSummary),
     {
-        crate::refresh::refresh_incremental_streaming(self, batch_size, on_progress)
+        let Some(_write_lock) = self.acquire_refresh_lock()? else {
+            return self.current_refresh_summary();
+        };
+        self.reader.reload()?;
+        match crate::refresh::refresh_incremental_streaming(self, batch_size, on_progress) {
+            Ok(summary) => Ok(summary),
+            Err(error) if is_writer_lock_busy(&error) => self.current_refresh_summary(),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn scan_all_sessions() -> Vec<Session> {
@@ -259,6 +367,26 @@ impl SessionIndex {
         Ok(())
     }
 
+    fn acquire_write_lock(&self) -> Result<IndexLock> {
+        IndexLock::acquire(&self.path, "write")
+    }
+
+    fn acquire_refresh_lock(&self) -> Result<Option<IndexLock>> {
+        if self.total_len()? == 0 {
+            return self.acquire_write_lock().map(Some);
+        }
+        IndexLock::try_acquire_for(&self.path, "write", REFRESH_LOCK_WAIT)
+    }
+
+    fn current_refresh_summary(&self) -> Result<RefreshSummary> {
+        self.reader.reload()?;
+        Ok(RefreshSummary {
+            sessions: self.total_len()?,
+            new_or_modified: 0,
+            deleted: 0,
+        })
+    }
+
     fn searcher(&self) -> Result<tantivy::Searcher> {
         Ok(self.reader.searcher())
     }
@@ -323,6 +451,15 @@ impl SessionIndex {
         }
         Ok(sessions)
     }
+}
+
+fn is_writer_lock_busy(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<TantivyError>(),
+            Some(TantivyError::LockFailure(LockError::LockBusy, _))
+        )
+    })
 }
 
 #[cfg(test)]
