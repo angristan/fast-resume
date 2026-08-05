@@ -1,3 +1,10 @@
+## [2.6.1](https://github.com/angristan/fast-resume/compare/v2.6.0...v2.6.1) (2026-08-05)
+
+
+### Performance Improvements
+
+* **vscode:** skip unchanged session JSON parsing ([843ec96](https://github.com/angristan/fast-resume/commit/843ec9670f72b92fcebdd9eda90d152c498fe22e))
+
 # [2.6.0](https://github.com/angristan/fast-resume/compare/v2.5.0...v2.6.0) (2026-08-05)
 
 
