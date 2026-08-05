@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod config;
 pub mod index;
 pub mod model;
+pub mod output;
 pub mod query;
 pub mod refresh;
 pub mod search;

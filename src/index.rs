@@ -293,6 +293,17 @@ impl SessionIndex {
         directory_filter: Option<&str>,
         limit: usize,
     ) -> Result<Vec<SearchHit>> {
+        self.search_with_offset(query, agent_filter, directory_filter, 0, limit)
+    }
+
+    pub fn search_with_offset(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<SearchHit>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -300,8 +311,9 @@ impl SessionIndex {
         let searcher = self.searcher()?;
         let (query, has_text) = self.build_search_query(query, agent_filter, directory_filter)?;
         if !has_text {
-            let collector =
-                TopDocs::with_limit(limit).order_by_fast_field::<f64>("timestamp", Order::Desc);
+            let collector = TopDocs::with_limit(limit)
+                .and_offset(offset)
+                .order_by_fast_field::<f64>("timestamp", Order::Desc);
             let hits: Vec<(Option<f64>, DocAddress)> = searcher.search(&query, &collector)?;
             self.hits_to_sessions(
                 &searcher,
@@ -309,8 +321,12 @@ impl SessionIndex {
                     .map(|(score, addr)| (score.unwrap_or_default() as f32, addr)),
             )
         } else {
-            let hits: Vec<(Score, DocAddress)> =
-                searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+            let hits: Vec<(Score, DocAddress)> = searcher.search(
+                &query,
+                &TopDocs::with_limit(limit)
+                    .and_offset(offset)
+                    .order_by_score(),
+            )?;
             self.hits_to_sessions(&searcher, hits.into_iter())
         }
     }

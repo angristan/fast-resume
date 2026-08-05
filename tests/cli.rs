@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -21,6 +23,18 @@ fn assert_success(output: Output) -> (String, String) {
         output.status.success(),
         "fr failed with {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status,
+        stdout,
+        stderr
+    );
+    (stdout, stderr)
+}
+
+fn assert_failure(output: Output) -> (String, String) {
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !output.status.success(),
+        "fr unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
         stdout,
         stderr
     );
@@ -321,4 +335,116 @@ fn lists_antigravity_cursor_and_grok_sessions() {
         );
     }
     assert!(stdout.contains("Showing 3 of 3 sessions"));
+}
+
+#[test]
+fn json_output_is_stable_and_paginated() {
+    let temp = TempDir::new().unwrap();
+    for (id, prompt) in [
+        ("json-a", "JSON pagination alpha"),
+        ("json-b", "JSON pagination beta"),
+        ("json-c", "JSON pagination gamma"),
+    ] {
+        write_codex_session(temp.path(), id, "/repo/json", prompt);
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let (first_stdout, first_stderr) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--limit", "2", "JSON pagination"],
+    ));
+    assert!(first_stderr.is_empty());
+    let first: Value = serde_json::from_str(&first_stdout).unwrap();
+    assert_eq!(first["schema_version"], 1);
+    assert_eq!(first["meta"]["state"], "more");
+    assert_eq!(first["meta"]["total"], 3);
+    assert_eq!(first["meta"]["offset"], 0);
+    assert_eq!(first["meta"]["limit"], 2);
+    assert_eq!(first["meta"]["returned"], 2);
+    assert_eq!(first["meta"]["next_offset"], 2);
+    let first_sessions = first["sessions"].as_array().unwrap();
+    assert_eq!(first_sessions.len(), 2);
+    for session in first_sessions {
+        assert_eq!(session["agent"], "codex");
+        assert_eq!(session["directory"], "/repo/json");
+        assert_eq!(session["message_count"], 1);
+        assert!(session["timestamp"].as_str().is_some());
+        assert_eq!(session["resume_command"][0], "codex");
+        assert_eq!(session["resume_command"][1], "resume");
+        assert!(session.get("content").is_none());
+        assert!(session.get("mtime").is_none());
+        assert!(session.get("yolo").is_none());
+    }
+
+    let (second_stdout, second_stderr) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--limit", "2", "--offset", "2", "JSON pagination"],
+    ));
+    assert!(second_stderr.is_empty());
+    let second: Value = serde_json::from_str(&second_stdout).unwrap();
+    assert_eq!(second["meta"]["state"], "complete");
+    assert_eq!(second["meta"]["returned"], 1);
+    assert!(second["meta"]["next_offset"].is_null());
+
+    let mut ids: Vec<_> = first_sessions
+        .iter()
+        .chain(second["sessions"].as_array().unwrap())
+        .map(|session| session["id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids, vec!["json-a", "json-b", "json-c"]);
+
+    let (past_stdout, _) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--offset", "99", "JSON pagination"],
+    ));
+    let past: Value = serde_json::from_str(&past_stdout).unwrap();
+    assert_eq!(past["meta"]["state"], "past_end");
+    assert_eq!(past["meta"]["returned"], 0);
+
+    let (all_stdout, _) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--all", "--offset", "1", "JSON pagination"],
+    ));
+    let all: Value = serde_json::from_str(&all_stdout).unwrap();
+    assert_eq!(all["meta"]["state"], "complete");
+    assert_eq!(all["meta"]["returned"], 2);
+}
+
+#[test]
+fn agent_context_exposes_the_portable_skill() {
+    let temp = TempDir::new().unwrap();
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--agent-context"]));
+
+    assert!(stderr.is_empty());
+    assert!(stdout.starts_with("---\nname: fast-resume\n"));
+    assert!(stdout.contains("fr --json --limit 10"));
+    assert!(stdout.contains("meta.next_offset"));
+}
+
+#[test]
+fn json_empty_results_and_invalid_pagination_are_explicit() {
+    let temp = TempDir::new().unwrap();
+
+    let (empty_stdout, empty_stderr) =
+        assert_success(run_fr(temp.path(), &["--json", "no-such-session"]));
+    assert!(empty_stderr.is_empty());
+    let empty: Value = serde_json::from_str(&empty_stdout).unwrap();
+    assert_eq!(empty["sessions"], json!([]));
+    assert_eq!(empty["meta"]["state"], "complete");
+    assert_eq!(empty["meta"]["total"], 0);
+    assert_eq!(empty["meta"]["returned"], 0);
+
+    for args in [
+        vec!["--json", "--limit", "0"],
+        vec!["--json", "--limit", "invalid"],
+        vec!["--json", "--all", "--limit", "2"],
+        vec!["--limit", "2"],
+    ] {
+        let (stdout, stderr) = assert_failure(run_fr(temp.path(), &args));
+        assert!(stdout.is_empty());
+        assert!(!stderr.is_empty());
+    }
 }

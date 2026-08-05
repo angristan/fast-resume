@@ -58,7 +58,18 @@ impl SearchEngine {
         directory_filter: Option<&str>,
         limit: usize,
     ) -> Vec<Session> {
-        self.search_result(query, agent_filter, directory_filter, limit)
+        self.search_with_offset(query, agent_filter, directory_filter, 0, limit)
+    }
+
+    pub fn search_with_offset(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Vec<Session> {
+        self.search_result_with_offset(query, agent_filter, directory_filter, offset, limit)
             .unwrap_or_default()
     }
 
@@ -69,8 +80,19 @@ impl SearchEngine {
         directory_filter: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Session>> {
+        self.search_result_with_offset(query, agent_filter, directory_filter, 0, limit)
+    }
+
+    pub fn search_result_with_offset(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Session>> {
         self.index
-            .search(query, agent_filter, directory_filter, limit)
+            .search_with_offset(query, agent_filter, directory_filter, offset, limit)
             .map(|hits| hits.into_iter().map(|hit| hit.session).collect())
     }
 }

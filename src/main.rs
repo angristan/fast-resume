@@ -10,6 +10,7 @@ use clap::{Parser, ValueEnum};
 use fast_resume::adapters::all_adapters;
 use fast_resume::config::{VERSION, index_dir, is_agent};
 use fast_resume::index::SessionIndex;
+use fast_resume::output::{DEFAULT_LIST_LIMIT, print_sessions_json, print_sessions_table};
 use fast_resume::search::SearchEngine;
 use fast_resume::stats::print_stats;
 use fast_resume::tui::{TuiExit, run_tui};
@@ -44,6 +45,22 @@ struct Args {
     #[arg(long = "list")]
     list_only: bool,
 
+    /// Output a stable JSON session list instead of opening the TUI.
+    #[arg(long, conflicts_with = "stats")]
+    json: bool,
+
+    /// Maximum sessions to return in list or JSON output.
+    #[arg(long, value_parser = parse_positive_usize, conflicts_with = "all")]
+    limit: Option<usize>,
+
+    /// Skip this many matching sessions in list or JSON output.
+    #[arg(long)]
+    offset: Option<usize>,
+
+    /// Return all matching sessions from the requested offset.
+    #[arg(long)]
+    all: bool,
+
     /// Force a fresh session scan and rebuild the Tantivy index.
     #[arg(long)]
     rebuild: bool,
@@ -51,6 +68,10 @@ struct Args {
     /// Show index/session statistics.
     #[arg(long)]
     stats: bool,
+
+    /// Print concise instructions for coding agents.
+    #[arg(long)]
+    agent_context: bool,
 
     /// Resume sessions with auto-approve/skip-permissions flags where supported.
     #[arg(long)]
@@ -75,7 +96,13 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let query = args.query.unwrap_or_default();
+    validate_pagination_args(&args)?;
+    let query = args.query.clone().unwrap_or_default();
+
+    if args.agent_context {
+        print!("{}", include_str!("../skills/fast-resume/SKILL.md"));
+        return Ok(());
+    }
 
     if args.rebuild {
         let start = Instant::now();
@@ -90,7 +117,7 @@ fn main() -> Result<()> {
             start.elapsed().as_secs_f64() * 1000.0,
             index_dir().display()
         );
-        if !args.no_tui && !args.list_only && query.is_empty() && !args.stats {
+        if !args.no_tui && !args.list_only && !args.json && query.is_empty() && !args.stats {
             return Ok(());
         }
     }
@@ -110,12 +137,28 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if args.no_tui || args.list_only {
+    if args.no_tui || args.list_only || args.json {
         let index = refreshed_index()?;
         let engine = SearchEngine::from_index(index);
-        let results = engine.search(&query, args.agent.as_deref(), args.directory.as_deref(), 50);
         let total = engine.count_matches(&query, args.agent.as_deref(), args.directory.as_deref());
-        print_sessions(&results, total);
+        let offset = args.offset.unwrap_or(0);
+        let limit = if args.all {
+            total.saturating_sub(offset)
+        } else {
+            args.limit.unwrap_or(DEFAULT_LIST_LIMIT)
+        };
+        let results = engine.search_with_offset(
+            &query,
+            args.agent.as_deref(),
+            args.directory.as_deref(),
+            offset,
+            limit,
+        );
+        if args.json {
+            print_sessions_json(&results, total, offset, limit, args.yolo)?;
+        } else {
+            print_sessions_table(&results, total, offset);
+        }
         return Ok(());
     }
 
@@ -150,6 +193,25 @@ fn validate_agent(value: &str) -> std::result::Result<String, String> {
     }
 }
 
+fn parse_positive_usize(value: &str) -> std::result::Result<usize, String> {
+    let value = value
+        .parse::<usize>()
+        .map_err(|_| "must be a positive integer".to_string())?;
+    if value == 0 {
+        return Err("must be greater than zero".to_string());
+    }
+    Ok(value)
+}
+
+fn validate_pagination_args(args: &Args) -> Result<()> {
+    if (args.limit.is_some() || args.offset.is_some() || args.all)
+        && !(args.json || args.list_only || args.no_tui)
+    {
+        bail!("--limit, --offset, and --all require --json, --list, or --no-tui");
+    }
+    Ok(())
+}
+
 fn refreshed_index() -> Result<SessionIndex> {
     let index = SessionIndex::open_default()?;
     if index.total_len()? == 0 {
@@ -159,39 +221,6 @@ fn refreshed_index() -> Result<SessionIndex> {
         index.refresh_incremental()?;
     }
     Ok(index)
-}
-
-fn print_sessions(results: &[fast_resume::model::Session], total: usize) {
-    if results.is_empty() {
-        println!("No sessions found.");
-        return;
-    }
-
-    println!(
-        "{:<15}  {:<52}  {:<38}  {}",
-        "Agent", "Title", "Directory", "ID"
-    );
-    println!("{}", "-".repeat(124));
-    for session in results {
-        println!(
-            "{:<15}  {:<52}  {:<38}  {}",
-            session.agent,
-            truncate_for_terminal(&session.title, 52),
-            truncate_for_terminal(&session.display_directory(), 38),
-            session.id
-        );
-    }
-    println!("\nShowing {} of {} sessions", results.len(), total);
-}
-
-fn truncate_for_terminal(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    let keep = width.saturating_sub(3);
-    let mut out: String = value.chars().take(keep).collect();
-    out.push_str("...");
-    out
 }
 
 fn exec_resume(command: Vec<String>, directory: String) -> Result<()> {
