@@ -1,6 +1,6 @@
 {
   "name": "fast-resume",
-  "version": "2.6.1-linux-arm64",
+  "version": "2.7.0-linux-arm64",
   "description": "fast-resume native binary for Linux ARM64",
   "license": "MIT",
   "repository": {

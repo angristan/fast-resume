@@ -1,6 +1,6 @@
 {
   "name": "fast-resume",
-  "version": "2.6.1-darwin-x64",
+  "version": "2.7.0-darwin-x64",
   "description": "fast-resume native binary for macOS x64",
   "license": "MIT",
   "repository": {

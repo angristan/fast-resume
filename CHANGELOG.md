@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/angristan/fast-resume/compare/v2.6.1...v2.7.0) (2026-08-05)
+
+
+### Features
+
+* **packaging:** publish CLI on npm ([9f60e8b](https://github.com/angristan/fast-resume/commit/9f60e8bc7851d4aa59db38d970d3b7aa2d9ad9bb))
+
 ## [2.6.1](https://github.com/angristan/fast-resume/compare/v2.6.0...v2.6.1) (2026-08-05)
 
 
