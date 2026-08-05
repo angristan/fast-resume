@@ -61,12 +61,16 @@ The persistent index lives at:
 
 On an incremental refresh, fast-resume:
 
-1. Loads indexed session IDs and refresh markers.
-2. Scans each adapter concurrently.
-3. Parses new or changed sessions.
-4. Retains old documents when a source is temporarily incomplete or malformed.
-5. Infers deletions only when the relevant scan is complete.
-6. Commits changes in batches and reports progress to the TUI.
+1. Acquires a cross-process refresh lock.
+2. Reloads the latest committed index state.
+3. Loads indexed session IDs and refresh markers.
+4. Scans each adapter concurrently.
+5. Parses new or changed sessions.
+6. Retains old documents when a source is temporarily incomplete or malformed.
+7. Infers deletions only when the relevant scan is complete.
+8. Commits changes in batches and reports progress to the TUI.
+
+Only one process refreshes the index at a time. If another process is already refreshing a populated index, read commands wait briefly and then use the latest committed snapshot. Cold initialization and explicit rebuilds wait for exclusive access. This keeps parallel `fr --list` and `fr --json` calls available without allowing refresh batches to interleave.
 
 File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
 

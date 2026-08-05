@@ -72,12 +72,50 @@ fr --no-tui "api error"
 # List sessions without offering to resume
 fr --list "agent:codex"
 
+# Return stable machine-readable results
+fr --json --limit 10 "agent:codex api error"
+
 # Rebuild the index from every source
 fr --rebuild
 
 # Show index and activity statistics
 fr --stats
 ```
+
+### JSON output
+
+`--json` prints exactly one JSON object to stdout and implies non-interactive listing. Diagnostics and errors stay on stderr.
+
+```json
+{
+  "schema_version": 1,
+  "sessions": [
+    {
+      "id": "abc123",
+      "agent": "codex",
+      "title": "Review API authentication",
+      "directory": "/work/backend",
+      "timestamp": "2026-07-15T12:00:00+02:00",
+      "message_count": 8,
+      "resume_command": ["codex", "resume", "abc123"]
+    }
+  ],
+  "meta": {
+    "state": "more",
+    "total": 24,
+    "offset": 0,
+    "limit": 10,
+    "returned": 10,
+    "next_offset": 10
+  }
+}
+```
+
+Continue with the same query and filters plus `--offset <next_offset>` only while `meta.state` is `more`. Stop on `complete` or `past_end`. `--all` returns every match from the requested offset; it conflicts with an explicit `--limit`.
+
+The JSON session objects omit indexed conversation content and internal refresh fields. `--yolo` changes supported `resume_command` values but never starts a session in JSON mode.
+
+Run `fr --agent-context` to print the bundled Agent Skill for coding-agent use.
 
 ## Command reference
 
@@ -92,8 +130,13 @@ Options:
   -d, --directory <DIR>   Filter by directory substring
       --no-tui            Output a list instead of opening the TUI
       --list              List sessions without resuming
+      --json              Output a stable JSON session list
+      --limit <N>         Maximum sessions to return (default: 50)
+      --offset <N>        Skip matching sessions
+      --all               Return all matches from the requested offset
       --rebuild           Rebuild the Tantivy index from a fresh scan
       --stats             Show index and session statistics
+      --agent-context     Print concise instructions for coding agents
       --yolo              Force auto-approve flags where supported
       --images            Enable agent artwork when supported
       --no-images         Disable agent artwork

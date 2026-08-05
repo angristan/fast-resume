@@ -60,6 +60,17 @@ fr --rebuild
 
 Inside the TUI, use the arrow keys to select a session and press `Enter` to resume it. `Tab` completes filters or cycles agents, `Ctrl+P` toggles the preview, and `Ctrl+Y` copies the resume command.
 
+## Agent usage
+
+Coding agents can use the stable JSON output instead of parsing the human table:
+
+```bash
+fr --json --limit 10 "dir:backend authentication bug"
+fr --json --limit 10 --offset 10 "dir:backend authentication bug"
+```
+
+Run `fr --agent-context` to print the bundled [Agent Skill](skills/fast-resume/SKILL.md) with safe search, pagination, and resume guidance.
+
 ## Documentation
 
 - [Installation](docs/installation.md) — packages, platforms, terminals, and upgrades

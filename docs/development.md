@@ -40,8 +40,9 @@ fast-resume/
 │   ├── main.rs             # Clap CLI and resume process handoff
 │   ├── config.rs           # Agent metadata, paths, and schema version
 │   ├── model.rs            # Normalized session model
+│   ├── output.rs           # Human tables and stable JSON envelopes
 │   ├── refresh.rs          # Concurrent incremental refresh orchestration
-│   ├── index.rs            # Tantivy index facade
+│   ├── index.rs            # Tantivy index facade and process locks
 │   ├── index/              # Schema, documents, queries, and statistics
 │   ├── query.rs            # User query and filter parsing
 │   ├── search.rs           # Search engine facade
@@ -52,6 +53,7 @@ fast-resume/
 ├── tests/                  # CLI integration tests
 ├── assets/                 # Project and agent artwork
 ├── python/                 # Compatibility wrappers packaged in wheels
+├── skills/                 # Portable Agent Skills embedded by the CLI
 ├── docs/                   # User and contributor documentation
 ├── Cargo.toml              # Rust dependencies and binary metadata
 └── pyproject.toml          # Maturin/PyPI metadata

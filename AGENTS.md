@@ -1,5 +1,45 @@
 # Repository instructions
 
+## Project
+
+- `fast-resume` is a Rust 2024 CLI and Ratatui application. The binary is `fr`.
+- Read `docs/development.md` for the source map and validation workflow.
+- Read `docs/how-it-works.md` before changing adapters, refresh behavior, search, or resume handoff.
+- Keep the README focused on discovery. Put detailed user behavior in `docs/usage.md`.
+
+## Behavior
+
+- Preserve the human CLI unless a change explicitly replaces it.
+- Machine output must remain one valid JSON value on stdout. Send diagnostics and errors to stderr.
+- Do not serialize `model::Session` directly. It contains conversation content and internal refresh fields.
+- Keep index writes behind the cross-process coordination in `index.rs`. Reload the manual Tantivy reader after another process can commit.
+- Adapter scans must not delete good indexed data after partial files, malformed rows, inaccessible paths, or incomplete scans.
+- Index user and assistant conversation text. Exclude system payloads, large tool results, and unrelated local command output.
+- Tests must use synthetic session data under `TempDir`. Do not depend on a developer's real agent history or home directory.
+
+## Adding or changing an adapter
+
+- Implement the `Adapter` contract in `src/adapters/` and register it in `src/adapters/mod.rs`.
+- Update agent metadata and source paths in `src/config.rs`.
+- Add focused parser, incremental refresh, deletion-safety, and resume-command tests.
+- Add binary coverage in `tests/cli.rs`.
+- Update the supported-agent and resume-command documentation.
+- Add and register an agent image only when an appropriate asset is available.
+
+## Validation
+
+Run the same core checks as CI:
+
+```bash
+cargo fmt --all --check
+cargo check --all-targets --locked
+cargo test --locked
+cargo build --release --locked
+git diff --check
+```
+
+Use `cargo clippy --all-targets --locked` for additional cleanup. The project does not currently fail CI on every Clippy warning.
+
 ## Commits
 
 - Follow Conventional Commits for every commit subject.
