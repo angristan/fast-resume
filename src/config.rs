@@ -8,7 +8,7 @@ use serde_json::Value;
 use once_cell::sync::Lazy;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const INDEX_SCHEMA_VERSION: u32 = 23;
+pub const INDEX_SCHEMA_VERSION: u32 = 24;
 
 pub const AGENT_ORDER: [&str; 12] = [
     "antigravity",
@@ -167,6 +167,10 @@ pub fn antigravity_dir() -> PathBuf {
 
 pub fn cursor_chats_dir() -> PathBuf {
     home_dir().join(".cursor").join("chats")
+}
+
+pub fn cursor_projects_dir() -> PathBuf {
+    home_dir().join(".cursor").join("projects")
 }
 
 pub fn grok_sessions_dir() -> PathBuf {

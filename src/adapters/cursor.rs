@@ -1,8 +1,10 @@
 //! Cursor CLI stores each chat in a small SQLite key-value database. Values
-//! vary across releases, so parsing accepts structured JSON and the legacy
-//! plain-user-message encoding while leaving unknown binary records untouched.
+//! vary across releases, so parsing accepts structured JSON, hex-encoded
+//! metadata, and the legacy plain-user-message encoding while leaving unknown
+//! binary records untouched.
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local, TimeZone};
@@ -25,12 +27,14 @@ type SessionFiles = HashMap<String, (PathBuf, f64)>;
 #[derive(Debug, Clone)]
 pub struct CursorAdapter {
     chats_dir: PathBuf,
+    projects_dir: PathBuf,
 }
 
 impl Default for CursorAdapter {
     fn default() -> Self {
         Self {
             chats_dir: config::cursor_chats_dir(),
+            projects_dir: config::cursor_projects_dir(),
         }
     }
 }
@@ -38,7 +42,22 @@ impl Default for CursorAdapter {
 impl CursorAdapter {
     #[allow(dead_code)]
     pub fn new(chats_dir: PathBuf) -> Self {
-        Self { chats_dir }
+        let projects_dir = chats_dir
+            .parent()
+            .map(|parent| parent.join("projects"))
+            .unwrap_or_else(config::cursor_projects_dir);
+        Self {
+            chats_dir,
+            projects_dir,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn new_with_projects_dir(chats_dir: PathBuf, projects_dir: PathBuf) -> Self {
+        Self {
+            chats_dir,
+            projects_dir,
+        }
     }
 
     fn scan_session_files(&self) -> Option<(SessionFiles, bool)> {
@@ -72,7 +91,31 @@ impl CursorAdapter {
         Some((files, complete))
     }
 
-    fn parse_session(&self, path: &Path) -> rusqlite::Result<Option<Session>> {
+    fn workspace_paths_by_hash(&self) -> HashMap<String, String> {
+        let mut workspaces = HashMap::new();
+        let Ok(projects) = fs::read_dir(&self.projects_dir) else {
+            return workspaces;
+        };
+        for project in projects.filter_map(Result::ok) {
+            let worker_log = project.path().join("worker.log");
+            let Ok(contents) = fs::read_to_string(worker_log) else {
+                continue;
+            };
+            for line in contents.lines() {
+                let Some(workspace) = cursor_workspace_path_from_log_line(line) else {
+                    continue;
+                };
+                workspaces.insert(cursor_workspace_hash(&workspace), workspace);
+            }
+        }
+        workspaces
+    }
+
+    fn parse_session(
+        &self,
+        path: &Path,
+        workspace_by_hash: &HashMap<String, String>,
+    ) -> rusqlite::Result<Option<Session>> {
         let connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -80,18 +123,31 @@ impl CursorAdapter {
         let mut title = String::new();
         let mut directory = String::new();
         let mut created_at = None;
+        let mut yolo = false;
         let mut messages = Vec::new();
 
         for (_, bytes) in read_key_value_table(&connection, "meta")? {
             let Some(value) = decode_json(&bytes) else {
                 continue;
             };
-            apply_cursor_metadata(&value, &mut title, &mut directory, &mut created_at);
+            apply_cursor_metadata(
+                &value,
+                &mut title,
+                &mut directory,
+                &mut created_at,
+                &mut yolo,
+            );
         }
 
         for (_, bytes) in read_key_value_table(&connection, "blobs")? {
             if let Some(value) = decode_json(&bytes) {
-                collect_cursor_records(&value, &mut messages, &mut title, &mut created_at);
+                collect_cursor_records(
+                    &value,
+                    &mut messages,
+                    &mut title,
+                    &mut created_at,
+                    &mut yolo,
+                );
             } else if let Some(text) = cursor_plain_user_message(&bytes) {
                 messages.push(CursorMessage {
                     user: true,
@@ -112,7 +168,7 @@ impl CursorAdapter {
             title = first_user.clone();
         }
         if directory.trim().is_empty() {
-            directory = cursor_directory_from_path(path);
+            directory = cursor_directory_from_path(path, workspace_by_hash);
         }
         let timestamp = messages
             .iter()
@@ -149,11 +205,16 @@ impl CursorAdapter {
             user_turns,
         );
         session.mtime = sqlite_mtime(path);
+        session.yolo = yolo;
         Ok(Some(session))
     }
 
-    fn parse_incremental(&self, path: &Path) -> IncrementalParse {
-        match self.parse_session(path) {
+    fn parse_incremental(
+        &self,
+        path: &Path,
+        workspace_by_hash: &HashMap<String, String>,
+    ) -> IncrementalParse {
+        match self.parse_session(path, workspace_by_hash) {
             Ok(Some(session)) => IncrementalParse::Session(session),
             Ok(None) => IncrementalParse::Delete,
             Err(_) => IncrementalParse::Retain,
@@ -173,9 +234,12 @@ impl Adapter for CursorAdapter {
     fn find_sessions(&self) -> Vec<Session> {
         self.scan_session_files()
             .map(|(files, _)| {
+                let workspace_by_hash = self.workspace_paths_by_hash();
                 files
                     .into_values()
-                    .filter_map(|(path, _)| self.parse_session(&path).ok().flatten())
+                    .filter_map(|(path, _)| {
+                        self.parse_session(&path, &workspace_by_hash).ok().flatten()
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -185,8 +249,9 @@ impl Adapter for CursorAdapter {
         let Some((files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
+        let workspace_by_hash = self.workspace_paths_by_hash();
         let mut scan = incremental_from_files(self.name(), known, files, |path| {
-            self.parse_incremental(path)
+            self.parse_incremental(path, &workspace_by_hash)
         });
         if !complete {
             scan.deleted_ids.clear();
@@ -202,11 +267,12 @@ impl Adapter for CursorAdapter {
         let Some((files, complete)) = self.scan_session_files() else {
             return failed_incremental_scan(self.name());
         };
+        let workspace_by_hash = self.workspace_paths_by_hash();
         let mut scan = incremental_from_files_streaming(
             self.name(),
             known,
             files,
-            |path| self.parse_incremental(path),
+            |path| self.parse_incremental(path, &workspace_by_hash),
             on_session,
         );
         if !complete {
@@ -308,13 +374,36 @@ fn read_key_value_table(
 }
 
 fn decode_json(bytes: &[u8]) -> Option<Value> {
-    serde_json::from_slice(bytes).ok().or_else(|| {
-        let start = bytes.iter().position(|byte| *byte == b'{')?;
-        let end = bytes.iter().rposition(|byte| *byte == b'}')?;
-        (start < end)
-            .then(|| serde_json::from_slice(&bytes[start..=end]).ok())
-            .flatten()
-    })
+    parse_json_bytes(bytes)
+        .or_else(|| parse_json_fragment(bytes))
+        .or_else(|| {
+            let decoded = decode_hex_bytes(bytes)?;
+            parse_json_bytes(&decoded).or_else(|| parse_json_fragment(&decoded))
+        })
+}
+
+fn parse_json_bytes(bytes: &[u8]) -> Option<Value> {
+    serde_json::from_slice(bytes).ok()
+}
+
+fn parse_json_fragment(bytes: &[u8]) -> Option<Value> {
+    let start = bytes.iter().position(|byte| *byte == b'{')?;
+    let end = bytes.iter().rposition(|byte| *byte == b'}')?;
+    (start < end)
+        .then(|| serde_json::from_slice(&bytes[start..=end]).ok())
+        .flatten()
+}
+
+fn decode_hex_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).ok()?.trim();
+    if text.len() < 2 || text.len() % 2 != 0 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut decoded = Vec::with_capacity(text.len() / 2);
+    for index in (0..text.len()).step_by(2) {
+        decoded.push(u8::from_str_radix(&text[index..index + 2], 16).ok()?);
+    }
+    Some(decoded)
 }
 
 fn apply_cursor_metadata(
@@ -322,6 +411,7 @@ fn apply_cursor_metadata(
     title: &mut String,
     directory: &mut String,
     created_at: &mut Option<DateTime<Local>>,
+    yolo: &mut bool,
 ) {
     if title.is_empty() {
         *title = value
@@ -342,6 +432,18 @@ fn apply_cursor_metadata(
     if created_at.is_none() {
         *created_at = cursor_timestamp(value.get("createdAt"));
     }
+    *yolo |= cursor_metadata_uses_yolo(value);
+}
+
+fn cursor_metadata_uses_yolo(value: &Value) -> bool {
+    value
+        .get("isRunEverything")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || value
+            .get("approvalMode")
+            .and_then(Value::as_str)
+            .is_some_and(|mode| matches!(mode, "unrestricted" | "runEverything" | "yolo"))
 }
 
 fn collect_cursor_records(
@@ -349,16 +451,17 @@ fn collect_cursor_records(
     messages: &mut Vec<CursorMessage>,
     title: &mut String,
     created_at: &mut Option<DateTime<Local>>,
+    yolo: &mut bool,
 ) {
-    apply_cursor_metadata(value, title, &mut String::new(), created_at);
+    apply_cursor_metadata(value, title, &mut String::new(), created_at, yolo);
     if let Some(items) = value.get("messages").and_then(Value::as_array) {
         for item in items {
-            collect_cursor_records(item, messages, title, created_at);
+            collect_cursor_records(item, messages, title, created_at, yolo);
         }
     }
     if let Some(items) = value.get("conversation").and_then(Value::as_array) {
         for item in items {
-            collect_cursor_records(item, messages, title, created_at);
+            collect_cursor_records(item, messages, title, created_at, yolo);
         }
     }
 
@@ -436,18 +539,31 @@ fn cursor_timestamp(value: Option<&Value>) -> Option<DateTime<Local>> {
     }
 }
 
-fn cursor_directory_from_path(path: &Path) -> String {
+fn cursor_directory_from_path(path: &Path, workspace_by_hash: &HashMap<String, String>) -> String {
     let encoded = path
         .parent()
         .and_then(Path::parent)
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap_or_default();
+    if let Some(workspace) = workspace_by_hash.get(encoded) {
+        return workspace.clone();
+    }
     let decoded = percent_decode(encoded);
     Path::new(&decoded)
         .is_absolute()
         .then_some(decoded)
         .unwrap_or_default()
+}
+
+fn cursor_workspace_path_from_log_line(line: &str) -> Option<String> {
+    let (_, rest) = line.split_once("workspacePath=")?;
+    let workspace = rest.trim();
+    (!workspace.is_empty()).then(|| workspace.to_string())
+}
+
+fn cursor_workspace_hash(workspace: &str) -> String {
+    format!("{:x}", md5::compute(workspace.as_bytes()))
 }
 
 fn percent_decode(value: &str) -> String {
@@ -540,6 +656,69 @@ mod tests {
             stats.total_bytes,
             db_path.metadata().unwrap().len() + b"wal".len() as u64 + b"shm".len() as u64
         );
+    }
+
+    #[test]
+    fn parses_hex_metadata_and_hashed_workspace_dirs() {
+        let temp = tempdir().unwrap();
+        let chats_dir = temp.path().join("chats");
+        let projects_dir = temp.path().join("projects");
+        let workspace = "/work/cursor-cli";
+        let workspace_hash = cursor_workspace_hash(workspace);
+        let id = "cursor-hashed-session";
+        let session_dir = chats_dir.join(&workspace_hash).join(id);
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::create_dir_all(projects_dir.join("work-cursor-cli")).unwrap();
+        fs::write(
+            projects_dir.join("work-cursor-cli").join("worker.log"),
+            format!("[info] Getting tree structure for workspacePath={workspace}\n"),
+        )
+        .unwrap();
+
+        let db_path = session_dir.join("store.db");
+        let connection = Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); \
+                 CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB);",
+            )
+            .unwrap();
+        let metadata = json!({
+            "agentId": id,
+            "createdAt": 1784282400000_i64,
+            "isRunEverything": true,
+            "name": "Hex Cursor metadata"
+        })
+        .to_string();
+        let encoded_metadata = metadata
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        connection
+            .execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                ("0", encoded_metadata),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO blobs (id, data) VALUES (?1, ?2)",
+                (
+                    "u1",
+                    json!({"role":"user","content":"Parse hashed Cursor workspace"}).to_string(),
+                ),
+            )
+            .unwrap();
+        drop(connection);
+
+        let adapter = CursorAdapter::new_with_projects_dir(chats_dir, projects_dir);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, id);
+        assert_eq!(sessions[0].title, "Hex Cursor metadata");
+        assert_eq!(sessions[0].directory, workspace);
+        assert!(sessions[0].yolo);
     }
 
     #[test]
