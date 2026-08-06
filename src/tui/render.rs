@@ -25,7 +25,7 @@ const SEARCH_PLACEHOLDER: &str = "Search titles, messages, paths. Try agent:clau
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
-    let layout = layout::app(area, state.show_preview);
+    let layout = layout::app(area, state.show_preview, state.preview_ratio);
 
     draw_header(frame, layout.header, state);
     draw_search(frame, layout.search, state);
