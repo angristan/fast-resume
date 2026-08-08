@@ -1,47 +1,26 @@
-# Python
+# Rust
+/target/
+
+# macOS
+.DS_Store
+
+# Node (CI installs commitlint and semantic-release at the repo root)
+node_modules/
+/package-lock.json
+
+# Python tooling
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-!npm/fast-resume/lib/
-!npm/fast-resume/lib/**
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-*.egg
-
-# Virtual environments
 .venv/
-venv/
-ENV/
+.pytest_cache/
+.ruff_cache/
+.python-version
 
-# IDE
+# Local build artifacts
+/dist/
+*.whl
+
+# IDE and editors
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# PyInstaller
-*.spec
-
-# uv
-.python-version
-
-# Rust
-target/
