@@ -1,3 +1,10 @@
+## [2.9.2](https://github.com/angristan/fast-resume/compare/v2.9.1...v2.9.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* **config:** honor XDG cache directory ([1fb9488](https://github.com/angristan/fast-resume/commit/1fb94888c64164863b73974431c008ebb5c72b41))
+
 ## [2.9.1](https://github.com/angristan/fast-resume/compare/v2.9.0...v2.9.1) (2026-08-08)
 
 
