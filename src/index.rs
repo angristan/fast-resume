@@ -29,6 +29,12 @@ struct IndexLock {
 
 impl IndexLock {
     fn acquire(index_path: &Path, purpose: &str) -> Result<Self> {
+        Self::acquire_notify(index_path, purpose, || {})
+    }
+
+    /// Acquire the lock, calling `on_wait` once first if another process
+    /// already holds it and this acquisition is going to block.
+    fn acquire_notify(index_path: &Path, purpose: &str, on_wait: impl FnOnce()) -> Result<Self> {
         let lock_path = coordination_lock_path(index_path, purpose);
         let file = OpenOptions::new()
             .read(true)
@@ -42,12 +48,21 @@ impl IndexLock {
                     lock_path.display()
                 )
             })?;
-        file.lock_exclusive().with_context(|| {
+        let acquired = file.try_lock_exclusive().with_context(|| {
             format!(
                 "failed to acquire index {purpose} lock {}",
                 lock_path.display()
             )
         })?;
+        if !acquired {
+            on_wait();
+            file.lock_exclusive().with_context(|| {
+                format!(
+                    "failed to acquire index {purpose} lock {}",
+                    lock_path.display()
+                )
+            })?;
+        }
         Ok(Self { _file: file })
     }
 }
@@ -151,7 +166,13 @@ impl SessionIndex {
     }
 
     pub fn refresh_incremental(&self) -> Result<RefreshSummary> {
-        let _write_lock = self.acquire_write_lock()?;
+        self.refresh_incremental_notify(|| {})
+    }
+
+    /// Refresh incrementally, calling `on_wait` once first if the refresh has
+    /// to wait for another process's refresh to finish.
+    pub fn refresh_incremental_notify(&self, on_wait: impl FnOnce()) -> Result<RefreshSummary> {
+        let _write_lock = IndexLock::acquire_notify(&self.path, "write", on_wait)?;
         self.reader.reload()?;
         crate::refresh::refresh_incremental(self)
     }

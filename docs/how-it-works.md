@@ -70,7 +70,7 @@ On an incremental refresh, fast-resume:
 7. Infers deletions only when the relevant scan is complete.
 8. Commits changes in batches and reports progress to the TUI.
 
-Only one process refreshes the index at a time. Concurrent `fr --list` and `fr --json` calls wait for exclusive access, reload the latest committed index, and then run their own incremental refresh. This keeps every invocation current without allowing refresh batches to interleave. Cold initialization uses the same lock, so its source scan also runs serially.
+Only one process refreshes the index at a time. Concurrent `fr --list` and `fr --json` calls wait for exclusive access, reload the latest committed index, and then run their own incremental refresh. This keeps every invocation current without allowing refresh batches to interleave. Cold initialization uses the same lock, so its source scan also runs serially. A call that has to wait prints a notice on stderr; `--no-refresh` skips the refresh entirely and serves the last committed index immediately.
 
 File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
 

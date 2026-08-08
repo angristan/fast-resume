@@ -25,6 +25,7 @@ Use `fr` as a local session discovery tool. Do not parse its human table.
    ```
 
 5. Stop on `complete` or `past_end`. Do not restart pagination or increase the limit without a reason.
+6. Add `--no-refresh` to serve the last indexed state without scanning when speed matters more than freshness, for example while another `fr` process reports that it holds the refresh lock.
 
 ## Select and resume
 

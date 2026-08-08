@@ -61,6 +61,10 @@ struct Args {
     #[arg(long)]
     all: bool,
 
+    /// Serve the existing index without scanning for session changes.
+    #[arg(long)]
+    no_refresh: bool,
+
     /// Force a fresh session scan and rebuild the Tantivy index.
     #[arg(long)]
     rebuild: bool,
@@ -123,7 +127,7 @@ fn main() -> Result<()> {
     }
 
     if args.stats {
-        let index = refreshed_index()?;
+        let index = refreshed_index(args.no_refresh)?;
         let stats = index.stats()?;
         if stats.total_sessions == 0 {
             println!("No sessions indexed.");
@@ -138,7 +142,7 @@ fn main() -> Result<()> {
     }
 
     if args.no_tui || args.list_only || args.json {
-        let index = refreshed_index()?;
+        let index = refreshed_index(args.no_refresh)?;
         let engine = SearchEngine::from_index(index);
         let total = engine
             .count_result(&query, args.agent.as_deref(), args.directory.as_deref())
@@ -213,12 +217,22 @@ fn validate_pagination_args(args: &Args) -> Result<()> {
     {
         bail!("--limit, --offset, and --all require --json, --list, or --no-tui");
     }
+    if args.no_refresh && !(args.json || args.list_only || args.no_tui || args.stats) {
+        bail!("--no-refresh requires --json, --list, --no-tui, or --stats");
+    }
     Ok(())
 }
 
-fn refreshed_index() -> Result<SessionIndex> {
+fn refreshed_index(no_refresh: bool) -> Result<SessionIndex> {
     let index = SessionIndex::open_default()?;
-    index.refresh_incremental()?;
+    if no_refresh {
+        return Ok(index);
+    }
+    index.refresh_incremental_notify(|| {
+        eprintln!(
+            "Waiting for another fr process to finish refreshing; pass --no-refresh to search the current index."
+        );
+    })?;
     Ok(index)
 }
 

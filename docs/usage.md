@@ -75,6 +75,9 @@ fr --list "agent:codex"
 # Return stable machine-readable results
 fr --json --limit 10 "agent:codex api error"
 
+# Serve the existing index without scanning for changes
+fr --json --no-refresh "agent:codex api error"
+
 # Rebuild the index from every source
 fr --rebuild
 
@@ -115,6 +118,8 @@ Continue with the same query and filters plus `--offset <next_offset>` only whil
 
 The JSON session objects omit indexed conversation content and internal refresh fields. `--yolo` changes supported `resume_command` values but never starts a session in JSON mode.
 
+Non-interactive calls refresh the index first. If another `fr` process holds the refresh lock, the call prints a notice on stderr and waits. Pass `--no-refresh` to skip the scan and serve the last indexed state immediately.
+
 Run `fr --agent-context` to print the bundled Agent Skill for coding-agent use.
 
 ## Command reference
@@ -134,6 +139,7 @@ Options:
       --limit <N>         Maximum sessions to return (default: 50)
       --offset <N>        Skip matching sessions
       --all               Return all matches from the requested offset
+      --no-refresh        Serve the existing index without scanning for changes
       --rebuild           Rebuild the Tantivy index from a fresh scan
       --stats             Show index and session statistics
       --agent-context     Print concise instructions for coding agents

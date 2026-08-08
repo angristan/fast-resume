@@ -100,7 +100,12 @@ fn parallel_list_calls_serialize_refreshes() {
     for child in children.drain(..) {
         let output = child.wait_with_output().unwrap();
         let (stdout, stderr) = assert_success(output);
-        assert!(stderr.is_empty());
+        for line in stderr.lines() {
+            assert!(
+                line.contains("Waiting for another fr process"),
+                "unexpected stderr line: {line}"
+            );
+        }
         assert!(stdout.contains("parallel123"));
         assert!(stdout.contains("Showing 1 of 1 sessions"));
     }
@@ -190,7 +195,45 @@ fn list_waits_for_the_refresh_lock_and_returns_fresh_data() {
     FileExt::unlock(&lock_file).unwrap();
     let output = child.wait_with_output().unwrap();
     let (stdout, stderr) = assert_success(output);
-    assert!(stderr.is_empty());
+    assert!(stderr.contains("Waiting for another fr process"));
+    assert!(stderr.contains("--no-refresh"));
     assert!(stdout.contains("committed123"));
     assert!(stdout.contains("pending123"));
+}
+
+#[test]
+fn no_refresh_serves_the_current_index_while_the_lock_is_held() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(
+        temp.path(),
+        "committed123",
+        "/repo/parallel",
+        "Committed session",
+    );
+    assert_success(run_fr(temp.path(), &["--list"]));
+
+    write_codex_session(
+        temp.path(),
+        "pending123",
+        "/repo/parallel",
+        "Pending session",
+    );
+    let lock_path = temp
+        .path()
+        .join(".cache/fast-resume/tantivy_index.write.lock");
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .unwrap();
+    lock_file.lock_exclusive().unwrap();
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list", "--no-refresh"]));
+
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("committed123"));
+    assert!(!stdout.contains("pending123"));
+    FileExt::unlock(&lock_file).unwrap();
 }

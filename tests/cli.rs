@@ -429,6 +429,27 @@ fn broken_index_fails_loudly_instead_of_reporting_zero_sessions() {
 }
 
 #[test]
+fn no_refresh_serves_the_existing_index_without_scanning() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(temp.path(), "seen123", "/repo/backend", "Seen session");
+
+    let (before_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "--no-refresh"]));
+    assert!(before_stdout.contains("No sessions found."));
+
+    assert_success(run_fr(temp.path(), &["--list"]));
+    write_codex_session(temp.path(), "unseen123", "/repo/backend", "Unseen session");
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--json", "--no-refresh"]));
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("seen123"));
+    assert!(!stdout.contains("unseen123"));
+
+    let (stdout, stderr) = assert_failure(run_fr(temp.path(), &["--no-refresh"]));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("--no-refresh"));
+}
+
+#[test]
 fn agent_context_exposes_the_portable_skill() {
     let temp = TempDir::new().unwrap();
 
