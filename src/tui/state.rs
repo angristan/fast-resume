@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use crate::config::{AGENT_ORDER, is_agent};
@@ -6,6 +7,7 @@ use crate::query::{Filter, parse_query};
 use crate::search::SearchEngine;
 
 use super::images::AgentImages;
+use super::preview::render_preview_lines;
 use super::text::char_to_byte_idx;
 
 const DATE_SUGGESTIONS: [&str; 4] = ["today", "yesterday", "week", "month"];
@@ -53,8 +55,16 @@ pub(super) struct YoloModal {
     pub(super) selected: bool,
 }
 
+struct PreviewCache {
+    session_id: String,
+    mtime: f64,
+    query: String,
+    lines: Vec<ratatui::text::Line<'static>>,
+}
+
 pub(super) struct AppState {
     pub(super) engine: SearchEngine,
+    preview_cache: RefCell<Option<PreviewCache>>,
     pub(super) visible: Vec<Session>,
     pub(super) query: String,
     pub(super) cursor: usize,
@@ -78,6 +88,28 @@ pub(super) struct AppState {
 }
 
 impl AppState {
+    /// Rendering the preview lowercases and highlights the full session
+    /// content, so the result is cached per (session, mtime, query) instead
+    /// of being recomputed on every frame while the user types.
+    pub(super) fn preview_lines(&self, session: &Session) -> Vec<ratatui::text::Line<'static>> {
+        let mut cache = self.preview_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref()
+            && cached.session_id == session.id
+            && cached.mtime == session.mtime
+            && cached.query == self.query
+        {
+            return cached.lines.clone();
+        }
+        let lines = render_preview_lines(session, &self.query);
+        *cache = Some(PreviewCache {
+            session_id: session.id.clone(),
+            mtime: session.mtime,
+            query: self.query.clone(),
+            lines: lines.clone(),
+        });
+        lines
+    }
+
     pub(super) fn new(
         query: String,
         agent_filter: Option<String>,
@@ -88,6 +120,7 @@ impl AppState {
     ) -> Self {
         let mut state = Self {
             engine,
+            preview_cache: RefCell::new(None),
             visible: Vec::new(),
             cursor: query.chars().count(),
             query,

@@ -10,7 +10,6 @@ use crate::config::{AGENTS, VERSION};
 use crate::model::Session;
 
 use super::layout::{self, MainLayout};
-use super::preview::render_preview_lines;
 use super::state::{AppState, PendingAction, YoloModal};
 use super::text::{
     age_style, display_width_until, line_width, search_query_spans, time_ago, truncate,
@@ -763,11 +762,7 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         Vec::new()
     };
 
-    lines.extend(
-        render_preview_lines(session, &state.query)
-            .into_iter()
-            .take(220),
-    );
+    lines.extend(state.preview_lines(session).into_iter().take(220));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines))

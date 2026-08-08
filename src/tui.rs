@@ -401,6 +401,23 @@ mod tests {
     }
 
     #[test]
+    fn preview_cache_refreshes_when_session_content_changes() {
+        let state = test_state(Vec::new());
+        let mut session = session("preview-1");
+        session.content = "first version of the content".to_string();
+        session.mtime = 1.0;
+
+        let first = state.preview_lines(&session);
+        let cached = state.preview_lines(&session);
+        assert_eq!(format!("{first:?}"), format!("{cached:?}"));
+
+        session.content = "second version of the content".to_string();
+        session.mtime = 2.0;
+        let refreshed = state.preview_lines(&session);
+        assert!(format!("{refreshed:?}").contains("second version"));
+    }
+
+    #[test]
     fn pending_search_requests_coalesce_to_latest() {
         let (tx, rx) = std::sync::mpsc::channel();
         tx.send(search_request(2, "second")).unwrap();
