@@ -1,3 +1,23 @@
+# [2.8.0](https://github.com/angristan/fast-resume/compare/v2.7.1...v2.8.0) (2026-08-08)
+
+
+### Bug Fixes
+
+* **cli:** propagate search errors in list and JSON output ([b447213](https://github.com/angristan/fast-resume/commit/b4472135122e70d5c097c69b4320081eb60b7595))
+* **index:** wipe stale index schemas under the write lock ([dffb54f](https://github.com/angristan/fast-resume/commit/dffb54f77879a0a1fa3f9d0160cbcad9a8796cab))
+* **tui:** restore the terminal when a panic unwinds the TUI ([ceabef8](https://github.com/angristan/fast-resume/commit/ceabef854320521023e0c8523ab0b18e14d90339))
+
+
+### Features
+
+* **cli:** add --no-refresh and announce refresh-lock waits ([647f9d4](https://github.com/angristan/fast-resume/commit/647f9d4cb7cdbabbb39f311bc5c9d5b3a4c04356))
+
+
+### Performance Improvements
+
+* **index:** read session markers from fast fields at launch ([2ac84b0](https://github.com/angristan/fast-resume/commit/2ac84b0881089d9338d815a0cb682830f9b6748a))
+* **index:** reuse one index writer and batch commits per refresh ([cb59aff](https://github.com/angristan/fast-resume/commit/cb59aff0c050a43039f902c1d25fafa44404cfe2))
+
 ## [2.7.1](https://github.com/angristan/fast-resume/compare/v2.7.0...v2.7.1) (2026-08-05)
 
 
