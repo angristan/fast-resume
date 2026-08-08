@@ -209,19 +209,41 @@ impl SessionIndex {
         Ok(())
     }
 
+    /// Read `(agent, id) -> mtime` from columnar fast fields. This runs on
+    /// every launch, so it must not fetch stored documents: that would
+    /// decompress every session's conversation content just to reach three
+    /// small fields.
     pub fn known_sessions(&self) -> Result<KnownSessions> {
         let searcher = self.searcher()?;
         let mut known = KnownSessions::new();
-        for (_, address) in self.search_all_addresses(&searcher)? {
-            let doc = searcher.doc::<TantivyDocument>(address)?;
-            let Some(id) = document::text(&doc, self.fields.id) else {
-                continue;
-            };
-            let Some(agent) = document::text(&doc, self.fields.agent) else {
-                continue;
-            };
-            let mtime = document::number(&doc, self.fields.mtime).unwrap_or(0.0);
-            known.insert((agent.to_string(), id.to_string()), mtime);
+        let mut id = String::new();
+        let mut agent = String::new();
+        for segment_reader in searcher.segment_readers() {
+            let fast_fields = segment_reader.fast_fields();
+            let ids = fast_fields.str("id")?.context("id fast field missing")?;
+            let agents = fast_fields
+                .str("agent")?
+                .context("agent fast field missing")?;
+            let mtimes = fast_fields.f64("mtime")?;
+            let alive = segment_reader.alive_bitset();
+            for doc in 0..segment_reader.max_doc() {
+                if alive.is_some_and(|bitset| !bitset.is_alive(doc)) {
+                    continue;
+                }
+                let Some(id_ord) = ids.term_ords(doc).next() else {
+                    continue;
+                };
+                let Some(agent_ord) = agents.term_ords(doc).next() else {
+                    continue;
+                };
+                id.clear();
+                agent.clear();
+                if !ids.ord_to_str(id_ord, &mut id)? || !agents.ord_to_str(agent_ord, &mut agent)? {
+                    continue;
+                }
+                let mtime = mtimes.first(doc).unwrap_or(0.0);
+                known.insert((agent.clone(), id.clone()), mtime);
+            }
         }
         Ok(known)
     }
@@ -545,6 +567,36 @@ mod tests {
         assert_eq!(
             known.get(&("claude".to_string(), "a".to_string())),
             Some(&1.0)
+        );
+    }
+
+    #[test]
+    fn known_sessions_skips_deleted_and_superseded_documents() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[
+                session("a", "claude", "Auth bug", "/work/api", "token"),
+                session("b", "codex", "Other", "/work/b", "button"),
+            ])
+            .unwrap();
+
+        // A second commit supersedes "a" (tombstone in the first segment) and
+        // a third deletes "b" entirely.
+        let mut updated = session("a", "claude", "Auth bug", "/work/api", "token again");
+        updated.mtime = 2.0;
+        index.update_sessions(&[updated]).unwrap();
+        let mut updater = index.updater(None);
+        updater
+            .delete_sessions("codex", &["b".to_string()])
+            .unwrap();
+        updater.finish().unwrap();
+
+        let known = index.known_sessions().unwrap();
+        assert_eq!(known.len(), 1);
+        assert_eq!(
+            known.get(&("claude".to_string(), "a".to_string())),
+            Some(&2.0)
         );
     }
 

@@ -43,11 +43,13 @@ impl IndexFields {
 
 pub(super) fn build_schema() -> Schema {
     let mut schema = Schema::builder();
-    schema.add_text_field("id", raw_text_options());
+    // id, agent, and mtime are fast fields so known_sessions() can read them
+    // from columnar storage without decompressing stored conversation content.
+    schema.add_text_field("id", raw_text_options().set_fast(Some("raw")));
     schema.add_text_field("session_key", raw_text_options());
     schema.add_text_field("title", TEXT | STORED);
     schema.add_text_field("directory", raw_text_options());
-    schema.add_text_field("agent", raw_text_options());
+    schema.add_text_field("agent", raw_text_options().set_fast(Some("raw")));
     schema.add_text_field("content", TEXT | STORED);
     schema.add_f64_field(
         "timestamp",
@@ -57,7 +59,7 @@ pub(super) fn build_schema() -> Schema {
             .set_fast(),
     );
     schema.add_i64_field("message_count", STORED);
-    schema.add_f64_field("mtime", STORED);
+    schema.add_f64_field("mtime", NumericOptions::default().set_stored().set_fast());
     schema.add_bool_field("yolo", STORED);
     schema.build()
 }
