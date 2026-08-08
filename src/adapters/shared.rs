@@ -84,15 +84,24 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     ))
 }
 
-pub(super) fn incremental_from_files<F>(
+/// Run the shared incremental-scan skeleton over keyed session files,
+/// streaming each parsed session to `on_session` when a callback is given.
+/// `scanned` is None when the file scan itself failed. An incomplete scan
+/// (`complete == false`) reports no deletions: files that could not be
+/// listed may still exist, and deleting them would drop good indexed data.
+pub(super) fn incremental_scan<F>(
     agent: &'static str,
     known: &KnownSessions,
-    current_files: HashMap<String, (PathBuf, f64)>,
+    scanned: Option<SessionFileScan>,
     mut parse: F,
+    mut on_session: Option<&mut SessionCallback<'_>>,
 ) -> IncrementalScan
 where
     F: FnMut(&Path) -> IncrementalParse,
 {
+    let Some((current_files, complete)) = scanned else {
+        return failed_incremental_scan(agent);
+    };
     let mut current_ids = HashSet::new();
     let mut new_or_modified = Vec::new();
 
@@ -104,6 +113,9 @@ where
         match parse(&path) {
             IncrementalParse::Session(mut session) => {
                 session.mtime = mtime;
+                if let Some(on_session) = on_session.as_mut() {
+                    on_session(session.clone());
+                }
                 new_or_modified.push(session);
             }
             IncrementalParse::Delete => {
@@ -116,46 +128,49 @@ where
     IncrementalScan {
         agent,
         new_or_modified,
-        deleted_ids: deleted_ids_for_agent(known, agent, &current_ids),
+        deleted_ids: if complete {
+            deleted_ids_for_agent(known, agent, &current_ids)
+        } else {
+            Vec::new()
+        },
     }
 }
 
-pub(super) fn incremental_from_files_streaming<F>(
-    agent: &'static str,
-    known: &KnownSessions,
-    current_files: HashMap<String, (PathBuf, f64)>,
-    mut parse: F,
-    on_session: &mut SessionCallback<'_>,
-) -> IncrementalScan
-where
-    F: FnMut(&Path) -> IncrementalParse,
-{
-    let mut current_ids = HashSet::new();
-    let mut new_or_modified = Vec::new();
+/// Build the common resume command shape: binary, yolo flags when yolo mode
+/// is on and the agent supports it, resume flags, then the session id.
+pub(super) fn build_resume_command(
+    binary: &str,
+    yolo_flags: &[&str],
+    yolo: bool,
+    resume_flags: &[&str],
+    id: &str,
+) -> Vec<String> {
+    let mut command = vec![binary.to_string()];
+    if yolo {
+        command.extend(yolo_flags.iter().map(|flag| (*flag).to_string()));
+    }
+    command.extend(resume_flags.iter().map(|flag| (*flag).to_string()));
+    command.push(id.to_string());
+    command
+}
 
-    for (session_id, (path, mtime)) in current_files {
-        current_ids.insert(session_id.clone());
-        if !session_needs_update(known, agent, &session_id, mtime) {
-            continue;
-        }
-        match parse(&path) {
-            IncrementalParse::Session(mut session) => {
-                session.mtime = mtime;
-                on_session(session.clone());
-                new_or_modified.push(session);
-            }
-            IncrementalParse::Delete => {
-                current_ids.remove(&session_id);
-            }
-            IncrementalParse::Retain => {}
+pub(super) fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&value[index + 1..index + 3], 16)
+        {
+            output.push(byte);
+            index += 3;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
         }
     }
-
-    IncrementalScan {
-        agent,
-        new_or_modified,
-        deleted_ids: deleted_ids_for_agent(known, agent, &current_ids),
-    }
+    String::from_utf8(output).unwrap_or_else(|_| value.to_string())
 }
 
 pub(super) fn incremental_parse_from_option(session: Option<Session>) -> IncrementalParse {
@@ -442,9 +457,13 @@ mod tests {
         let mut known = KnownSessions::new();
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
 
-        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| {
-            IncrementalParse::Delete
-        });
+        let scan = incremental_scan(
+            "codex",
+            &known,
+            Some((current_file("abc123", 2.0), true)),
+            |_| IncrementalParse::Delete,
+            None,
+        );
 
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["abc123"]);
@@ -456,12 +475,12 @@ mod tests {
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
         let mut streamed = Vec::new();
 
-        let scan = incremental_from_files_streaming(
+        let scan = incremental_scan(
             "codex",
             &known,
-            current_file("abc123", 2.0),
+            Some((current_file("abc123", 2.0), true)),
             |_| IncrementalParse::Delete,
-            &mut |session| streamed.push(session),
+            Some(&mut |session| streamed.push(session)),
         );
 
         assert!(streamed.is_empty());
@@ -474,9 +493,13 @@ mod tests {
         let mut known = KnownSessions::new();
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
 
-        let scan = incremental_from_files("codex", &known, current_file("abc123", 2.0), |_| {
-            IncrementalParse::Retain
-        });
+        let scan = incremental_scan(
+            "codex",
+            &known,
+            Some((current_file("abc123", 2.0), true)),
+            |_| IncrementalParse::Retain,
+            None,
+        );
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
@@ -488,12 +511,12 @@ mod tests {
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
         let mut streamed = Vec::new();
 
-        let scan = incremental_from_files_streaming(
+        let scan = incremental_scan(
             "codex",
             &known,
-            current_file("abc123", 2.0),
+            Some((current_file("abc123", 2.0), true)),
             |_| IncrementalParse::Retain,
-            &mut |session| streamed.push(session),
+            Some(&mut |session| streamed.push(session)),
         );
 
         assert!(streamed.is_empty());
@@ -506,12 +529,56 @@ mod tests {
         let mut known = KnownSessions::new();
         known.insert(("codex".to_string(), "abc123".to_string()), 1.0);
 
-        let scan = incremental_from_files("codex", &known, current_file("abc123", 1.0), |_| {
-            panic!("unchanged sessions should not be parsed")
-        });
+        let scan = incremental_scan(
+            "codex",
+            &known,
+            Some((current_file("abc123", 1.0), true)),
+            |_| panic!("unchanged sessions should not be parsed"),
+            None,
+        );
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incomplete_scans_do_not_delete_known_sessions() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "gone".to_string()), 1.0);
+
+        let scan = incremental_scan(
+            "codex",
+            &known,
+            Some((HashMap::new(), false)),
+            |_| IncrementalParse::Retain,
+            None,
+        );
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn failed_file_scans_report_no_changes_or_deletions() {
+        let mut known = KnownSessions::new();
+        known.insert(("codex".to_string(), "gone".to_string()), 1.0);
+
+        let scan = incremental_scan("codex", &known, None, |_| IncrementalParse::Retain, None);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn builds_resume_commands_with_optional_yolo_flags() {
+        assert_eq!(
+            build_resume_command("crush", &["--yolo"], false, &["--session"], "abc"),
+            ["crush", "--session", "abc"]
+        );
+        assert_eq!(
+            build_resume_command("crush", &["--yolo"], true, &["--session"], "abc"),
+            ["crush", "--yolo", "--session", "abc"]
+        );
     }
 
     #[test]

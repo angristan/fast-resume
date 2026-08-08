@@ -11,9 +11,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, SessionFileScan, copilot_fallback_session_id, failed_incremental_scan,
-    incremental_from_files, incremental_from_files_streaming, incremental_parse_jsonl,
-    raw_stats_for_tree, string_at,
+    IncrementalParse, SessionFileScan, build_resume_command, copilot_fallback_session_id,
+    incremental_parse_jsonl, incremental_scan, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -52,16 +51,7 @@ impl Adapter for CopilotCliAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session_incremental(path)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -69,29 +59,11 @@ impl Adapter for CopilotCliAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            current_files,
-            |path| self.parse_session_incremental(path),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut cmd = vec!["copilot".to_string()];
-        if yolo {
-            cmd.push("--yolo".to_string());
-        }
-        cmd.extend(["--resume".to_string(), session.id.clone()]);
-        cmd
+        build_resume_command("copilot", &["--yolo"], yolo, &["--resume"], &session.id)
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -100,6 +72,20 @@ impl Adapter for CopilotCliAdapter {
 }
 
 impl CopilotCliAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session_incremental(path),
+            on_session,
+        )
+    }
+
     fn scan_session_files(&self) -> Option<SessionFileScan> {
         let mut current_files = HashMap::new();
         let mut complete = true;

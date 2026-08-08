@@ -10,8 +10,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, truncate_title};
 
 use super::shared::{
-    deleted_ids_for_agent, failed_incremental_scan, session_needs_update, string_at,
-    timestamp_from_ms, timestamp_from_seconds,
+    build_resume_command, deleted_ids_for_agent, failed_incremental_scan, session_needs_update,
+    string_at, timestamp_from_ms, timestamp_from_seconds,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -58,12 +58,7 @@ impl Adapter for CrushAdapter {
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut cmd = vec!["crush".to_string()];
-        if yolo {
-            cmd.push("--yolo".to_string());
-        }
-        cmd.extend(["--session".to_string(), session.id.clone()]);
-        cmd
+        build_resume_command("crush", &["--yolo"], yolo, &["--session"], &session.id)
     }
 
     fn raw_stats(&self) -> RawAdapterStats {

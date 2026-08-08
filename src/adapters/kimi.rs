@@ -10,10 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_from_option,
-    incremental_parse_jsonl_with_partial_check, json_file_has_parse_errors, raw_stats_for_tree,
-    string_at, timestamp_from_ms, value_i64_at,
+    IncrementalParse, build_resume_command, content_texts, failed_incremental_scan,
+    incremental_parse_from_option, incremental_parse_jsonl_with_partial_check, incremental_scan,
+    json_file_has_parse_errors, raw_stats_for_tree, string_at, timestamp_from_ms, value_i64_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -54,6 +53,24 @@ impl Default for KimiAdapter {
 }
 
 impl KimiAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        let index_mtime = file_mtime_seconds(&self.session_index_file());
+        let Some(work_dirs) = self.read_session_index() else {
+            return failed_incremental_scan(self.name());
+        };
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files(index_mtime),
+            |path| self.parse_session_incremental(path, &work_dirs, index_mtime),
+            on_session,
+        )
+    }
+
     #[allow(dead_code)]
     pub fn new(sessions_dir: PathBuf) -> Self {
         Self { sessions_dir }
@@ -289,20 +306,7 @@ impl Adapter for KimiAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let index_mtime = file_mtime_seconds(&self.session_index_file());
-        let Some(work_dirs) = self.read_session_index() else {
-            return failed_incremental_scan(self.name());
-        };
-        let Some((current_files, complete)) = self.scan_session_files(index_mtime) else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session_incremental(path, &work_dirs, index_mtime)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -310,33 +314,11 @@ impl Adapter for KimiAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let index_mtime = file_mtime_seconds(&self.session_index_file());
-        let Some(work_dirs) = self.read_session_index() else {
-            return failed_incremental_scan(self.name());
-        };
-        let Some((current_files, complete)) = self.scan_session_files(index_mtime) else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            current_files,
-            |path| self.parse_session_incremental(path, &work_dirs, index_mtime),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut command = vec!["kimi".to_string()];
-        if yolo {
-            command.push("--yolo".to_string());
-        }
-        command.extend(["--session".to_string(), session.id.clone()]);
-        command
+        build_resume_command("kimi", &["--yolo"], yolo, &["--session"], &session.id)
     }
 
     fn raw_stats(&self) -> RawAdapterStats {

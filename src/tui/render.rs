@@ -535,10 +535,6 @@ fn result_columns(width: u16) -> ResultColumns {
 }
 
 fn agent_badge(agent: &str) -> &str {
-    if agent == "antigravity" {
-        return "agy";
-    }
-
     AGENTS
         .get(agent)
         .map(|config| config.badge)
@@ -994,7 +990,7 @@ mod tests {
 
     #[test]
     fn result_rows_use_short_agent_badges() {
-        assert_eq!(AGENTS["antigravity"].badge, "antigravity");
+        assert_eq!(AGENTS["antigravity"].badge, "agy");
         assert_eq!(agent_badge("antigravity"), "agy");
         assert_eq!(agent_badge("copilot-cli"), "copilot");
         assert_eq!(agent_badge("copilot-vscode"), "vscode");

@@ -211,14 +211,14 @@ fn load_opencode_db_incremental(
     known: &KnownSessions,
 ) -> IncrementalScan {
     let Ok(conn) = Connection::open(db_path) else {
-        return opencode_db_error_scan(agent);
+        return failed_incremental_scan(agent);
     };
 
     let mut stmt = match conn
         .prepare("SELECT id, title, directory, time_created, time_updated FROM session")
     {
         Ok(stmt) => stmt,
-        Err(_) => return opencode_db_error_scan(agent),
+        Err(_) => return failed_incremental_scan(agent),
     };
 
     let rows = match stmt.query_map([], |row| {
@@ -231,7 +231,7 @@ fn load_opencode_db_incremental(
         ))
     }) {
         Ok(rows) => rows,
-        Err(_) => return opencode_db_error_scan(agent),
+        Err(_) => return failed_incremental_scan(agent),
     };
 
     let mut current_ids = HashSet::new();
@@ -239,7 +239,7 @@ fn load_opencode_db_incremental(
     let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
     for row in rows {
         let Ok((id, title, directory, time_created, time_updated)) = row else {
-            return opencode_db_error_scan(agent);
+            return failed_incremental_scan(agent);
         };
         current_ids.insert(id.clone());
         let timestamp_ms = time_created
@@ -275,7 +275,7 @@ fn load_opencode_db_incremental(
         );
         let mut stmt = match conn.prepare(&query) {
             Ok(stmt) => stmt,
-            Err(_) => return opencode_db_error_scan(agent),
+            Err(_) => return failed_incremental_scan(agent),
         };
         let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
             Ok((
@@ -285,11 +285,11 @@ fn load_opencode_db_incremental(
             ))
         }) {
             Ok(rows) => rows,
-            Err(_) => return opencode_db_error_scan(agent),
+            Err(_) => return failed_incremental_scan(agent),
         };
         for row in rows {
             let Ok((msg_id, session_id, role)) = row else {
-                return opencode_db_error_scan(agent);
+                return failed_incremental_scan(agent);
             };
             messages_by_session
                 .entry(session_id)
@@ -306,7 +306,7 @@ fn load_opencode_db_incremental(
         );
         let mut stmt = match conn.prepare(&query) {
             Ok(stmt) => stmt,
-            Err(_) => return opencode_db_error_scan(agent),
+            Err(_) => return failed_incremental_scan(agent),
         };
         let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
             Ok((
@@ -315,11 +315,11 @@ fn load_opencode_db_incremental(
             ))
         }) {
             Ok(rows) => rows,
-            Err(_) => return opencode_db_error_scan(agent),
+            Err(_) => return failed_incremental_scan(agent),
         };
         for row in rows {
             let Ok((message_id, text)) = row else {
-                return opencode_db_error_scan(agent);
+                return failed_incremental_scan(agent);
             };
             if !text.is_empty() {
                 parts_by_message.entry(message_id).or_default().push(text);
@@ -364,14 +364,6 @@ fn load_opencode_db_incremental(
         agent,
         new_or_modified,
         deleted_ids,
-    }
-}
-
-fn opencode_db_error_scan(agent: &'static str) -> IncrementalScan {
-    IncrementalScan {
-        agent,
-        new_or_modified: Vec::new(),
-        deleted_ids: Vec::new(),
     }
 }
 

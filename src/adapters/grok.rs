@@ -13,9 +13,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_jsonl, json_file_has_parse_errors,
-    parse_datetime, raw_stats_for_tree, string_at,
+    IncrementalParse, build_resume_command, incremental_parse_jsonl, incremental_scan,
+    json_file_has_parse_errors, parse_datetime, percent_decode, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -35,6 +34,20 @@ impl Default for GrokAdapter {
 }
 
 impl GrokAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_incremental(path),
+            on_session,
+        )
+    }
+
     #[allow(dead_code)]
     pub fn new(sessions_dir: PathBuf) -> Self {
         Self { sessions_dir }
@@ -280,16 +293,7 @@ impl Adapter for GrokAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some((files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files(self.name(), known, files, |path| {
-            self.parse_incremental(path)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -297,29 +301,17 @@ impl Adapter for GrokAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some((files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            files,
-            |path| self.parse_incremental(path),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut command = vec!["grok".to_string()];
-        if yolo {
-            command.push("--always-approve".to_string());
-        }
-        command.extend(["--resume".to_string(), session.id.clone()]);
-        command
+        build_resume_command(
+            "grok",
+            &["--always-approve"],
+            yolo,
+            &["--resume"],
+            &session.id,
+        )
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -371,25 +363,6 @@ fn grok_directory_from_path(path: &Path) -> String {
     } else {
         Default::default()
     }
-}
-
-fn percent_decode(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&value[index + 1..index + 3], 16)
-        {
-            output.push(byte);
-            index += 3;
-        } else {
-            output.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(output).unwrap_or_else(|_| value.to_string())
 }
 
 #[cfg(test)]

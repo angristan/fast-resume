@@ -9,10 +9,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, SessionFileScan, content_texts, failed_incremental_scan,
-    incremental_from_files, incremental_from_files_streaming, incremental_parse_from_option,
-    incremental_parse_jsonl_with_partial_check, json_file_has_parse_errors, parse_datetime,
-    raw_stats_for_tree, string_at,
+    IncrementalParse, SessionFileScan, build_resume_command, content_texts,
+    incremental_parse_from_option, incremental_parse_jsonl_with_partial_check, incremental_scan,
+    json_file_has_parse_errors, parse_datetime, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -60,16 +59,7 @@ impl Adapter for VibeAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session_incremental(path)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -77,29 +67,17 @@ impl Adapter for VibeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            current_files,
-            |path| self.parse_session_incremental(path),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut cmd = vec!["vibe".to_string()];
-        if yolo {
-            cmd.extend(["--agent".to_string(), "auto-approve".to_string()]);
-        }
-        cmd.extend(["--resume".to_string(), session.id.clone()]);
-        cmd
+        build_resume_command(
+            "vibe",
+            &["--agent", "auto-approve"],
+            yolo,
+            &["--resume"],
+            &session.id,
+        )
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -108,6 +86,20 @@ impl Adapter for VibeAdapter {
 }
 
 impl VibeAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| self.parse_session_incremental(path),
+            on_session,
+        )
+    }
+
     fn scan_session_files(&self) -> Option<SessionFileScan> {
         let mut current_files = HashMap::new();
         let mut complete = true;

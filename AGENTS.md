@@ -20,6 +20,7 @@
 ## Adding or changing an adapter
 
 - Implement the `Adapter` contract in `src/adapters/` and register it in `src/adapters/mod.rs`.
+- Build file-backed incremental refresh on `shared::incremental_scan`: write a file scan and a parser, and pass both through it. It owns the deletion-safety rule (incomplete scans never delete). Use `shared::build_resume_command` for the standard binary/yolo/resume shape.
 - Update agent metadata and source paths in `src/config.rs`.
 - Add focused parser, incremental refresh, deletion-safety, and resume-command tests.
 - Add binary coverage in `tests/cli.rs`.

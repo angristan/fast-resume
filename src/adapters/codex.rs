@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -10,9 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, SessionFileScan, codex_session_id_from_path, content_texts,
-    deleted_ids_for_agent, failed_incremental_scan, fallback_session_id, incremental_parse_jsonl,
-    parse_timestamp_seconds, raw_stats_for_tree, session_needs_update, string_at,
+    SessionFileScan, build_resume_command, codex_session_id_from_path, content_texts,
+    fallback_session_id, incremental_parse_jsonl, incremental_scan, parse_timestamp_seconds,
+    raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -32,6 +32,21 @@ impl Default for CodexAdapter {
 }
 
 impl CodexAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        let thread_names = self.load_thread_names();
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files(),
+            |path| incremental_parse_jsonl(path, || self.parse_session(path, &thread_names)),
+            on_session,
+        )
+    }
+
     #[allow(dead_code)]
     pub fn new(sessions_dir: PathBuf, session_index_file: PathBuf) -> Self {
         Self {
@@ -250,40 +265,7 @@ impl Adapter for CodexAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let thread_names = self.load_thread_names();
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut current_ids = HashSet::new();
-        let mut new_or_modified = Vec::new();
-
-        for (session_id, (path, mtime)) in current_files {
-            current_ids.insert(session_id.clone());
-            if !session_needs_update(known, self.name(), &session_id, mtime) {
-                continue;
-            }
-
-            match incremental_parse_jsonl(&path, || self.parse_session(&path, &thread_names)) {
-                IncrementalParse::Session(mut session) => {
-                    session.mtime = mtime;
-                    new_or_modified.push(session);
-                }
-                IncrementalParse::Delete => {
-                    current_ids.remove(&session_id);
-                }
-                IncrementalParse::Retain => {}
-            }
-        }
-
-        IncrementalScan {
-            agent: self.name(),
-            new_or_modified,
-            deleted_ids: if complete {
-                deleted_ids_for_agent(known, self.name(), &current_ids)
-            } else {
-                Vec::new()
-            },
-        }
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -291,50 +273,17 @@ impl Adapter for CodexAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let thread_names = self.load_thread_names();
-        let Some((current_files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut current_ids = HashSet::new();
-        let mut new_or_modified = Vec::new();
-
-        for (session_id, (path, mtime)) in current_files {
-            current_ids.insert(session_id.clone());
-            if !session_needs_update(known, self.name(), &session_id, mtime) {
-                continue;
-            }
-
-            match incremental_parse_jsonl(&path, || self.parse_session(&path, &thread_names)) {
-                IncrementalParse::Session(mut session) => {
-                    session.mtime = mtime;
-                    on_session(session.clone());
-                    new_or_modified.push(session);
-                }
-                IncrementalParse::Delete => {
-                    current_ids.remove(&session_id);
-                }
-                IncrementalParse::Retain => {}
-            }
-        }
-
-        IncrementalScan {
-            agent: self.name(),
-            new_or_modified,
-            deleted_ids: if complete {
-                deleted_ids_for_agent(known, self.name(), &current_ids)
-            } else {
-                Vec::new()
-            },
-        }
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut cmd = vec!["codex".to_string()];
-        if yolo {
-            cmd.push("--dangerously-bypass-approvals-and-sandbox".to_string());
-        }
-        cmd.extend(["resume".to_string(), session.id.clone()]);
-        cmd
+        build_resume_command(
+            "codex",
+            &["--dangerously-bypass-approvals-and-sandbox"],
+            yolo,
+            &["resume"],
+            &session.id,
+        )
     }
 
     fn raw_stats(&self) -> RawAdapterStats {

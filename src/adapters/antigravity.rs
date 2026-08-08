@@ -16,9 +16,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_jsonl, parse_datetime, raw_stats_for_tree,
-    sqlite_file_stats, sqlite_mtime, string_at,
+    IncrementalParse, build_resume_command, incremental_parse_jsonl, incremental_scan,
+    parse_datetime, raw_stats_for_tree, sqlite_file_stats, sqlite_mtime, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -42,6 +41,22 @@ impl Default for AntigravityAdapter {
 }
 
 impl AntigravityAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        let scanned = self.scan_session_files();
+        let workspaces = self.workspace_map();
+        incremental_scan(
+            self.name(),
+            known,
+            scanned,
+            |path| self.parse_incremental(path, &workspaces),
+            on_session,
+        )
+    }
+
     #[allow(dead_code)]
     pub fn new(data_dir: PathBuf) -> Self {
         Self { data_dir }
@@ -439,17 +454,7 @@ impl Adapter for AntigravityAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some((files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let workspaces = self.workspace_map();
-        let mut scan = incremental_from_files(self.name(), known, files, |path| {
-            self.parse_incremental(path, &workspaces)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -457,30 +462,17 @@ impl Adapter for AntigravityAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some((files, complete)) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        let workspaces = self.workspace_map();
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            files,
-            |path| self.parse_incremental(path, &workspaces),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut command = vec!["agy".to_string()];
-        if yolo {
-            command.push("--dangerously-skip-permissions".to_string());
-        }
-        command.extend(["--conversation".to_string(), session.id.clone()]);
-        command
+        build_resume_command(
+            "agy",
+            &["--dangerously-skip-permissions"],
+            yolo,
+            &["--conversation"],
+            &session.id,
+        )
     }
 
     fn raw_stats(&self) -> RawAdapterStats {

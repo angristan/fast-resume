@@ -38,7 +38,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
             "antigravity",
             AgentConfig {
                 name: "antigravity",
-                badge: "antigravity",
+                badge: "agy",
                 color: ratatui::style::Color::Rgb(66, 133, 244),
             },
         ),

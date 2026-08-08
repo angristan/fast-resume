@@ -10,9 +10,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_jsonl, parse_timestamp_seconds,
-    raw_stats_for_tree, string_at, text_from_part,
+    IncrementalParse, build_resume_command, content_texts, incremental_parse_jsonl,
+    incremental_scan, parse_timestamp_seconds, raw_stats_for_tree, string_at, text_from_part,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -29,6 +28,20 @@ impl Default for ClaudeAdapter {
 }
 
 impl ClaudeAdapter {
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        incremental_scan(
+            self.name(),
+            known,
+            self.scan_session_files().map(|files| (files, true)),
+            |path| self.parse_session_incremental(path),
+            on_session,
+        )
+    }
+
     #[allow(dead_code)]
     pub fn new(sessions_dir: PathBuf) -> Self {
         Self { sessions_dir }
@@ -242,12 +255,7 @@ impl Adapter for ClaudeAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        incremental_from_files(self.name(), known, current_files, |path| {
-            self.parse_session_incremental(path)
-        })
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -255,25 +263,17 @@ impl Adapter for ClaudeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some(current_files) = self.scan_session_files() else {
-            return failed_incremental_scan(self.name());
-        };
-        incremental_from_files_streaming(
-            self.name(),
-            known,
-            current_files,
-            |path| self.parse_session_incremental(path),
-            on_session,
-        )
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
-        let mut cmd = vec!["claude".to_string()];
-        if yolo {
-            cmd.push("--dangerously-skip-permissions".to_string());
-        }
-        cmd.extend(["--resume".to_string(), session.id.clone()]);
-        cmd
+        build_resume_command(
+            "claude",
+            &["--dangerously-skip-permissions"],
+            yolo,
+            &["--resume"],
+            &session.id,
+        )
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
