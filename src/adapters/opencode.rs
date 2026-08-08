@@ -469,7 +469,7 @@ impl Default for LegacyLoad {
 }
 
 fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> {
-    let mut load = load_opencode_legacy_with_health(agent, legacy_dir);
+    let mut load = load_opencode_legacy_with_health(agent, legacy_dir, None);
     if !load.complete {
         return Vec::new();
     }
@@ -478,7 +478,13 @@ fn load_opencode_legacy(agent: &'static str, legacy_dir: &Path) -> Vec<Session> 
     load.sessions
 }
 
-fn load_opencode_legacy_with_health(agent: &'static str, legacy_dir: &Path) -> LegacyLoad {
+/// `only` limits content parsing to the given session ids so an incremental
+/// refresh does not re-read every message and part in the legacy store.
+fn load_opencode_legacy_with_health(
+    agent: &'static str,
+    legacy_dir: &Path,
+    only: Option<&HashSet<String>>,
+) -> LegacyLoad {
     let session_dir = legacy_dir.join("session");
     let message_dir = legacy_dir.join("message");
     let part_dir = legacy_dir.join("part");
@@ -537,6 +543,9 @@ fn load_opencode_legacy_with_health(agent: &'static str, legacy_dir: &Path) -> L
             else {
                 continue;
             };
+            if only.is_some_and(|ids| !ids.contains(&session_id)) {
+                continue;
+            }
             let Ok(data_bytes) = fs::read(path) else {
                 incomplete_session_ids.insert(session_id);
                 continue;
@@ -648,6 +657,9 @@ fn load_opencode_legacy_with_health(agent: &'static str, legacy_dir: &Path) -> L
         if id.is_empty() {
             continue;
         }
+        if only.is_some_and(|ids| !ids.contains(&id)) {
+            continue;
+        }
         let title = {
             let value = string_at(&data, &["title"]);
             if value.is_empty() {
@@ -732,7 +744,7 @@ fn load_opencode_legacy_incremental(
         sessions,
         incomplete_session_ids,
         complete: content_complete,
-    } = load_opencode_legacy_with_health(agent, legacy_dir);
+    } = load_opencode_legacy_with_health(agent, legacy_dir, Some(&changed_ids));
     if !content_complete {
         return IncrementalScan {
             agent,
@@ -975,6 +987,73 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["opencode", "/work/opencode", "--session", "opencode-1"]
         );
+    }
+
+    #[test]
+    fn legacy_incremental_parses_only_changed_sessions_and_keeps_the_rest() {
+        let temp = tempdir().unwrap();
+        let legacy_dir = temp.path().join("legacy");
+        for (session, msg, text) in [
+            ("opencode-a", "msg-a", "Alpha content"),
+            ("opencode-b", "msg-b", "Beta content"),
+        ] {
+            let session_dir = legacy_dir.join("session");
+            let message_dir = legacy_dir.join("message").join(session);
+            let part_dir = legacy_dir.join("part").join(msg);
+            fs::create_dir_all(&session_dir).unwrap();
+            fs::create_dir_all(&message_dir).unwrap();
+            fs::create_dir_all(&part_dir).unwrap();
+            fs::write(
+                session_dir.join(format!("ses_{session}.json")),
+                json!({
+                    "id": session,
+                    "title": "Thread",
+                    "directory": "/work/opencode",
+                    "time": {"updated": 1_720_000_000_000_i64}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            fs::write(
+                message_dir.join("msg_1.json"),
+                json!({"id": msg, "role": "user"}).to_string(),
+            )
+            .unwrap();
+            fs::write(
+                part_dir.join("part.json"),
+                json!({"type": "text", "text": text}).to_string(),
+            )
+            .unwrap();
+        }
+        let adapter = OpenCodeAdapter {
+            data_dir: temp.path().join("data"),
+            db_path: temp.path().join("data/opencode.db"),
+            legacy_dir: legacy_dir.clone(),
+        };
+        let known: KnownSessions = adapter
+            .find_sessions()
+            .into_iter()
+            .map(|session| (("opencode".to_string(), session.id), session.mtime))
+            .collect();
+        assert_eq!(known.len(), 2);
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(
+            legacy_dir.join("part/msg-b/part.json"),
+            json!({"type": "text", "text": "Beta content updated"}).to_string(),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "opencode-b");
+        assert!(
+            scan.new_or_modified[0]
+                .content
+                .contains("Beta content updated")
+        );
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]

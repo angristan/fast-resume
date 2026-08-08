@@ -53,13 +53,13 @@ pub fn refresh_incremental_streaming<F>(
 where
     F: FnMut(RefreshSummary),
 {
-    let known = index.known_sessions()?;
+    let known = std::sync::Arc::new(index.known_sessions()?);
     let mut updater = index.updater(commit_interval);
     let (tx, rx) = mpsc::channel();
     let trace_refresh = env::var_os("FAST_RESUME_TRACE_REFRESH").is_some();
     for adapter in all_adapters() {
         let tx = tx.clone();
-        let known = known.clone();
+        let known = std::sync::Arc::clone(&known);
         thread::spawn(move || {
             let started = Instant::now();
             let agent = adapter.name();
