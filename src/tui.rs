@@ -1,4 +1,6 @@
 use std::io::{self, Stdout};
+use std::panic;
+use std::sync::Once;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -80,6 +82,7 @@ pub fn run_tui(
         let _ = scan_tx.send(message);
     });
 
+    install_panic_hook();
     let mut terminal = setup_terminal()?;
     let images = image_protocol.and_then(AgentImages::load);
     let mut state = AppState::new(query, agent_filter, directory_filter, yolo, engine, images);
@@ -248,6 +251,31 @@ fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
         }
         None => false,
     }
+}
+
+/// Restore the terminal before the default panic handler runs. Without this,
+/// the panic message prints into the alternate screen and is erased, and the
+/// shell is left in raw mode.
+fn install_panic_hook() {
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let original = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            restore_terminal_modes();
+            original(info);
+        }));
+    });
+}
+
+fn restore_terminal_modes() {
+    let mut stdout = io::stdout();
+    let _ = execute!(
+        stdout,
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    );
+    let _ = disable_raw_mode();
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
