@@ -252,15 +252,17 @@ impl Adapter for CodexAdapter {
     }
 
     fn find_sessions(&self) -> Vec<Session> {
-        if !self.sessions_dir.exists() {
+        let Some((current_files, _)) = self.scan_session_files() else {
             return Vec::new();
-        }
+        };
         let thread_names = self.load_thread_names();
-        WalkDir::new(&self.sessions_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("jsonl"))
-            .filter_map(|entry| self.parse_session(entry.path(), &thread_names))
+        current_files
+            .into_values()
+            .filter_map(|(path, mtime)| {
+                let mut session = self.parse_session(&path, &thread_names)?;
+                session.mtime = mtime;
+                Some(session)
+            })
             .collect()
     }
 
@@ -313,6 +315,36 @@ mod tests {
                 .join("\n"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn full_scan_mtimes_match_the_incremental_scan() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
+        write_jsonl(
+            &sessions_dir.join("2026/06/21/rollout-2026-06-21T10-00-00-parity.jsonl"),
+            &[
+                json!({"type": "session_meta", "payload": {"id": "parity1", "cwd": "/work/app"}}),
+                json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Prompt"}}),
+            ],
+        );
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+
+        let full = adapter.find_sessions();
+        assert_eq!(full.len(), 1);
+        let known: KnownSessions = full
+            .iter()
+            .map(|session| (("codex".to_string(), session.id.clone()), session.mtime))
+            .collect();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(
+            scan.new_or_modified.is_empty(),
+            "rebuild mtimes must satisfy the incremental scan"
+        );
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]

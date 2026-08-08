@@ -429,6 +429,44 @@ fn broken_index_fails_loudly_instead_of_reporting_zero_sessions() {
 }
 
 #[test]
+fn incremental_refresh_after_rebuild_reparses_nothing() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(
+        temp.path(),
+        "parity-codex",
+        "/repo/backend",
+        "Codex parity session",
+    );
+    write_claude_session(
+        temp.path(),
+        "parity-claude",
+        "/repo/backend",
+        "Claude parity session prompt",
+    );
+    assert_success(run_fr(temp.path(), &["--rebuild", "--list"]));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fr"))
+        .arg("--list")
+        .env_clear()
+        .env("HOME", temp.path())
+        .env("FAST_RESUME_TRACE_REFRESH", "1")
+        .output()
+        .unwrap();
+    let (_, stderr) = assert_success(output);
+
+    for agent in ["codex", "claude"] {
+        let line = stderr
+            .lines()
+            .find(|line| line.starts_with(&format!("refresh {agent}:")))
+            .unwrap_or_else(|| panic!("missing trace for {agent}:\n{stderr}"));
+        assert!(
+            line.contains("changed=0") && line.contains("deleted=0"),
+            "rebuild mtimes were not accepted by the incremental scan: {line}"
+        );
+    }
+}
+
+#[test]
 fn no_refresh_serves_the_existing_index_without_scanning() {
     let temp = TempDir::new().unwrap();
     write_codex_session(temp.path(), "seen123", "/repo/backend", "Seen session");

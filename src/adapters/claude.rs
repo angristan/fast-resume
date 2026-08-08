@@ -4,7 +4,6 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use walkdir::WalkDir;
 
 use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
@@ -226,32 +225,17 @@ impl Adapter for ClaudeAdapter {
     }
 
     fn find_sessions(&self) -> Vec<Session> {
-        if !self.sessions_dir.exists() {
+        let Some(current_files) = self.scan_session_files() else {
             return Vec::new();
-        }
-        let mut sessions = Vec::new();
-        for entry in WalkDir::new(&self.sessions_dir)
-            .min_depth(2)
-            .max_depth(2)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("agent-"))
-            {
-                continue;
-            }
-            if let Some(session) = self.parse_session(path) {
-                sessions.push(session);
-            }
-        }
-        sessions
+        };
+        current_files
+            .into_values()
+            .filter_map(|(path, mtime)| {
+                let mut session = self.parse_session(&path)?;
+                session.mtime = mtime;
+                Some(session)
+            })
+            .collect()
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
@@ -327,6 +311,44 @@ mod tests {
     use crate::adapters::Adapter;
 
     use super::*;
+
+    #[test]
+    fn full_scan_mtimes_match_the_incremental_scan() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("mtime-parity.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Prompt with enough characters"}
+                })
+                .to_string(),
+                json!({"type": "assistant", "message": {"content": "Response"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let adapter = ClaudeAdapter::new(projects);
+
+        let full = adapter.find_sessions();
+        assert_eq!(full.len(), 1);
+        let known: crate::adapters::KnownSessions = full
+            .iter()
+            .map(|session| (("claude".to_string(), session.id.clone()), session.mtime))
+            .collect();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(
+            scan.new_or_modified.is_empty(),
+            "rebuild mtimes must satisfy the incremental scan"
+        );
+        assert!(scan.deleted_ids.is_empty());
+    }
 
     #[test]
     fn uses_sessions_index_title() {
