@@ -86,7 +86,7 @@ impl Adapter for CopilotVsCodeAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        self.find_sessions_incremental_with(known, |session| on_session(session))
+        self.find_sessions_incremental_with(known, on_session)
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
@@ -263,17 +263,17 @@ impl CopilotVsCodeAdapter {
                 turns += 1;
             }
 
-            if directory.is_empty() {
-                if let Some(refs) = req.get("contentReferences").and_then(Value::as_array) {
-                    for reference in refs {
-                        let fs_path = string_at(reference, &["reference", "uri", "fsPath"]);
-                        if !fs_path.is_empty() {
-                            directory = Path::new(&fs_path)
-                                .parent()
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_default();
-                            break;
-                        }
+            if directory.is_empty()
+                && let Some(refs) = req.get("contentReferences").and_then(Value::as_array)
+            {
+                for reference in refs {
+                    let fs_path = string_at(reference, &["reference", "uri", "fsPath"]);
+                    if !fs_path.is_empty() {
+                        directory = Path::new(&fs_path)
+                            .parent()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_default();
+                        break;
                     }
                 }
             }
@@ -328,14 +328,14 @@ fn workspace_directory(workspace_dir: &Path) -> String {
         return String::new();
     };
     let folder = string_at(&data, &["folder"]);
-    if let Ok(url) = Url::parse(&folder) {
-        if url.scheme() == "file" {
-            return url
-                .to_file_path()
-                .ok()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-        }
+    if let Ok(url) = Url::parse(&folder)
+        && url.scheme() == "file"
+    {
+        return url
+            .to_file_path()
+            .ok()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
     }
     String::new()
 }

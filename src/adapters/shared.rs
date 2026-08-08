@@ -11,6 +11,10 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds};
 
 use super::{IncrementalScan, KnownSessions, MTIME_TOLERANCE, SessionCallback};
 
+/// Session files keyed by id with `(path, mtime)`, plus a completeness flag
+/// that is false when any part of the scan could not be read.
+pub(super) type SessionFileScan = (HashMap<String, (PathBuf, f64)>, bool);
+
 pub(super) enum IncrementalParse {
     Session(Session),
     Delete,
@@ -42,9 +46,8 @@ pub(super) fn deleted_ids_for_agent(
 ) -> Vec<String> {
     known
         .iter()
-        .filter_map(|((known_agent, id), _)| {
-            (known_agent == agent && !current_ids.contains(id)).then(|| id.clone())
-        })
+        .filter(|&((known_agent, id), _)| known_agent == agent && !current_ids.contains(id))
+        .map(|((_known_agent, id), _)| id.clone())
         .collect()
 }
 

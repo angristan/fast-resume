@@ -8,9 +8,9 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: cargo-check
-        name: cargo check
-        entry: cargo check --all-targets --locked
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --locked -- -D warnings
         language: system
         pass_filenames: false
         always_run: true

@@ -108,15 +108,15 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
         let (visible_query, visible_cursor) =
             search_input_view(&state.query, state.cursor, input_width);
         spans.extend(search_query_spans(&visible_query));
-        if visible_cursor == visible_query.chars().count() {
-            if let Some(suffix) = state.suggestion_suffix() {
-                let remaining = input_width.saturating_sub(visible_query.width());
-                if remaining > 0 {
-                    spans.push(Span::styled(
-                        truncate(&suffix, remaining),
-                        Style::new().fg(Color::DarkGray),
-                    ));
-                }
+        if visible_cursor == visible_query.chars().count()
+            && let Some(suffix) = state.suggestion_suffix()
+        {
+            let remaining = input_width.saturating_sub(visible_query.width());
+            if remaining > 0 {
+                spans.push(Span::styled(
+                    truncate(&suffix, remaining),
+                    Style::new().fg(Color::DarkGray),
+                ));
             }
         }
     }
@@ -351,6 +351,7 @@ fn count_suffix(count: Option<usize>) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_filter_tab(
     frame: &mut Frame,
     area: Rect,
@@ -743,19 +744,19 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         .images
         .as_ref()
         .and_then(|images| images.preview.get(&session.agent))
+        && inner.width > 48
+        && inner.height > 7
     {
-        if inner.width > 48 && inner.height > 7 {
-            let logo_area = Rect::new(inner.right().saturating_sub(8), inner.y, 8, 4);
-            let text_area = Rect::new(inner.x, inner.y, inner.width.saturating_sub(9), 3);
-            frame.render_widget(Paragraph::new(Text::from(header_lines.clone())), text_area);
-            frame.render_widget(TuiImage::new(protocol).allow_clipping(true), logo_area);
-            body_area = Rect::new(
-                inner.x,
-                inner.y + 4,
-                inner.width,
-                inner.height.saturating_sub(4),
-            );
-        }
+        let logo_area = Rect::new(inner.right().saturating_sub(8), inner.y, 8, 4);
+        let text_area = Rect::new(inner.x, inner.y, inner.width.saturating_sub(9), 3);
+        frame.render_widget(Paragraph::new(Text::from(header_lines.clone())), text_area);
+        frame.render_widget(TuiImage::new(protocol).allow_clipping(true), logo_area);
+        body_area = Rect::new(
+            inner.x,
+            inner.y + 4,
+            inner.width,
+            inner.height.saturating_sub(4),
+        );
     }
 
     let mut lines = if body_area.y == inner.y {
@@ -861,6 +862,26 @@ fn button_span(label: &'static str, selected: bool) -> Span<'static> {
     } else {
         Span::styled(label, Style::new().fg(Color::Gray))
     }
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(area.width.saturating_sub(width) / 2),
+            Constraint::Length(width.min(area.width)),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(area.height.saturating_sub(height) / 2),
+            Constraint::Length(height.min(area.height)),
+            Constraint::Min(0),
+        ])
+        .split(horizontal[1]);
+    vertical[1]
 }
 
 #[cfg(test)]
@@ -1041,24 +1062,4 @@ mod tests {
         assert_eq!(visible, "56789a");
         assert_eq!(cursor, 5);
     }
-}
-
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(area.width.saturating_sub(width) / 2),
-            Constraint::Length(width.min(area.width)),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(height) / 2),
-            Constraint::Length(height.min(area.height)),
-            Constraint::Min(0),
-        ])
-        .split(horizontal[1]);
-    vertical[1]
 }

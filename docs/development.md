@@ -20,17 +20,13 @@ Run the same core checks used by CI:
 
 ```bash
 cargo fmt --all --check
-cargo check --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 cargo build --release --locked
 git diff --check
 ```
 
-Clippy is useful for additional cleanup, although the project does not currently fail CI on every style warning:
-
-```bash
-cargo clippy --all-targets --locked
-```
+CI fails on any Clippy warning. Fix warnings or add a narrow, explicit `#[allow]` with a reason.
 
 ## Project layout
 

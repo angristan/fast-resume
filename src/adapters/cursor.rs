@@ -444,10 +444,11 @@ fn cursor_directory_from_path(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
     let decoded = percent_decode(encoded);
-    Path::new(&decoded)
-        .is_absolute()
-        .then_some(decoded)
-        .unwrap_or_default()
+    if Path::new(&decoded).is_absolute() {
+        decoded
+    } else {
+        Default::default()
+    }
 }
 
 fn percent_decode(value: &str) -> String {

@@ -32,13 +32,13 @@ Run the same core checks as CI:
 
 ```bash
 cargo fmt --all --check
-cargo check --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 cargo build --release --locked
 git diff --check
 ```
 
-Use `cargo clippy --all-targets --locked` for additional cleanup. The project does not currently fail CI on every Clippy warning.
+CI fails on any Clippy warning, so fix or explicitly allow every warning before committing.
 
 ## Commits
 

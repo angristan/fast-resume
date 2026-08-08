@@ -11,8 +11,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, copilot_fallback_session_id, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_jsonl, raw_stats_for_tree, string_at,
+    IncrementalParse, SessionFileScan, copilot_fallback_session_id, failed_incremental_scan,
+    incremental_from_files, incremental_from_files_streaming, incremental_parse_jsonl,
+    raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -99,7 +100,7 @@ impl Adapter for CopilotCliAdapter {
 }
 
 impl CopilotCliAdapter {
-    fn scan_session_files(&self) -> Option<(HashMap<String, (PathBuf, f64)>, bool)> {
+    fn scan_session_files(&self) -> Option<SessionFileScan> {
         let mut current_files = HashMap::new();
         let mut complete = true;
         if !self.sessions_dir.exists() {

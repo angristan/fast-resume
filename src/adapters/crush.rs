@@ -54,7 +54,7 @@ impl Adapter for CrushAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        self.find_sessions_incremental_with(known, |session| on_session(session))
+        self.find_sessions_incremental_with(known, on_session)
     }
 
     fn resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {

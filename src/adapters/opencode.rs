@@ -138,8 +138,7 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message ORDER BY time_created ASC",
     )
-    {
-        if let Ok(rows) = stmt.query_map([], |row| {
+        && let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -153,14 +152,12 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
                     .push((msg_id, role));
             }
         }
-    }
 
     let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT message_id, json_extract(data, '$.text') FROM part WHERE json_extract(data, '$.type') = 'text' ORDER BY time_created ASC",
     )
-    {
-        if let Ok(rows) = stmt.query_map([], |row| {
+        && let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?.unwrap_or_default(),
@@ -172,7 +169,6 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
                 }
             }
         }
-    }
 
     let mut sessions = Vec::new();
     for (id, title, directory, time_created, time_updated) in sessions_meta {
@@ -710,9 +706,8 @@ fn load_opencode_legacy_incremental(
     };
     let changed_ids: HashSet<_> = current_files
         .iter()
-        .filter_map(|(id, (_, mtime))| {
-            session_needs_update(known, agent, id, *mtime).then(|| id.clone())
-        })
+        .filter(|&(id, (_, mtime))| session_needs_update(known, agent, id, *mtime))
+        .map(|(id, (_, _mtime))| id.clone())
         .collect();
 
     if changed_ids.is_empty() {

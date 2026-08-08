@@ -60,7 +60,6 @@ where
     for adapter in all_adapters() {
         let tx = tx.clone();
         let known = known.clone();
-        let trace_refresh = trace_refresh;
         thread::spawn(move || {
             let started = Instant::now();
             let agent = adapter.name();

@@ -49,10 +49,10 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<T
         (KeyCode::Char('-'), modifiers) if modifiers.contains(KeyModifiers::ALT) => {
             state.scroll_preview(3);
         }
-        (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
-            if ch != '\n' && ch != '\r' {
-                state.insert_char(ch);
-            }
+        (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT)
+            if ch != '\n' && ch != '\r' =>
+        {
+            state.insert_char(ch);
         }
         _ => {}
     }

@@ -10,9 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, codex_session_id_from_path, content_texts, deleted_ids_for_agent,
-    failed_incremental_scan, fallback_session_id, incremental_parse_jsonl, parse_timestamp_seconds,
-    raw_stats_for_tree, session_needs_update, string_at,
+    IncrementalParse, SessionFileScan, codex_session_id_from_path, content_texts,
+    deleted_ids_for_agent, failed_incremental_scan, fallback_session_id, incremental_parse_jsonl,
+    parse_timestamp_seconds, raw_stats_for_tree, session_needs_update, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -196,7 +196,7 @@ impl CodexAdapter {
         fallback_session_id(path)
     }
 
-    fn scan_session_files(&self) -> Option<(HashMap<String, (PathBuf, f64)>, bool)> {
+    fn scan_session_files(&self) -> Option<SessionFileScan> {
         let mut current_files = HashMap::new();
         let mut complete = true;
         if !self.sessions_dir.exists() {

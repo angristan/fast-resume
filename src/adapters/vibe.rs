@@ -9,8 +9,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, content_texts, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, incremental_parse_from_option,
+    IncrementalParse, SessionFileScan, content_texts, failed_incremental_scan,
+    incremental_from_files, incremental_from_files_streaming, incremental_parse_from_option,
     incremental_parse_jsonl_with_partial_check, json_file_has_parse_errors, parse_datetime,
     raw_stats_for_tree, string_at,
 };
@@ -108,7 +108,7 @@ impl Adapter for VibeAdapter {
 }
 
 impl VibeAdapter {
-    fn scan_session_files(&self) -> Option<(HashMap<String, (PathBuf, f64)>, bool)> {
+    fn scan_session_files(&self) -> Option<SessionFileScan> {
         let mut current_files = HashMap::new();
         let mut complete = true;
         if !self.sessions_dir.exists() {

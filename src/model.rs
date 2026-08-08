@@ -69,10 +69,8 @@ pub fn truncate_title(text: &str, max_len: usize, word_break: bool) -> String {
     }
 
     let mut truncated: String = text.chars().take(max_len).collect();
-    if word_break {
-        if let Some((prefix, _)) = truncated.rsplit_once(' ') {
-            truncated = prefix.to_string();
-        }
+    if word_break && let Some((prefix, _)) = truncated.rsplit_once(' ') {
+        truncated = prefix.to_string();
     }
     truncated.push_str("...");
     truncated
@@ -110,6 +108,6 @@ pub fn sort_and_dedupe_sessions(sessions: Vec<Session>) -> Vec<Session> {
     }
 
     let mut sessions: Vec<_> = by_key.into_values().collect();
-    sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.timestamp));
     sessions
 }

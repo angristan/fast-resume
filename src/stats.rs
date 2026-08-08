@@ -62,8 +62,8 @@ fn print_agent_stats(stats: &IndexStats, raw_stats: &[RawAdapterStats]) {
 
     println!("\nData by Agent\n");
     println!(
-        "{:<16} {:>7} {:>10} {:>10} {:>10} {:>10}  {}",
-        "Agent", "Files", "Disk", "Sessions", "Messages", "Content", "Data Dir"
+        "{:<16} {:>7} {:>10} {:>10} {:>10} {:>10}  Data Dir",
+        "Agent", "Files", "Disk", "Sessions", "Messages", "Content"
     );
     println!("{}", "-".repeat(93));
     for agent in agents {
