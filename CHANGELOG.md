@@ -1,3 +1,10 @@
+# [2.9.0](https://github.com/angristan/fast-resume/compare/v2.8.0...v2.9.0) (2026-08-08)
+
+
+### Features
+
+* **packaging:** drop Windows support ([ccbf930](https://github.com/angristan/fast-resume/commit/ccbf93027aeb362ea25293469fe93e379b0cbd3f))
+
 # [2.8.0](https://github.com/angristan/fast-resume/compare/v2.7.1...v2.8.0) (2026-08-08)
 
 
