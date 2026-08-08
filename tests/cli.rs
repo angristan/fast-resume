@@ -429,6 +429,42 @@ fn broken_index_fails_loudly_instead_of_reporting_zero_sessions() {
 }
 
 #[test]
+fn flag_polish_covers_alias_conflicts_and_stats_filters() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(
+        temp.path(),
+        "codex123",
+        "/repo/backend",
+        "Codex stats session",
+    );
+    write_claude_session(
+        temp.path(),
+        "claude123",
+        "/repo/frontend",
+        "Claude stats session prompt",
+    );
+
+    let (alias_stdout, _) = assert_success(run_fr(temp.path(), &["--no-tui"]));
+    assert!(alias_stdout.contains("codex123"));
+
+    let (stats_stdout, _) = assert_success(run_fr(temp.path(), &["--stats", "-a", "codex"]));
+    assert!(stats_stdout.contains("Total sessions          1"));
+    assert!(stats_stdout.contains("codex"));
+    assert!(!stats_stdout.contains("claude"));
+
+    let (dir_stats_stdout, _) = assert_success(run_fr(temp.path(), &["--stats", "-d", "frontend"]));
+    assert!(dir_stats_stdout.contains("Total sessions          1"));
+
+    let (context_stdout, _) =
+        assert_success(run_fr(temp.path(), &["--agent-context", "--limit", "5"]));
+    assert!(context_stdout.starts_with("---\nname: fast-resume\n"));
+
+    let (stdout, stderr) = assert_failure(run_fr(temp.path(), &["--images", "--no-images"]));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("cannot be used with"));
+}
+
+#[test]
 fn incremental_refresh_after_rebuild_reparses_nothing() {
     let temp = TempDir::new().unwrap();
     write_codex_session(

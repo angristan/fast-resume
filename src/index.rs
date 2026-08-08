@@ -346,7 +346,17 @@ impl SessionIndex {
     }
 
     pub fn stats(&self) -> Result<IndexStats> {
-        Ok(stats::build(self.all_sessions()?, &self.path))
+        self.stats_for(None, None)
+    }
+
+    pub fn stats_for(&self, agent: Option<&str>, directory: Option<&str>) -> Result<IndexStats> {
+        let sessions = self
+            .all_sessions()?
+            .into_iter()
+            .filter(|session| agent.is_none_or(|agent| session.agent == agent))
+            .filter(|session| directory.is_none_or(|dir| session.directory.contains(dir)))
+            .collect();
+        Ok(stats::build(sessions, &self.path))
     }
 
     /// Test-only convenience: production writes go through `updater` so one

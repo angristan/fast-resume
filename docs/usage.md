@@ -66,10 +66,7 @@ Type a partial filter such as `agent:cl` and press `Tab` to accept the suggestio
 ## Non-interactive commands
 
 ```bash
-# Print matching sessions without opening the TUI
-fr --no-tui "api error"
-
-# List sessions without offering to resume
+# List matching sessions without opening the TUI (--no-tui is an alias)
 fr --list "agent:codex"
 
 # Return stable machine-readable results
@@ -133,8 +130,8 @@ Arguments:
 Options:
   -a, --agent <AGENT>     Filter by agent
   -d, --directory <DIR>   Filter by directory substring
-      --no-tui            Output a list instead of opening the TUI
-      --list              List sessions without resuming
+      --list              List sessions to stdout instead of opening the TUI
+                          [alias: --no-tui]
       --json              Output a stable JSON session list
       --limit <N>         Maximum sessions to return (default: 50)
       --offset <N>        Skip matching sessions
@@ -142,6 +139,7 @@ Options:
       --no-refresh        Serve the existing index without scanning for changes
       --rebuild           Rebuild the Tantivy index from a fresh scan
       --stats             Show index and session statistics
+                          (honors -a and -d filters)
       --agent-context     Print concise instructions for coding agents
       --yolo              Force auto-approve flags where supported
       --images            Enable agent artwork when supported

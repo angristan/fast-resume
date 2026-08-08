@@ -36,12 +36,8 @@ struct Args {
     #[arg(short, long)]
     directory: Option<String>,
 
-    /// Output list to stdout instead of opening the TUI.
-    #[arg(long)]
-    no_tui: bool,
-
-    /// Just list sessions, don't resume.
-    #[arg(long = "list")]
+    /// List sessions to stdout instead of opening the TUI.
+    #[arg(long = "list", visible_alias = "no-tui")]
     list_only: bool,
 
     /// Output a stable JSON session list instead of opening the TUI.
@@ -89,7 +85,7 @@ struct Args {
     images: bool,
 
     /// Disable agent PNGs in the TUI.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "images")]
     no_images: bool,
 
     /// Force a terminal image protocol for --images.
@@ -99,13 +95,12 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    validate_pagination_args(&args)?;
-    let query = args.query.clone().unwrap_or_default();
-
     if args.agent_context {
         print!("{}", include_str!("../skills/fast-resume/SKILL.md"));
         return Ok(());
     }
+    validate_pagination_args(&args)?;
+    let query = args.query.clone().unwrap_or_default();
 
     if args.rebuild {
         let start = Instant::now();
@@ -120,27 +115,32 @@ fn main() -> Result<()> {
             start.elapsed().as_secs_f64() * 1000.0,
             index_dir().display()
         );
-        if !args.no_tui && !args.list_only && !args.json && query.is_empty() && !args.stats {
+        if !args.list_only && !args.json && query.is_empty() && !args.stats {
             return Ok(());
         }
     }
 
     if args.stats {
         let index = refreshed_index(args.no_refresh)?;
-        let stats = index.stats()?;
+        let stats = index.stats_for(args.agent.as_deref(), args.directory.as_deref())?;
         if stats.total_sessions == 0 {
             println!("No sessions indexed.");
             return Ok(());
         }
         let raw_stats: Vec<_> = all_adapters()
             .into_iter()
+            .filter(|adapter| {
+                args.agent
+                    .as_deref()
+                    .is_none_or(|agent| adapter.name() == agent)
+            })
             .map(|adapter| adapter.raw_stats())
             .collect();
         print_stats(&stats, &raw_stats);
         return Ok(());
     }
 
-    if args.no_tui || args.list_only || args.json {
+    if args.list_only || args.json {
         let index = refreshed_index(args.no_refresh)?;
         let engine = SearchEngine::from_index(index);
         let total = engine
@@ -169,7 +169,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let image_protocol = if args.no_images && !args.images {
+    let image_protocol = if args.no_images {
         None
     } else {
         Some(args.image_protocol.into())
@@ -211,12 +211,11 @@ fn parse_positive_usize(value: &str) -> std::result::Result<usize, String> {
 }
 
 fn validate_pagination_args(args: &Args) -> Result<()> {
-    if (args.limit.is_some() || args.offset.is_some() || args.all)
-        && !(args.json || args.list_only || args.no_tui)
+    if (args.limit.is_some() || args.offset.is_some() || args.all) && !(args.json || args.list_only)
     {
         bail!("--limit, --offset, and --all require --json, --list, or --no-tui");
     }
-    if args.no_refresh && !(args.json || args.list_only || args.no_tui || args.stats) {
+    if args.no_refresh && !(args.json || args.list_only || args.stats) {
         bail!("--no-refresh requires --json, --list, --no-tui, or --stats");
     }
     Ok(())
