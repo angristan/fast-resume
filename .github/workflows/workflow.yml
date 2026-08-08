@@ -115,7 +115,7 @@ jobs:
             manylinux: '2014'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -316,7 +316,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: v${{ needs.release.outputs.new_release_version }}
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
