@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, MouseEvent, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -138,7 +138,9 @@ fn run_loop(
 
         if event::poll(Duration::from_millis(24))? {
             match event::read()? {
-                Event::Key(key) => {
+                // Terminals using the Kitty keyboard protocol also emit
+                // Release/Repeat events; acting on them doubles keystrokes.
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if let Some(exit) = handle_key(state, key)? {
                         return Ok(exit);
                     }
