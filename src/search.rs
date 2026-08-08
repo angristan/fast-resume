@@ -32,15 +32,14 @@ impl SearchEngine {
         self.index.total_len().unwrap_or(0)
     }
 
-    pub fn count_matches(
+    pub fn count_result(
         &self,
         query: &str,
         agent_filter: Option<&str>,
         directory_filter: Option<&str>,
-    ) -> usize {
+    ) -> Result<usize> {
         self.index
             .search_count(query, agent_filter, directory_filter)
-            .unwrap_or(0)
     }
 
     pub fn count_for_agent(&self, agent: Option<&str>) -> usize {

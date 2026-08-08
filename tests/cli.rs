@@ -413,6 +413,22 @@ fn json_output_is_stable_and_paginated() {
 }
 
 #[test]
+fn broken_index_fails_loudly_instead_of_reporting_zero_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(temp.path(), "broken123", "/repo/backend", "Broken index");
+    assert_success(run_fr(temp.path(), &["--list"]));
+
+    let meta = temp
+        .path()
+        .join(".cache/fast-resume/tantivy_index/meta.json");
+    fs::write(meta, "not json").unwrap();
+
+    let (stdout, stderr) = assert_failure(run_fr(temp.path(), &["--json"]));
+    assert!(stdout.is_empty());
+    assert!(!stderr.is_empty());
+}
+
+#[test]
 fn agent_context_exposes_the_portable_skill() {
     let temp = TempDir::new().unwrap();
 

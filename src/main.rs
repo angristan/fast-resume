@@ -140,20 +140,24 @@ fn main() -> Result<()> {
     if args.no_tui || args.list_only || args.json {
         let index = refreshed_index()?;
         let engine = SearchEngine::from_index(index);
-        let total = engine.count_matches(&query, args.agent.as_deref(), args.directory.as_deref());
+        let total = engine
+            .count_result(&query, args.agent.as_deref(), args.directory.as_deref())
+            .context("search failed")?;
         let offset = args.offset.unwrap_or(0);
         let limit = if args.all {
             total.saturating_sub(offset)
         } else {
             args.limit.unwrap_or(DEFAULT_LIST_LIMIT)
         };
-        let results = engine.search_with_offset(
-            &query,
-            args.agent.as_deref(),
-            args.directory.as_deref(),
-            offset,
-            limit,
-        );
+        let results = engine
+            .search_result_with_offset(
+                &query,
+                args.agent.as_deref(),
+                args.directory.as_deref(),
+                offset,
+                limit,
+            )
+            .context("search failed")?;
         if args.json {
             print_sessions_json(&results, total, offset, limit, args.yolo)?;
         } else {
