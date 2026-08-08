@@ -1,6 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
@@ -22,6 +23,10 @@ mod stats;
 pub use stats::IndexStats;
 
 pub const INDEX_REFRESH_BATCH_SIZE: usize = 500;
+
+/// How often a streaming refresh commits, so TUI results update while long
+/// refreshes run without paying a commit (fsync plus a new segment) per batch.
+const STREAMING_COMMIT_INTERVAL: Duration = Duration::from_secs(1);
 
 struct IndexLock {
     _file: File,
@@ -187,7 +192,12 @@ impl SessionIndex {
     {
         let _write_lock = self.acquire_write_lock()?;
         self.reader.reload()?;
-        crate::refresh::refresh_incremental_streaming(self, batch_size, on_progress)
+        crate::refresh::refresh_incremental_streaming(
+            self,
+            batch_size,
+            Some(STREAMING_COMMIT_INTERVAL),
+            on_progress,
+        )
     }
 
     pub fn scan_all_sessions() -> Vec<Session> {
@@ -317,41 +327,26 @@ impl SessionIndex {
         Ok(stats::build(self.all_sessions()?, &self.path))
     }
 
+    /// Test-only convenience: production writes go through `updater` so one
+    /// `IndexWriter` serves a whole refresh.
+    #[cfg(test)]
     pub(crate) fn update_sessions(&self, sessions: &[Session]) -> Result<()> {
-        if sessions.is_empty() {
-            return Ok(());
-        }
-        let mut writer: IndexWriter<TantivyDocument> =
-            self.index.writer_with_num_threads(1, 128_000_000)?;
-        for session in sessions {
-            writer.delete_term(Term::from_field_text(
-                self.fields.session_key,
-                &document::session_key(&session.agent, &session.id),
-            ));
-        }
-        for session in sessions {
-            writer.add_document(document::session_document(self.fields, session))?;
-        }
-        writer.commit()?;
-        self.reader.reload()?;
-        Ok(())
+        let mut updater = self.updater(None);
+        updater.update_sessions(sessions)?;
+        updater.finish()
     }
 
-    pub(crate) fn delete_sessions(&self, agent: &str, ids: &[String]) -> Result<()> {
-        if ids.is_empty() {
-            return Ok(());
+    /// Start a batched update pass that reuses one `IndexWriter`. With a
+    /// commit interval, dirty changes commit at most that often; without one,
+    /// everything commits once in `finish`.
+    pub(crate) fn updater(&self, commit_interval: Option<Duration>) -> IndexUpdater<'_> {
+        IndexUpdater {
+            index: self,
+            writer: None,
+            dirty: false,
+            commit_interval,
+            last_commit: Instant::now(),
         }
-        let mut writer: IndexWriter<TantivyDocument> =
-            self.index.writer_with_num_threads(1, 64_000_000)?;
-        for id in ids {
-            writer.delete_term(Term::from_field_text(
-                self.fields.session_key,
-                &document::session_key(agent, id),
-            ));
-        }
-        writer.commit()?;
-        self.reader.reload()?;
-        Ok(())
     }
 
     fn acquire_write_lock(&self) -> Result<IndexLock> {
@@ -421,6 +416,89 @@ impl SessionIndex {
             }
         }
         Ok(sessions)
+    }
+}
+
+pub(crate) struct IndexUpdater<'a> {
+    index: &'a SessionIndex,
+    writer: Option<IndexWriter<TantivyDocument>>,
+    dirty: bool,
+    commit_interval: Option<Duration>,
+    last_commit: Instant,
+}
+
+impl IndexUpdater<'_> {
+    pub(crate) fn update_sessions(&mut self, sessions: &[Session]) -> Result<()> {
+        if sessions.is_empty() {
+            return Ok(());
+        }
+        let fields = self.index.fields;
+        let writer = self.writer()?;
+        for session in sessions {
+            writer.delete_term(Term::from_field_text(
+                fields.session_key,
+                &document::session_key(&session.agent, &session.id),
+            ));
+        }
+        for session in sessions {
+            writer.add_document(document::session_document(fields, session))?;
+        }
+        self.dirty = true;
+        self.maybe_commit()
+    }
+
+    pub(crate) fn delete_sessions(&mut self, agent: &str, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let fields = self.index.fields;
+        let writer = self.writer()?;
+        for id in ids {
+            writer.delete_term(Term::from_field_text(
+                fields.session_key,
+                &document::session_key(agent, id),
+            ));
+        }
+        self.dirty = true;
+        self.maybe_commit()
+    }
+
+    /// Commit outstanding changes and reload the reader. Dropping the updater
+    /// without calling this discards uncommitted changes.
+    pub(crate) fn finish(mut self) -> Result<()> {
+        if self.dirty {
+            self.commit()?;
+        }
+        Ok(())
+    }
+
+    /// The writer is created on first use so refreshes that find no changes
+    /// never pay for its indexing arena.
+    fn writer(&mut self) -> Result<&mut IndexWriter<TantivyDocument>> {
+        if self.writer.is_none() {
+            self.writer = Some(self.index.index.writer_with_num_threads(1, 128_000_000)?);
+        }
+        self.writer.as_mut().context("index writer was not created")
+    }
+
+    fn maybe_commit(&mut self) -> Result<()> {
+        let Some(interval) = self.commit_interval else {
+            return Ok(());
+        };
+        if self.dirty && self.last_commit.elapsed() >= interval {
+            self.commit()?;
+        }
+        Ok(())
+    }
+
+    fn commit(&mut self) -> Result<()> {
+        if let Some(writer) = self.writer.as_mut() {
+            writer.commit()?;
+            self.index.reader.reload()?;
+        }
+        self.dirty = false;
+        self.last_commit = Instant::now();
+        Ok(())
     }
 }
 
@@ -541,6 +619,59 @@ mod tests {
         let results = index.search("tokem", None, None, 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].session.id, "a");
+    }
+
+    #[test]
+    fn updater_without_interval_commits_only_on_finish() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[session("a", "claude", "Old", "/work/a", "old content")])
+            .unwrap();
+
+        let mut updater = index.updater(None);
+        updater
+            .update_sessions(&[session("b", "codex", "New", "/work/b", "new content")])
+            .unwrap();
+        updater
+            .delete_sessions("claude", &["a".to_string()])
+            .unwrap();
+
+        let ids: Vec<_> = index
+            .all_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(ids, vec!["a"], "changes must stay invisible before finish");
+
+        updater.finish().unwrap();
+
+        let ids: Vec<_> = index
+            .all_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(ids, vec!["b"]);
+    }
+
+    #[test]
+    fn updater_with_interval_commits_mid_stream() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+
+        let mut updater = index.updater(Some(Duration::ZERO));
+        updater
+            .update_sessions(&[session("a", "claude", "Streamed", "/work/a", "content")])
+            .unwrap();
+
+        assert_eq!(
+            index.total_len().unwrap(),
+            1,
+            "an elapsed interval must commit without finish"
+        );
+        updater.finish().unwrap();
     }
 
     #[test]

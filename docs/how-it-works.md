@@ -10,7 +10,7 @@ Agent stores ──► adapters ──► normalized sessions ──► Tantivy 
 Terminal ◄──── resume handoff ◄──── TUI/search ◄────────┘
 ```
 
-The TUI opens against the current index immediately. A background refresh scans for changes, commits updates in batches, reloads the search reader, and preserves the current selection where possible.
+The TUI opens against the current index immediately. A background refresh scans for changes, commits batched updates about once per second, reloads the search reader, and preserves the current selection where possible.
 
 ## Session adapters
 
@@ -68,7 +68,7 @@ On an incremental refresh, fast-resume:
 5. Parses new or changed sessions.
 6. Retains old documents when a source is temporarily incomplete or malformed.
 7. Infers deletions only when the relevant scan is complete.
-8. Commits changes in batches and reports progress to the TUI.
+8. Applies changes through one index writer and reports progress to the TUI. A TUI refresh commits about once per second so new results appear while it runs; non-interactive refreshes commit once at the end.
 
 Only one process refreshes the index at a time. Concurrent `fr --list` and `fr --json` calls wait for exclusive access, reload the latest committed index, and then run their own incremental refresh. This keeps every invocation current without allowing refresh batches to interleave. Cold initialization uses the same lock, so its source scan also runs serially. A call that has to wait prints a notice on stderr; `--no-refresh` skips the refresh entirely and serves the last committed index immediately.
 
@@ -142,7 +142,7 @@ fast-resume avoids a full parse on ordinary launches:
 - Adapters scan concurrently.
 - The current index is searchable before refresh finishes.
 - Unchanged sessions are not re-parsed.
-- Changed sessions are committed in batches.
+- Changed sessions flow through one index writer with periodic commits.
 - Search and index reloads stay off the input path.
 - Obsolete search generations are discarded.
 

@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::env;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::adapters::all_adapters;
-use crate::index::{INDEX_REFRESH_BATCH_SIZE, RefreshSummary, SessionIndex};
+use crate::index::{INDEX_REFRESH_BATCH_SIZE, IndexUpdater, RefreshSummary, SessionIndex};
 use crate::model::{Session, sort_and_dedupe_sessions};
 
 enum AdapterEvent {
@@ -41,18 +41,20 @@ pub fn scan_all_sessions() -> Vec<Session> {
 }
 
 pub fn refresh_incremental(index: &SessionIndex) -> Result<RefreshSummary> {
-    refresh_incremental_streaming(index, INDEX_REFRESH_BATCH_SIZE, |_| {})
+    refresh_incremental_streaming(index, INDEX_REFRESH_BATCH_SIZE, None, |_| {})
 }
 
 pub fn refresh_incremental_streaming<F>(
     index: &SessionIndex,
     batch_size: usize,
+    commit_interval: Option<Duration>,
     mut on_progress: F,
 ) -> Result<RefreshSummary>
 where
     F: FnMut(RefreshSummary),
 {
     let known = index.known_sessions()?;
+    let mut updater = index.updater(commit_interval);
     let (tx, rx) = mpsc::channel();
     let trace_refresh = env::var_os("FAST_RESUME_TRACE_REFRESH").is_some();
     for adapter in all_adapters() {
@@ -97,7 +99,7 @@ where
                 batch.push(session);
                 if batch.len() >= batch_size {
                     flush_refresh_batch(
-                        index,
+                        &mut updater,
                         &mut batch,
                         &mut known_keys,
                         &mut total_sessions,
@@ -110,7 +112,7 @@ where
             AdapterEvent::Finished { agent, deleted_ids } => {
                 if !batch.is_empty() {
                     flush_refresh_batch(
-                        index,
+                        &mut updater,
                         &mut batch,
                         &mut known_keys,
                         &mut total_sessions,
@@ -120,7 +122,7 @@ where
                     )?;
                 }
                 if !deleted_ids.is_empty() {
-                    index.delete_sessions(agent, &deleted_ids)?;
+                    updater.delete_sessions(agent, &deleted_ids)?;
                     deleted += deleted_ids.len();
                     let agent = agent.to_string();
                     for id in &deleted_ids {
@@ -140,7 +142,7 @@ where
 
     if !batch.is_empty() {
         flush_refresh_batch(
-            index,
+            &mut updater,
             &mut batch,
             &mut known_keys,
             &mut total_sessions,
@@ -149,6 +151,7 @@ where
             &mut on_progress,
         )?;
     }
+    updater.finish()?;
 
     Ok(RefreshSummary {
         sessions: index.total_len()?,
@@ -158,7 +161,7 @@ where
 }
 
 fn flush_refresh_batch<F>(
-    index: &SessionIndex,
+    updater: &mut IndexUpdater<'_>,
     batch: &mut Vec<Session>,
     known_keys: &mut HashSet<(String, String)>,
     total_sessions: &mut usize,
@@ -173,7 +176,7 @@ where
         return Ok(());
     }
 
-    index.update_sessions(batch)?;
+    updater.update_sessions(batch)?;
     *changed += batch.len();
     for session in batch.iter() {
         if known_keys.insert((session.agent.clone(), session.id.clone())) {
