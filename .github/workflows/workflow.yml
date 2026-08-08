@@ -49,6 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
         with:
           components: rustfmt, clippy
       - name: Cache Cargo dependencies and build output
@@ -58,9 +59,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-debug-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-debug-
+            cargo-${{ runner.os }}-${{ runner.arch }}-debug-${{ steps.toolchain.outputs.cachekey }}-
       - name: Check formatting
         run: cargo fmt --check
       - name: Lint
@@ -235,6 +236,7 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_release_version }}
       - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
 
       - name: Cache Cargo dependencies and release build output
         uses: actions/cache@v6
@@ -243,9 +245,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-release-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-release-
+            cargo-${{ runner.os }}-${{ runner.arch }}-release-${{ steps.toolchain.outputs.cachekey }}-
 
       - name: Build binary
         run: cargo build --release --locked

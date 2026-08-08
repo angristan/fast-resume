@@ -2,6 +2,7 @@
 name = "fast-resume"
 version = "2.9.0"
 edition = "2024"
+rust-version = "1.88"
 description = "Fast fuzzy finder for coding agent session history"
 license = "MIT"
 
