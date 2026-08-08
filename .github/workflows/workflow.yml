@@ -12,10 +12,9 @@ on:
         required: true
         type: string
 
+# Jobs that release or publish declare their own elevated permissions.
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
