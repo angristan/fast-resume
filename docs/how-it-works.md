@@ -53,7 +53,7 @@ The index focuses on conversation text: prompts and assistant responses. Most la
 
 ## Indexing and refresh
 
-The persistent index lives at:
+The persistent index follows the XDG Base Directory specification. It lives at `$XDG_CACHE_HOME/fast-resume/tantivy_index` when `XDG_CACHE_HOME` is an absolute path. Otherwise, it lives at:
 
 ```text
 ~/.cache/fast-resume/tantivy_index

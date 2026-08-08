@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -142,7 +142,17 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
-    home_dir().join(".cache").join("fast-resume")
+    cache_dir_from(
+        env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
+        &home_dir(),
+    )
+}
+
+fn cache_dir_from(xdg_cache_home: Option<PathBuf>, home: &Path) -> PathBuf {
+    xdg_cache_home
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home.join(".cache"))
+        .join("fast-resume")
 }
 
 pub fn index_dir() -> PathBuf {

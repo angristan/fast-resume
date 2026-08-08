@@ -233,6 +233,8 @@ codex                107    23.6 MB         89        321   890.6 KB
 opencode            9275    46.3 MB         72       1912   597.7 KB
 ```
 
+The shown index location is the default. When `XDG_CACHE_HOME` is an absolute path, fast-resume uses `$XDG_CACHE_HOME/fast-resume/tantivy_index` instead.
+
 ## Terminal images
 
 Artwork is enabled automatically when the terminal exposes a supported image protocol. Use:

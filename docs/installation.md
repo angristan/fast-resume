@@ -83,18 +83,20 @@ fr --help
 
 ## First launch and upgrades
 
-The first launch scans all supported local agent stores and builds a Tantivy index under:
+The first launch scans all supported local agent stores and builds a Tantivy index under the XDG cache directory:
 
 ```text
-~/.cache/fast-resume/tantivy_index
+$XDG_CACHE_HOME/fast-resume/tantivy_index
 ```
+
+`XDG_CACHE_HOME` must be an absolute path. Fast-resume uses `~/.cache/fast-resume/tantivy_index` when the variable is unset or invalid.
 
 Later launches search the existing index immediately and refresh changed sessions in the background. If an upgrade changes the index schema, fast-resume automatically discards the incompatible cache and rebuilds it.
 
 To force a clean rebuild:
 
 ```bash
-rm -rf ~/.cache/fast-resume
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/fast-resume"
 fr --rebuild
 ```
 

@@ -413,6 +413,55 @@ fn json_output_is_stable_and_paginated() {
 }
 
 #[test]
+fn xdg_cache_home_controls_index_location() {
+    let temp = TempDir::new().unwrap();
+    let xdg_cache_home = temp.path().join("custom-cache");
+    write_codex_session(temp.path(), "xdg123", "/repo/backend", "XDG cache");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fr"))
+        .arg("--list")
+        .env_clear()
+        .env("HOME", temp.path())
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .output()
+        .unwrap();
+    assert_success(output);
+
+    assert!(
+        xdg_cache_home
+            .join("fast-resume/tantivy_index/meta.json")
+            .is_file()
+    );
+    assert!(!temp.path().join(".cache/fast-resume").exists());
+}
+
+#[test]
+fn relative_xdg_cache_home_is_ignored() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(
+        temp.path(),
+        "xdg-relative",
+        "/repo/backend",
+        "Invalid XDG cache",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fr"))
+        .arg("--list")
+        .env_clear()
+        .env("HOME", temp.path())
+        .env("XDG_CACHE_HOME", "relative-cache")
+        .output()
+        .unwrap();
+    assert_success(output);
+
+    assert!(
+        temp.path()
+            .join(".cache/fast-resume/tantivy_index/meta.json")
+            .is_file()
+    );
+}
+
+#[test]
 fn broken_index_fails_loudly_instead_of_reporting_zero_sessions() {
     let temp = TempDir::new().unwrap();
     write_codex_session(temp.path(), "broken123", "/repo/backend", "Broken index");

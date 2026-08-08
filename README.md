@@ -82,12 +82,12 @@ Run `fr --agent-context` to print the bundled [Agent Skill](skills/fast-resume/S
 
 ## Configuration
 
-No configuration is required. The Tantivy index lives at `~/.cache/fast-resume/tantivy_index` and is rebuilt automatically when its schema changes.
+No configuration is required. The Tantivy index follows the XDG Base Directory specification. It lives at `$XDG_CACHE_HOME/fast-resume/tantivy_index` when `XDG_CACHE_HOME` is an absolute path, or at `~/.cache/fast-resume/tantivy_index` by default. It is rebuilt automatically when its schema changes.
 
 To reset it manually:
 
 ```bash
-rm -rf ~/.cache/fast-resume
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/fast-resume"
 fr --rebuild
 ```
 
