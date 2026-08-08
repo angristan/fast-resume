@@ -133,7 +133,7 @@ Each adapter returns the command needed to continue its session:
 | Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
 
-On Unix, `exec()` replaces fast-resume with the agent process. On Windows, fast-resume waits for the child and exits with the same status. In both cases the agent receives the session's working directory.
+`exec()` replaces fast-resume with the agent process, and the agent receives the session's working directory.
 
 ## Performance
 

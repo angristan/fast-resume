@@ -400,30 +400,11 @@ fn indexed_work_dir(
 }
 
 fn path_is_within(parent: &Path, child: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        windows_path_key(child).starts_with(windows_path_key(parent))
-    }
-    #[cfg(not(windows))]
-    {
-        child.starts_with(parent)
-    }
+    child.starts_with(parent)
 }
 
 fn paths_equal(left: &Path, right: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        windows_path_key(left) == windows_path_key(right)
-    }
-    #[cfg(not(windows))]
-    {
-        left == right
-    }
-}
-
-#[cfg(windows)]
-fn windows_path_key(path: &Path) -> PathBuf {
-    PathBuf::from(path.to_string_lossy().to_lowercase())
+    left == right
 }
 
 fn kimi_state_file_is_legacy(state_file: &Path) -> bool {
@@ -1174,29 +1155,6 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].directory, "/repo/valid");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn accepts_case_variants_in_windows_index_paths() {
-        let temp = tempdir().unwrap();
-        let sessions_dir = temp.path().join("sessions");
-        let session_id = "kimi-123";
-        let session_dir = write_kimi_session(&sessions_dir, session_id);
-        let case_variant = PathBuf::from(
-            session_dir
-                .parent()
-                .unwrap()
-                .to_string_lossy()
-                .to_uppercase(),
-        )
-        .join(session_id);
-        write_session_index(&sessions_dir, session_id, &case_variant, r"C:\repo\kimi");
-
-        let sessions = KimiAdapter::new(sessions_dir).find_sessions();
-
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].directory, r"C:\repo\kimi");
     }
 
     #[test]

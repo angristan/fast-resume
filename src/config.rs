@@ -223,10 +223,6 @@ fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         return home_dir().join(rest);
     }
-    #[cfg(windows)]
-    if let Some(rest) = path.strip_prefix("~\\") {
-        return home_dir().join(rest);
-    }
     PathBuf::from(path)
 }
 
@@ -260,8 +256,6 @@ pub fn vscode_storage_dir() -> PathBuf {
             .join("Library")
             .join("Application Support")
             .join("Code")
-    } else if cfg!(target_os = "windows") {
-        home_dir().join("AppData").join("Roaming").join("Code")
     } else {
         home_dir().join(".config").join("Code")
     }
@@ -299,12 +293,6 @@ mod tests {
         assert_eq!(expand_tilde("~"), home_dir());
         assert_eq!(
             expand_tilde("~/pi-sessions"),
-            home_dir().join("pi-sessions")
-        );
-
-        #[cfg(windows)]
-        assert_eq!(
-            expand_tilde(r"~\pi-sessions"),
             home_dir().join("pi-sessions")
         );
     }

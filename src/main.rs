@@ -1,6 +1,5 @@
 use std::env;
 use std::io;
-#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::Instant;
@@ -254,17 +253,7 @@ impl ExecBackend for ProcessExecBackend {
     }
 
     fn exec(&mut self, command: &[String]) -> io::Error {
-        #[cfg(unix)]
-        {
-            Command::new(&command[0]).args(&command[1..]).exec()
-        }
-        #[cfg(not(unix))]
-        {
-            match Command::new(&command[0]).args(&command[1..]).status() {
-                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-                Err(error) => error,
-            }
-        }
+        Command::new(&command[0]).args(&command[1..]).exec()
     }
 }
 

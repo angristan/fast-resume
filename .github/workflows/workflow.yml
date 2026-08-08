@@ -109,9 +109,6 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: '2014'
-          - name: Windows (x86_64)
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -137,34 +134,13 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
-      - name: Build Windows wheel
-        if: runner.os == 'Windows'
-        uses: PyO3/maturin-action@v1
-        with:
-          maturin-version: v1.14.1
-          sccache: true
-          target: ${{ matrix.platform.target }}
-          args: --release --locked --out dist --compatibility pypi
-
-      - name: Verify wheel installs and runs (Unix)
-        if: runner.os != 'Windows'
+      - name: Verify wheel installs and runs
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
-
-      - name: Verify wheel installs and runs (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          python -m venv .wheel-test
-          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
-          & .\.wheel-test\Scripts\python.exe -m pip install $wheel.FullName
-          & .\.wheel-test\Scripts\fr.exe --version
-          & .\.wheel-test\Scripts\fr.exe --help
-          & .\.wheel-test\Scripts\fast-resume.cmd --version
 
   release:
     name: Release
@@ -329,11 +305,6 @@ jobs:
             manylinux: '2014'
             artifact: python-wheel-linux-arm64
             npm_package: fast-resume-linux-arm64
-          - name: Windows (x86_64)
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: python-wheel-windows-x86_64
-            npm_package: fast-resume-win32-x64
     permissions:
       contents: read
     steps:
@@ -363,34 +334,13 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist --compatibility pypi
 
-      - name: Build Windows wheel
-        if: runner.os == 'Windows'
-        uses: PyO3/maturin-action@v1
-        with:
-          maturin-version: v1.14.1
-          sccache: true
-          target: ${{ matrix.platform.target }}
-          args: --release --locked --out dist --compatibility pypi
-
-      - name: Verify wheel installs and runs (Unix)
-        if: runner.os != 'Windows'
+      - name: Verify wheel installs and runs
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
-
-      - name: Verify wheel installs and runs (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          python -m venv .wheel-test
-          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
-          & .\.wheel-test\Scripts\python.exe -m pip install $wheel.FullName
-          & .\.wheel-test\Scripts\fr.exe --version
-          & .\.wheel-test\Scripts\fr.exe --help
-          & .\.wheel-test\Scripts\fast-resume.cmd --version
 
       - uses: actions/upload-artifact@v7
         with:
@@ -460,9 +410,7 @@ jobs:
             cp -R "$package_dir" "npm-stage/$package"
             cp -R "npm-binaries/npm-binary-$package/bin" "npm-stage/$package/bin"
             cp LICENSE "npm-stage/$package/LICENSE"
-            if [ "$package" != "fast-resume-win32-x64" ]; then
-              chmod +x "npm-stage/$package/bin/fr"
-            fi
+            chmod +x "npm-stage/$package/bin/fr"
             npm pack "./npm-stage/$package" --pack-destination npm-dist
           done
           cp LICENSE npm/fast-resume/LICENSE
