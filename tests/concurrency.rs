@@ -107,6 +107,47 @@ fn parallel_list_calls_serialize_refreshes() {
 }
 
 #[test]
+fn stale_schema_wipe_waits_for_the_write_lock() {
+    let temp = TempDir::new().unwrap();
+    write_codex_session(temp.path(), "schema123", "/repo/parallel", "Schema wipe");
+    assert_success(run_fr(temp.path(), &["--list"]));
+
+    let cache_dir = temp.path().join(".cache/fast-resume");
+    let index_dir = cache_dir.join("tantivy_index");
+    fs::write(index_dir.join(".schema_version"), "0").unwrap();
+
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(cache_dir.join("tantivy_index.write.lock"))
+        .unwrap();
+    lock_file.lock_exclusive().unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fr"))
+        .arg("--list")
+        .env_clear()
+        .env("HOME", temp.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_millis(150));
+    assert!(child.try_wait().unwrap().is_none());
+    let version = fs::read_to_string(index_dir.join(".schema_version")).unwrap_or_default();
+    assert_eq!(
+        version, "0",
+        "stale index was wiped while the write lock was held"
+    );
+
+    FileExt::unlock(&lock_file).unwrap();
+    let output = child.wait_with_output().unwrap();
+    let (stdout, _) = assert_success(output);
+    assert!(stdout.contains("schema123"));
+}
+
+#[test]
 fn list_waits_for_the_refresh_lock_and_returns_fresh_data() {
     let temp = TempDir::new().unwrap();
     write_codex_session(

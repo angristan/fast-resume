@@ -94,6 +94,10 @@ impl SessionIndex {
         let _initialization_lock = IndexLock::acquire(&path, "init")?;
 
         if path.exists() && !schema::schema_version_matches(&path) {
+            // The init lock does not exclude writers, so take the write lock
+            // before wiping: a refresh in another process must not lose its
+            // index directory under a live IndexWriter.
+            let _write_lock = IndexLock::acquire(&path, "write")?;
             fs::remove_dir_all(&path)
                 .with_context(|| format!("failed to clear stale index {}", path.display()))?;
         }
