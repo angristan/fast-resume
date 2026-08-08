@@ -18,6 +18,7 @@ pub(super) fn session_document(fields: IndexFields, session: &Session) -> Tantiv
         fields.message_count => session.message_count as i64,
         fields.mtime => session.mtime,
         fields.yolo => session.yolo,
+        fields.named => session.named,
     )
 }
 
@@ -34,6 +35,7 @@ pub(super) fn doc_to_session(fields: IndexFields, doc: &TantivyDocument) -> Opti
     );
     session.mtime = number(doc, fields.mtime).unwrap_or(0.0);
     session.yolo = boolean(doc, fields.yolo).unwrap_or(false);
+    session.named = boolean(doc, fields.named).unwrap_or(false);
     Some(session)
 }
 

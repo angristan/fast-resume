@@ -50,7 +50,12 @@ fn header_line(state: &AppState, width: u16) -> Line<'static> {
     let count_agent_filter = state.count_agent_filter();
     let count = state.engine.count_for_agent(count_agent_filter.as_deref());
     let right = format!(
-        "{} shown / {} indexed   {:.1}ms",
+        "{}{} shown / {} indexed   {:.1}ms",
+        if state.named_only {
+            "named only · "
+        } else {
+            ""
+        },
         state.visible.len(),
         count,
         state.last_search_ms

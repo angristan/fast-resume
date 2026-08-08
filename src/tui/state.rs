@@ -68,6 +68,7 @@ pub(super) struct AppState {
     pub(super) refresh_status: String,
     pub(super) last_search_ms: f64,
     pub(super) show_preview: bool,
+    pub(super) named_only: bool,
     pub(super) modal: Option<YoloModal>,
     pub(super) images: Option<AgentImages>,
     search_generation: u64,
@@ -101,6 +102,7 @@ impl AppState {
             refresh_status: "refreshing session stores".to_string(),
             last_search_ms: 0.0,
             show_preview: true,
+            named_only: false,
             modal: None,
             images,
             search_generation: 0,
@@ -135,6 +137,7 @@ impl AppState {
             directory_filter.as_deref(),
             100,
         );
+        self.retain_named_only();
         self.last_search_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.update_selection_after_search(selected_session.as_ref());
         self.preview_scroll = 0;
@@ -187,6 +190,7 @@ impl AppState {
         }
         let selected_session = preserve_selection.and_then(|_| self.selected_session_key());
         self.visible = visible;
+        self.retain_named_only();
         self.last_search_ms = elapsed_ms;
         self.applied_search_generation = generation;
         self.update_selection_after_search(selected_session.as_ref());
@@ -301,6 +305,17 @@ impl AppState {
             .strip_prefix(&self.query)
             .filter(|suffix| !suffix.is_empty())
             .map(ToString::to_string)
+    }
+
+    pub(super) fn toggle_named_only(&mut self) {
+        self.named_only = !self.named_only;
+        self.refresh_search();
+    }
+
+    fn retain_named_only(&mut self) {
+        if self.named_only {
+            self.visible.retain(|session| session.named);
+        }
     }
 
     pub(super) fn accept_suggestion(&mut self) -> bool {

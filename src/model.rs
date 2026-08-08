@@ -16,6 +16,9 @@ pub struct Session {
     pub message_count: usize,
     pub mtime: f64,
     pub yolo: bool,
+    /// True when `title` is an explicit/generated title (a rename or an
+    /// AI-generated name), false when it falls back to the first user message.
+    pub named: bool,
 }
 
 impl Session {
@@ -38,6 +41,7 @@ impl Session {
             message_count,
             mtime: 0.0,
             yolo: false,
+            named: false,
         }
     }
 
