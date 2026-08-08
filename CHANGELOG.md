@@ -1,3 +1,18 @@
+## [2.9.1](https://github.com/angristan/fast-resume/compare/v2.9.0...v2.9.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **adapters:** make rebuild mtimes match the incremental scan ([938e707](https://github.com/angristan/fast-resume/commit/938e7070633002f12f748ebd05b064bce73e5805))
+* **cli:** tidy flag interactions and let --stats honor filters ([456f0fe](https://github.com/angristan/fast-resume/commit/456f0fe13e669fb47d9f14f21f9dbe7ae9a6250a))
+* **tui:** only act on key press events ([b15b5b0](https://github.com/angristan/fast-resume/commit/b15b5b0c3cb9e9ad7f52cfde1779e6e91b987689))
+
+
+### Performance Improvements
+
+* **adapters:** scope legacy opencode loads and share the known map ([6c4952c](https://github.com/angristan/fast-resume/commit/6c4952c7e0cd2d00f6253e3da1b4588668e0b935))
+* **tui:** cache rendered preview lines ([cb6db3c](https://github.com/angristan/fast-resume/commit/cb6db3c22eb6d0fa2c08ae1f2c8dc20a5a189178))
+
 # [2.9.0](https://github.com/angristan/fast-resume/compare/v2.8.0...v2.9.0) (2026-08-08)
 
 
