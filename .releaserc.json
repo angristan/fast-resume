@@ -12,7 +12,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "sed -i 's/^version = .*/version = \"${nextRelease.version}\"/' Cargo.toml pyproject.toml && sed -i '/^name = \"fast-resume\"$/,/^dependencies = \\[$/ s/^version = .*/version = \"${nextRelease.version}\"/' Cargo.lock && node npm/scripts/set-version.mjs ${nextRelease.version}"
+        "prepareCmd": "node npm/scripts/set-version.mjs ${nextRelease.version} && cargo update --quiet --package fast-resume && cargo metadata --locked --format-version 1 > /dev/null"
       }
     ],
     [

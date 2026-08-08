@@ -10,8 +10,26 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 }
 
 const npmRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(npmRoot, "..");
 const launcherPath = path.join(npmRoot, "fast-resume", "package.json");
 const platformsRoot = path.join(npmRoot, "platforms");
+
+// The first top-level `version = "..."` line is the package version in both
+// Cargo.toml ([package]) and pyproject.toml ([project]); dependency versions
+// only appear in inline tables.
+function setTomlVersion(file) {
+  const source = fs.readFileSync(file, "utf8");
+  if (!/^version = ".*"$/m.test(source)) {
+    throw new Error(`No version field found in ${file}`);
+  }
+  fs.writeFileSync(
+    file,
+    source.replace(/^version = ".*"$/m, `version = "${version}"`),
+  );
+}
+
+setTomlVersion(path.join(repoRoot, "Cargo.toml"));
+setTomlVersion(path.join(repoRoot, "pyproject.toml"));
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
