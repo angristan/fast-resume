@@ -5,6 +5,12 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Existing release version to resume publishing (e.g. 2.8.0, without the v prefix)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -162,7 +168,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     needs: [commitlint, rust, npm-package, python-wheel]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch'
     # Prevent concurrent releases from racing (would cause "tag already exists" errors)
     concurrency:
       group: release
@@ -173,7 +179,7 @@ jobs:
       pull-requests: write
       id-token: write
     outputs:
-      new_release_version: ${{ steps.check.outputs.version }}
+      new_release_version: ${{ steps.check.outputs.version || steps.resume.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -182,16 +188,23 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: lts/*
+      # The semantic-release prepare step runs cargo update / cargo metadata.
+      - uses: dtolnay/rust-toolchain@stable
+        if: github.event_name == 'push'
       - name: Get latest tag before release
+        if: github.event_name == 'push'
         id: before
         run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
+        if: github.event_name == 'push'
         run: npm install -D semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/exec
       - name: Release
+        if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
       - name: Check if a new release was created
+        if: github.event_name == 'push'
         id: check
         run: |
           git fetch --tags
@@ -199,6 +212,19 @@ jobs:
           if [ "$LATEST_TAG" != "${{ steps.before.outputs.tag }}" ] && [ -n "$LATEST_TAG" ]; then
             echo "version=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
           fi
+      # Manual dispatch resumes publishing for a tag that semantic-release
+      # already created; downstream publish steps skip artifacts that exist.
+      - name: Resume release from an existing tag
+        if: github.event_name == 'workflow_dispatch'
+        id: resume
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            echo "Tag v$VERSION does not exist" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build-binaries:
     name: Build binary (${{ matrix.platform.name }})
@@ -398,7 +424,7 @@ jobs:
           merge-multiple: true
       - uses: astral-sh/setup-uv@v8.3.2
       - name: Publish wheels
-        run: uv publish dist/*.whl
+        run: uv publish --check-url https://pypi.org/simple/fast-resume/ dist/*.whl
 
   publish-npm:
     name: Publish npm package

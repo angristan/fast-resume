@@ -74,7 +74,11 @@ fast-resume/
 
 `maturin` builds PyPI wheels containing the Rust binary and compatibility commands. The same wheel builds supply npm's native variants. All variants use the `fast-resume` package name with platform prerelease versions such as `2.7.0-linux-x64`. The launcher selects one through an npm alias in `optionalDependencies`; it does not download code from an install script.
 
-Release automation also builds standalone macOS and Linux archives and dispatches the Homebrew formula update. Pull-request CI builds and installs wheels for macOS ARM64/Intel, Linux ARM64/x86_64, and Windows x86_64. Release and publishing jobs run only after a qualifying push to `master`.
+Release automation also builds standalone macOS and Linux archives and dispatches the Homebrew formula update. Pull-request CI builds and installs wheels for macOS ARM64/Intel, Linux ARM64/x86_64, and Windows x86_64. Release and publishing jobs run after a qualifying push to `master`, or through a manual workflow run that resumes an existing release.
+
+### Resuming a partial release
+
+If a publish job fails after semantic-release has created the tag, run the CI workflow manually (Actions → CI → Run workflow) with the release version, for example `2.8.0`. The run rebuilds the artifacts from the tag and retries every publish step. Publishing is idempotent: npm skips versions that already exist, `uv publish` checks PyPI before uploading, and release-asset uploads overwrite.
 
 ### npm publishing setup
 
