@@ -65,7 +65,7 @@ impl CodexAdapter {
         let mut directory = String::new();
         let mut messages = Vec::new();
         let mut user_prompts = Vec::new();
-        let mut turns = 0usize;
+        let mut response_user_prompts = Vec::new();
         let mut yolo = false;
 
         for line in BufReader::new(file).lines().map_while(Result::ok) {
@@ -103,9 +103,13 @@ impl CodexAdapter {
                         let role_prefix = if role == "user" { "» " } else { "  " };
                         if let Some(content) = payload.get("content") {
                             for text in content_texts(content) {
-                                if !text.trim_start().starts_with("<environment_context>") {
-                                    messages.push(format!("{role_prefix}{text}"));
+                                if text.trim_start().starts_with("<environment_context>") {
+                                    continue;
                                 }
+                                if role == "user" && string_at(payload, &["type"]) == "message" {
+                                    response_user_prompts.push(text.clone());
+                                }
+                                messages.push(format!("{role_prefix}{text}"));
                             }
                         }
                     }
@@ -116,7 +120,6 @@ impl CodexAdapter {
                         if !message.is_empty() {
                             messages.push(format!("» {message}"));
                             user_prompts.push(message);
-                            turns += 1;
                         }
                     }
                     "agent_reasoning" => {
@@ -135,8 +138,12 @@ impl CodexAdapter {
             session_id = fallback_session_id(path);
         }
         if user_prompts.is_empty() {
+            user_prompts = response_user_prompts;
+        }
+        if user_prompts.is_empty() {
             return None;
         }
+        let turns = user_prompts.len();
 
         let title_source = thread_names
             .get(&session_id)
@@ -423,6 +430,31 @@ mod tests {
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].message_count, 2);
+    }
+
+    #[test]
+    fn indexes_user_response_items_without_legacy_user_events() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(sessions_dir.join("2026/06/21")).unwrap();
+        let session_file = sessions_dir.join("2026/06/21/rollout-modern.jsonl");
+        write_jsonl(
+            &session_file,
+            &[
+                json!({"type": "session_meta", "payload": {"id": "modern", "cwd": "/work/app"}}),
+                json!({"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "First modern prompt"}]}}),
+                json!({"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "First modern answer"}]}}),
+                json!({"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Second modern prompt"}]}}),
+            ],
+        );
+
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "First modern prompt");
+        assert_eq!(sessions[0].message_count, 2);
+        assert!(sessions[0].content.contains("First modern answer"));
     }
 
     #[test]
