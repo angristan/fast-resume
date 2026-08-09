@@ -1,3 +1,10 @@
+## [2.9.4](https://github.com/angristan/fast-resume/compare/v2.9.3...v2.9.4) (2026-08-09)
+
+
+### Bug Fixes
+
+* **adapters:** index short user prompts ([f9e9a98](https://github.com/angristan/fast-resume/commit/f9e9a9878745c17757f10db98b7bf7d00ba1288f))
+
 ## [2.9.3](https://github.com/angristan/fast-resume/compare/v2.9.2...v2.9.3) (2026-08-09)
 
 
