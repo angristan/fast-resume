@@ -1,6 +1,6 @@
 [package]
 name = "fast-resume"
-version = "2.9.2"
+version = "2.9.3"
 edition = "2024"
 rust-version = "1.88"
 description = "Fast fuzzy finder for coding agent session history"

@@ -1,3 +1,10 @@
+## [2.9.3](https://github.com/angristan/fast-resume/compare/v2.9.2...v2.9.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **codex:** index modern user messages ([ed40a94](https://github.com/angristan/fast-resume/commit/ed40a94ba91e88f517cdd1773899735cb7a0c61e))
+
 ## [2.9.2](https://github.com/angristan/fast-resume/compare/v2.9.1...v2.9.2) (2026-08-08)
 
 
