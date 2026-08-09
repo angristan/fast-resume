@@ -81,7 +81,7 @@ impl ClaudeAdapter {
                             && !text.starts_with("<local-command")
                         {
                             messages.push(format!("» {text}"));
-                            if first_user_message.is_empty() && text.chars().count() > 10 {
+                            if first_user_message.is_empty() && !text.trim().is_empty() {
                                 first_user_message = text;
                             }
                         }
@@ -311,6 +311,34 @@ mod tests {
     use crate::adapters::Adapter;
 
     use super::*;
+
+    #[test]
+    fn indexes_short_non_meta_string_user_prompts() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("short-prompt.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Hi"}
+                })
+                .to_string(),
+                json!({"type": "assistant", "message": {"content": "Hello"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let sessions = ClaudeAdapter::new(projects).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Hi");
+        assert!(sessions[0].content.contains("» Hi"));
+    }
 
     #[test]
     fn full_scan_mtimes_match_the_incremental_scan() {

@@ -188,7 +188,7 @@ impl CopilotCliAdapter {
                     if !content.is_empty() {
                         messages.push(format!("» {content}"));
                         turns += 1;
-                        if first_user_message.is_empty() && content.chars().count() > 10 {
+                        if first_user_message.is_empty() {
                             first_user_message = content;
                         }
                     }
@@ -284,6 +284,29 @@ mod tests {
             adapter.resume_command(&sessions[0], true),
             vec!["copilot", "--yolo", "--resume", "copilot-1"]
         );
+    }
+
+    #[test]
+    fn parses_session_with_short_user_prompt() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        write_jsonl(
+            &sessions_dir.join("short-prompt.jsonl"),
+            &[
+                json!({"type": "session.start", "data": {"sessionId": "copilot-short"}}),
+                json!({"type": "user.message", "data": {"content": "Hi"}}),
+                json!({"type": "assistant.message", "data": {"content": "Hello"}}),
+            ],
+        );
+
+        let adapter = CopilotCliAdapter { sessions_dir };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "copilot-short");
+        assert_eq!(sessions[0].title, "Hi");
+        assert_eq!(sessions[0].message_count, 2);
     }
 
     #[test]
