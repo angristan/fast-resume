@@ -1,3 +1,10 @@
+# [2.10.0](https://github.com/angristan/fast-resume/compare/v2.9.4...v2.10.0) (2026-08-15)
+
+
+### Features
+
+* **tui:** add light terminal themes ([93fd8ba](https://github.com/angristan/fast-resume/commit/93fd8ba02d847c4ed52bd967b66c6903b6147f20))
+
 ## [2.9.4](https://github.com/angristan/fast-resume/compare/v2.9.3...v2.9.4) (2026-08-09)
 
 

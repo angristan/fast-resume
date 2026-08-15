@@ -1,6 +1,6 @@
 {
   "name": "fast-resume",
-  "version": "2.9.4",
+  "version": "2.10.0",
   "description": "Fast fuzzy finder for coding agent session history",
   "license": "MIT",
   "repository": {
@@ -31,10 +31,10 @@
     "test": "node --test"
   },
   "optionalDependencies": {
-    "fast-resume-darwin-arm64": "npm:fast-resume@2.9.4-darwin-arm64",
-    "fast-resume-darwin-x64": "npm:fast-resume@2.9.4-darwin-x64",
-    "fast-resume-linux-arm64": "npm:fast-resume@2.9.4-linux-arm64",
-    "fast-resume-linux-x64": "npm:fast-resume@2.9.4-linux-x64"
+    "fast-resume-darwin-arm64": "npm:fast-resume@2.10.0-darwin-arm64",
+    "fast-resume-darwin-x64": "npm:fast-resume@2.10.0-darwin-x64",
+    "fast-resume-linux-arm64": "npm:fast-resume@2.10.0-linux-arm64",
+    "fast-resume-linux-x64": "npm:fast-resume@2.10.0-linux-x64"
   },
   "publishConfig": {
     "access": "public"
