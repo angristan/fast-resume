@@ -191,6 +191,7 @@ fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
         "kimi" => Some(include_bytes!("../../assets/agents/kimi.png")),
         "opencode" => Some(include_bytes!("../../assets/agents/opencode.png")),
         "pi" => Some(include_bytes!("../../assets/agents/pi.png")),
+        "reasonix" => Some(include_bytes!("../../assets/agents/reasonix.png")),
         "vibe" => Some(include_bytes!("../../assets/agents/vibe.png")),
         _ => None,
     }
