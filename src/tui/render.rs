@@ -1,6 +1,6 @@
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::prelude::Frame;
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui_image::{Image as TuiImage, protocol::Protocol};
@@ -14,12 +14,7 @@ use super::state::{AppState, PendingAction, YoloModal};
 use super::text::{
     age_style, display_width_until, line_width, search_query_spans, time_ago, truncate,
 };
-
-const ACCENT: Color = Color::Rgb(224, 150, 70);
-const FILTER_SELECTED_BG: Color = Color::Rgb(42, 46, 54);
-const PANEL_BORDER: Color = Color::Rgb(70, 80, 95);
-const SELECTED_BG: Color = Color::Rgb(68, 52, 34);
-const WARNING: Color = Color::Rgb(240, 180, 80);
+use super::theme::Theme;
 const SEARCH_PLACEHOLDER: &str = "Search titles, messages, paths. Try agent:claude";
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
@@ -33,7 +28,7 @@ pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     draw_footer(frame, layout.footer, state);
 
     if let Some(modal) = &state.modal {
-        draw_yolo_modal(frame, area, modal);
+        draw_yolo_modal(frame, area, modal, &state.theme);
     }
 }
 
@@ -43,7 +38,7 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn header_line(state: &AppState, width: u16) -> Line<'static> {
     let left_spans = vec![
-        Span::styled("fast-resume", Style::new().bold().fg(ACCENT)),
+        Span::styled("fast-resume", Style::new().bold().fg(state.theme.accent)),
         Span::raw(format!(" v{VERSION}")),
     ];
     let count_agent_filter = state.count_agent_filter();
@@ -65,9 +60,9 @@ fn header_line(state: &AppState, width: u16) -> Line<'static> {
     let refresh_width = (width as usize).saturating_sub(base_width);
     if !state.refresh_status.is_empty() && refresh_width >= 4 {
         let style = if state.scanning {
-            Style::new().fg(WARNING)
+            Style::new().fg(state.theme.warning)
         } else {
-            Style::new().fg(Color::DarkGray)
+            Style::new().fg(state.theme.muted)
         };
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
@@ -80,7 +75,7 @@ fn header_line(state: &AppState, width: u16) -> Line<'static> {
         .saturating_sub(line_width(&Line::from(spans.clone())))
         .saturating_sub(right_width);
     spans.push(Span::raw(" ".repeat(pad as usize)));
-    spans.push(Span::styled(right, Style::new().fg(Color::DarkGray)));
+    spans.push(Span::styled(right, Style::new().fg(state.theme.muted)));
     Line::from(spans)
 }
 
@@ -88,25 +83,25 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(ACCENT))
+        .border_style(Style::new().fg(state.theme.accent))
         .title(" Search ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let prompt = Span::styled(" / ", Style::new().fg(ACCENT).bold());
+    let prompt = Span::styled(" / ", Style::new().fg(state.theme.accent).bold());
     let input_width = inner.width.saturating_sub(3) as usize;
     let mut spans = vec![prompt];
     if state.query.is_empty() {
         if input_width > 0 {
             spans.push(Span::styled(
                 truncate(SEARCH_PLACEHOLDER, input_width),
-                Style::new().fg(Color::DarkGray).italic(),
+                Style::new().fg(state.theme.muted).italic(),
             ));
         }
     } else {
         let (visible_query, visible_cursor) =
             search_input_view(&state.query, state.cursor, input_width);
-        spans.extend(search_query_spans(&visible_query));
+        spans.extend(search_query_spans(&visible_query, &state.theme));
         if visible_cursor == visible_query.chars().count()
             && let Some(suffix) = state.suggestion_suffix()
         {
@@ -114,7 +109,7 @@ fn draw_search(frame: &mut Frame, area: Rect, state: &AppState) {
             if remaining > 0 {
                 spans.push(Span::styled(
                     truncate(&suffix, remaining),
-                    Style::new().fg(Color::DarkGray),
+                    Style::new().fg(state.theme.muted),
                 ));
             }
         }
@@ -193,8 +188,9 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
             "All",
             None,
             state.all_agent_filter_active(),
-            Color::White,
+            state.theme.foreground,
             None,
+            &state.theme,
         );
     }
     for (index, (agent, _)) in available_agents.iter().enumerate() {
@@ -218,7 +214,17 @@ fn draw_filters(frame: &mut Frame, area: Rect, state: &AppState) {
         } else {
             ""
         };
-        x = draw_filter_tab(frame, area, x, label, count, active, config.color, icon);
+        x = draw_filter_tab(
+            frame,
+            area,
+            x,
+            label,
+            count,
+            active,
+            state.theme.agent_color(config),
+            icon,
+            &state.theme,
+        );
     }
 }
 
@@ -360,6 +366,7 @@ fn draw_filter_tab(
     active: bool,
     color: Color,
     icon: Option<&Protocol>,
+    theme: &Theme,
 ) -> u16 {
     let has_icon = icon.is_some();
     let suffix = count_suffix(count);
@@ -370,22 +377,24 @@ fn draw_filter_tab(
     }
 
     let background_style = if active {
-        Style::new().bg(FILTER_SELECTED_BG)
+        Style::new().bg(theme.filter_selected_bg)
     } else {
         Style::new()
     };
     let label_style = if active {
         Style::new()
             .fg(color)
-            .bg(FILTER_SELECTED_BG)
+            .bg(theme.filter_selected_bg)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(color)
     };
     let count_style = if active {
-        Style::new().fg(Color::Gray).bg(FILTER_SELECTED_BG)
+        Style::new()
+            .fg(theme.secondary)
+            .bg(theme.filter_selected_bg)
     } else {
-        Style::new().fg(Color::DarkGray)
+        Style::new().fg(theme.muted)
     };
     let label_line = || {
         Line::from(vec![
@@ -404,7 +413,7 @@ fn draw_filter_tab(
             Paragraph::new("▌").style(
                 Style::new()
                     .fg(color)
-                    .bg(FILTER_SELECTED_BG)
+                    .bg(theme.filter_selected_bg)
                     .add_modifier(Modifier::BOLD),
             ),
             Rect::new(x, area.y, 1.min(visible_width), 1),
@@ -446,7 +455,7 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(state.theme.panel_border))
         .title(" Sessions ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -456,7 +465,7 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     let columns = result_columns(inner.width);
-    draw_result_header(frame, inner, columns);
+    draw_result_header(frame, inner, columns, &state.theme);
 
     let rows_area = Rect::new(
         inner.x,
@@ -467,7 +476,8 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppState) {
 
     if state.visible.is_empty() {
         frame.render_widget(
-            Paragraph::new("  No sessions found").style(Style::new().fg(Color::DarkGray).italic()),
+            Paragraph::new("  No sessions found")
+                .style(Style::new().fg(state.theme.muted).italic()),
             rows_area,
         );
         return;
@@ -540,8 +550,8 @@ fn agent_badge(agent: &str) -> &str {
         .unwrap_or(agent)
 }
 
-fn draw_result_header(frame: &mut Frame, inner: Rect, columns: ResultColumns) {
-    let style = Style::new().fg(Color::Gray).bold();
+fn draw_result_header(frame: &mut Frame, inner: Rect, columns: ResultColumns, theme: &Theme) {
+    let style = Style::new().fg(theme.secondary).bold();
     draw_cell(
         frame,
         inner,
@@ -593,7 +603,9 @@ fn draw_result_row(
     state: &AppState,
 ) {
     let row_style = if selected {
-        Style::new().bg(SELECTED_BG).fg(Color::White)
+        Style::new()
+            .bg(state.theme.selected_bg)
+            .fg(state.theme.selected_fg)
     } else {
         Style::new()
     };
@@ -604,8 +616,8 @@ fn draw_result_row(
 
     let agent_config = AGENTS.get(session.agent.as_str());
     let agent_color = agent_config
-        .map(|agent| agent.color)
-        .unwrap_or(Color::White);
+        .map(|agent| state.theme.agent_color(agent))
+        .unwrap_or(state.theme.foreground);
     let agent_label = agent_badge(&session.agent);
     let pointer = if selected { "▸" } else { " " };
     draw_cell(
@@ -661,7 +673,7 @@ fn draw_result_row(
             row_y - rows_area.y,
             columns.dir_w,
             &truncate(&session.display_directory(), columns.dir_w as usize),
-            row_style.fg(Color::DarkGray),
+            row_style.fg(state.theme.muted),
         );
     }
     draw_cell(
@@ -680,7 +692,7 @@ fn draw_result_row(
         row_y - rows_area.y,
         columns.age_w,
         &time_ago(session.timestamp),
-        age_style(session.timestamp).bg(row_style.bg.unwrap_or(Color::Reset)),
+        age_style(session.timestamp, &state.theme).bg(row_style.bg.unwrap_or(Color::Reset)),
     );
 }
 
@@ -698,7 +710,7 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(state.theme.panel_border))
         .title(" Preview ");
     let inner = block.inner(area).inner(Margin {
         vertical: 0,
@@ -707,14 +719,17 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(block, area);
 
     let Some(session) = state.selected_session() else {
-        frame.render_widget(Paragraph::new("No session selected").dark_gray(), inner);
+        frame.render_widget(
+            Paragraph::new("No session selected").style(Style::new().fg(state.theme.muted)),
+            inner,
+        );
         return;
     };
 
     let agent_color = AGENTS
         .get(session.agent.as_str())
-        .map(|agent| agent.color)
-        .unwrap_or(Color::White);
+        .map(|agent| state.theme.agent_color(agent))
+        .unwrap_or(state.theme.foreground);
     let header_lines = vec![
         Line::from(vec![
             Span::styled(&session.agent, Style::new().fg(agent_color).bold()),
@@ -724,12 +739,12 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         Line::from(vec![
             Span::styled(
                 session.display_directory(),
-                Style::new().fg(Color::DarkGray),
+                Style::new().fg(state.theme.muted),
             ),
             Span::raw("  "),
             Span::styled(
                 session.timestamp.format("%Y-%m-%d %H:%M").to_string(),
-                Style::new().fg(Color::DarkGray),
+                Style::new().fg(state.theme.muted),
             ),
         ]),
     ];
@@ -773,26 +788,29 @@ fn draw_preview(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, state: &AppState) {
-    frame.render_widget(Paragraph::new(footer_line(&state.status, area.width)), area);
+    frame.render_widget(
+        Paragraph::new(footer_line(&state.status, area.width, &state.theme)),
+        area,
+    );
 }
 
-fn shortcut_footer() -> Line<'static> {
+fn shortcut_footer(theme: &Theme) -> Line<'static> {
     Line::from(vec![
-        Span::styled(" Enter ", Style::new().fg(Color::Black).bg(ACCENT)),
+        Span::styled(" Enter ", Style::new().fg(theme.key_fg).bg(theme.accent)),
         Span::raw(" resume  "),
-        Span::styled(" Ctrl+Y ", Style::new().fg(Color::Black).bg(Color::Gray)),
+        Span::styled(" Ctrl+Y ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" copy  "),
-        Span::styled(" Tab ", Style::new().fg(Color::Black).bg(Color::Gray)),
+        Span::styled(" Tab ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" agent  "),
-        Span::styled(" Ctrl+P ", Style::new().fg(Color::Black).bg(Color::Gray)),
+        Span::styled(" Ctrl+P ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" preview  "),
-        Span::styled(" Esc ", Style::new().fg(Color::Black).bg(Color::Gray)),
+        Span::styled(" Esc ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" quit"),
     ])
 }
 
-fn footer_line(status: &str, width: u16) -> Line<'static> {
-    let shortcuts = shortcut_footer();
+fn footer_line(status: &str, width: u16, theme: &Theme) -> Line<'static> {
+    let shortcuts = shortcut_footer(theme);
     if status.trim().is_empty() {
         return shortcuts;
     }
@@ -802,27 +820,27 @@ fn footer_line(status: &str, width: u16) -> Line<'static> {
     if width <= shortcut_width + 4 {
         return Line::from(Span::styled(
             truncate(status, width),
-            Style::new().fg(WARNING),
+            Style::new().fg(theme.warning),
         ));
     }
 
     let status_width = width.saturating_sub(shortcut_width + 2);
     let status = truncate(status, status_width);
     let mut spans = vec![
-        Span::styled(status, Style::new().fg(WARNING)),
+        Span::styled(status, Style::new().fg(theme.warning)),
         Span::raw("  "),
     ];
     spans.extend(shortcuts.spans);
     Line::from(spans)
 }
 
-fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
+fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal, theme: &Theme) {
     let popup = centered_rect(48, 8, area);
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(WARNING))
+        .border_style(Style::new().fg(theme.warning))
         .title(" Yolo mode ");
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -831,9 +849,9 @@ fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal) {
         Line::from(yolo_modal_prompt(modal.action)),
         Line::raw(""),
         Line::from(vec![
-            button_span(" No ", !modal.selected),
+            button_span(" No ", !modal.selected, theme),
             Span::raw("  "),
-            button_span(" Yolo ", modal.selected),
+            button_span(" Yolo ", modal.selected, theme),
         ])
         .alignment(Alignment::Center),
     ];
@@ -847,11 +865,14 @@ fn yolo_modal_prompt(action: PendingAction) -> &'static str {
     }
 }
 
-fn button_span(label: &'static str, selected: bool) -> Span<'static> {
+fn button_span(label: &'static str, selected: bool, theme: &Theme) -> Span<'static> {
     if selected {
-        Span::styled(label, Style::new().fg(Color::Black).bg(WARNING).bold())
+        Span::styled(
+            label,
+            Style::new().fg(theme.key_fg).bg(theme.warning).bold(),
+        )
     } else {
-        Span::styled(label, Style::new().fg(Color::Gray))
+        Span::styled(label, Style::new().fg(theme.secondary))
     }
 }
 
@@ -1002,7 +1023,7 @@ mod tests {
 
     #[test]
     fn footer_renders_status_when_present() {
-        let line = footer_line("copied: codex resume abc", 120);
+        let line = footer_line("copied: codex resume abc", 120, &Theme::dark());
         let rendered = line
             .spans
             .iter()
@@ -1015,7 +1036,11 @@ mod tests {
 
     #[test]
     fn footer_prefers_status_on_narrow_width() {
-        let line = footer_line("clipboard unavailable: codex resume abc", 18);
+        let line = footer_line(
+            "clipboard unavailable: codex resume abc",
+            18,
+            &Theme::dark(),
+        );
         let rendered = line
             .spans
             .iter()

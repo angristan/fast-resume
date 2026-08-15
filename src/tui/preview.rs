@@ -4,11 +4,19 @@ use ratatui::text::{Line, Span};
 use crate::config::AGENTS;
 use crate::model::Session;
 
-pub(super) fn render_preview_lines(session: &Session, query: &str) -> Vec<Line<'static>> {
+use super::theme::Theme;
+
+pub(super) fn render_preview_lines(
+    session: &Session,
+    query: &str,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     let snippet = preview_snippet(session, query);
     let agent = AGENTS.get(session.agent.as_str());
     let agent_label = agent.map(|agent| agent.badge).unwrap_or(&session.agent);
-    let agent_color = agent.map(|agent| agent.color).unwrap_or(Color::White);
+    let agent_color = agent
+        .map(|agent| theme.agent_color(agent))
+        .unwrap_or(theme.foreground);
     let terms = preview_terms(query);
 
     let mut lines = Vec::new();
@@ -19,7 +27,7 @@ pub(super) fn render_preview_lines(session: &Session, query: &str) -> Vec<Line<'
         if !lines.is_empty() {
             lines.push(Line::raw(""));
         }
-        render_preview_message(&mut lines, message, agent_label, agent_color, &terms);
+        render_preview_message(&mut lines, message, agent_label, agent_color, &terms, theme);
     }
     lines
 }
@@ -81,6 +89,7 @@ fn render_preview_message(
     agent_label: &str,
     agent_color: Color,
     terms: &[String],
+    theme: &Theme,
 ) {
     let role = preview_role(message);
     let mut in_code = false;
@@ -96,6 +105,7 @@ fn render_preview_message(
                 agent_label,
                 agent_color,
                 first_content_line,
+                theme,
             ));
             if in_code {
                 in_code = false;
@@ -109,20 +119,23 @@ fn render_preview_message(
         }
 
         if in_code {
-            out.push(render_code_line(line, &code_language, terms));
+            out.push(render_code_line(line, &code_language, terms, theme));
             continue;
         }
 
         match role {
-            PreviewRole::User => out.push(render_user_line(line, terms, first_content_line)),
+            PreviewRole::User => {
+                out.push(render_user_line(line, terms, first_content_line, theme));
+            }
             PreviewRole::Assistant => out.push(render_agent_line(
                 line,
                 terms,
                 agent_label,
                 agent_color,
                 first_content_line,
+                theme,
             )),
-            PreviewRole::Other => out.push(render_plain_preview_line(line, terms)),
+            PreviewRole::Other => out.push(render_plain_preview_line(line, terms, theme)),
         }
         first_content_line = false;
     }
@@ -154,25 +167,23 @@ fn code_fence_language(line: &str) -> Option<&str> {
         .map(|language| language.split_whitespace().next().unwrap_or_default())
 }
 
-fn render_user_line(line: &str, terms: &[String], first: bool) -> Line<'static> {
+fn render_user_line(line: &str, terms: &[String], first: bool, theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
     if first {
         spans.push(Span::styled(
             "» ".to_string(),
-            Style::new().fg(Color::Rgb(120, 210, 255)).bold(),
+            Style::new().fg(theme.user_accent).bold(),
         ));
     } else {
-        spans.push(Span::styled(
-            "  ".to_string(),
-            Style::new().fg(Color::DarkGray),
-        ));
+        spans.push(Span::styled("  ".to_string(), Style::new().fg(theme.muted)));
     }
     spans.extend(highlight_spans(
         vec![Span::styled(
             line.to_string(),
-            Style::new().fg(Color::Rgb(180, 225, 245)).bold(),
+            Style::new().fg(theme.user_text).bold(),
         )],
         terms,
+        theme,
     ));
     Line::from(spans)
 }
@@ -183,6 +194,7 @@ fn render_agent_line(
     agent_label: &str,
     agent_color: Color,
     first: bool,
+    theme: &Theme,
 ) -> Line<'static> {
     let mut spans = Vec::new();
     if first {
@@ -191,30 +203,29 @@ fn render_agent_line(
             Style::new().fg(agent_color).bold(),
         ));
     } else {
-        spans.push(Span::styled(
-            "  ".to_string(),
-            Style::new().fg(Color::DarkGray),
-        ));
+        spans.push(Span::styled("  ".to_string(), Style::new().fg(theme.muted)));
     }
     spans.extend(highlight_spans(
         vec![Span::styled(
             line.to_string(),
-            Style::new().fg(Color::Rgb(220, 225, 230)),
+            Style::new().fg(theme.assistant_text),
         )],
         terms,
+        theme,
     ));
     Line::from(spans)
 }
 
-fn render_plain_preview_line(line: &str, terms: &[String]) -> Line<'static> {
+fn render_plain_preview_line(line: &str, terms: &[String], theme: &Theme) -> Line<'static> {
     let style = if line.starts_with("...") {
-        Style::new().fg(Color::DarkGray).italic()
+        Style::new().fg(theme.muted).italic()
     } else {
-        Style::new().fg(Color::Gray)
+        Style::new().fg(theme.secondary)
     };
     Line::from(highlight_spans(
         vec![Span::styled(line.to_string(), style)],
         terms,
+        theme,
     ))
 }
 
@@ -224,6 +235,7 @@ fn render_code_fence_line(
     agent_label: &str,
     agent_color: Color,
     first: bool,
+    theme: &Theme,
 ) -> Line<'static> {
     let mut spans = Vec::new();
     if role == PreviewRole::Assistant && first {
@@ -232,34 +244,35 @@ fn render_code_fence_line(
             Style::new().fg(agent_color).bold(),
         ));
     } else {
-        spans.push(Span::styled(
-            "  ".to_string(),
-            Style::new().fg(Color::DarkGray),
-        ));
+        spans.push(Span::styled("  ".to_string(), Style::new().fg(theme.muted)));
     }
     spans.push(Span::styled(
         "```".to_string(),
-        Style::new().fg(Color::DarkGray).italic(),
+        Style::new().fg(theme.muted).italic(),
     ));
     if !language.is_empty() {
         spans.push(Span::styled(
             language.to_string(),
-            Style::new().fg(Color::Rgb(120, 210, 255)).italic(),
+            Style::new().fg(theme.code_keyword).italic(),
         ));
     }
     Line::from(spans)
 }
 
-fn render_code_line(line: &str, language: &str, terms: &[String]) -> Line<'static> {
+fn render_code_line(line: &str, language: &str, terms: &[String], theme: &Theme) -> Line<'static> {
     let mut spans = vec![Span::styled(
         "    ".to_string(),
-        Style::new().fg(Color::DarkGray),
+        Style::new().fg(theme.muted),
     )];
-    spans.extend(highlight_spans(code_spans(line, language), terms));
+    spans.extend(highlight_spans(
+        code_spans(line, language, theme),
+        terms,
+        theme,
+    ));
     Line::from(spans)
 }
 
-fn code_spans(line: &str, language: &str) -> Vec<Span<'static>> {
+fn code_spans(line: &str, language: &str, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut idx = 0usize;
     while idx < line.len() {
@@ -267,7 +280,7 @@ fn code_spans(line: &str, language: &str) -> Vec<Span<'static>> {
         if rest.starts_with("//") || (hash_comments(language) && rest.starts_with('#')) {
             spans.push(Span::styled(
                 rest.to_string(),
-                Style::new().fg(Color::Rgb(100, 160, 120)).italic(),
+                Style::new().fg(theme.code_comment).italic(),
             ));
             break;
         }
@@ -279,7 +292,7 @@ fn code_spans(line: &str, language: &str) -> Vec<Span<'static>> {
             let end = string_end(rest, ch);
             spans.push(Span::styled(
                 rest[..end].to_string(),
-                Style::new().fg(Color::Rgb(150, 220, 150)),
+                Style::new().fg(theme.code_string),
             ));
             idx += end;
         } else if ch.is_ascii_digit() {
@@ -288,20 +301,20 @@ fn code_spans(line: &str, language: &str) -> Vec<Span<'static>> {
             });
             spans.push(Span::styled(
                 rest[..end].to_string(),
-                Style::new().fg(Color::Rgb(210, 160, 255)),
+                Style::new().fg(theme.code_literal),
             ));
             idx += end;
         } else if ch == '_' || ch.is_ascii_alphabetic() {
             let end = take_while_len(rest, |ch| ch == '_' || ch.is_ascii_alphanumeric());
             let word = &rest[..end];
-            spans.push(Span::styled(word.to_string(), code_word_style(word)));
+            spans.push(Span::styled(word.to_string(), code_word_style(word, theme)));
             idx += end;
         } else {
             let len = ch.len_utf8();
             let style = if ch.is_whitespace() {
                 Style::new()
             } else {
-                Style::new().fg(Color::DarkGray)
+                Style::new().fg(theme.code_punctuation)
             };
             spans.push(Span::styled(ch.to_string(), style));
             idx += len;
@@ -328,16 +341,16 @@ fn hash_comments(language: &str) -> bool {
     )
 }
 
-fn code_word_style(word: &str) -> Style {
+fn code_word_style(word: &str, theme: &Theme) -> Style {
     if is_code_keyword(word) {
-        Style::new().fg(Color::Rgb(120, 210, 255)).bold()
+        Style::new().fg(theme.code_keyword).bold()
     } else if matches!(
         word,
         "true" | "false" | "null" | "None" | "Some" | "Ok" | "Err" | "True" | "False"
     ) {
-        Style::new().fg(Color::Rgb(210, 160, 255))
+        Style::new().fg(theme.code_literal)
     } else {
-        Style::new().fg(Color::Rgb(220, 225, 230))
+        Style::new().fg(theme.code_text)
     }
 }
 
@@ -413,7 +426,11 @@ fn take_while_len(value: &str, mut predicate: impl FnMut(char) -> bool) -> usize
         .unwrap_or(value.len())
 }
 
-fn highlight_spans(spans: Vec<Span<'static>>, terms: &[String]) -> Vec<Span<'static>> {
+fn highlight_spans(
+    spans: Vec<Span<'static>>,
+    terms: &[String],
+    theme: &Theme,
+) -> Vec<Span<'static>> {
     if terms.is_empty() {
         return spans;
     }
@@ -439,10 +456,7 @@ fn highlight_spans(spans: Vec<Span<'static>>, terms: &[String]) -> Vec<Span<'sta
             let end = (hit + len).min(text.len());
             highlighted.push(Span::styled(
                 text[hit..end].to_string(),
-                Style::new()
-                    .fg(Color::Black)
-                    .bg(Color::Rgb(250, 220, 110))
-                    .bold(),
+                Style::new().fg(theme.match_fg).bg(theme.match_bg).bold(),
             ));
             idx = end;
         }
@@ -513,7 +527,8 @@ mod tests {
             "» show rust\n\n  ```rust\n#[derive(Debug)]\nfn main() {\n    let answer = 42;\n}\n```\nLooks good",
         );
 
-        let lines = render_preview_lines(&session, "");
+        let theme = Theme::dark();
+        let lines = render_preview_lines(&session, "", &theme);
         let rendered = rendered_text(&lines);
 
         assert!(rendered.contains("» show rust"));
@@ -526,7 +541,7 @@ mod tests {
             .flat_map(|line| line.spans.iter())
             .find(|span| span.content.as_ref() == "fn")
             .expect("code keyword is highlighted");
-        assert_eq!(keyword.style.fg, Some(Color::Rgb(120, 210, 255)));
+        assert_eq!(keyword.style.fg, Some(theme.code_keyword));
         assert!(keyword.style.add_modifier.contains(Modifier::BOLD));
 
         let hash = lines
@@ -534,21 +549,22 @@ mod tests {
             .flat_map(|line| line.spans.iter())
             .find(|span| span.content.as_ref() == "#")
             .expect("rust attributes are not comments");
-        assert_eq!(hash.style.fg, Some(Color::DarkGray));
+        assert_eq!(hash.style.fg, Some(theme.code_punctuation));
     }
 
     #[test]
     fn preview_highlights_matches_inside_code_but_ignores_filter_tokens() {
         let session = session_with_content("» inspect\n\n  ```rust\nfn main() {}\n```");
 
-        let lines = render_preview_lines(&session, "agent:codex main");
+        let theme = Theme::dark();
+        let lines = render_preview_lines(&session, "agent:codex main", &theme);
 
         let highlighted = lines
             .iter()
             .flat_map(|line| line.spans.iter())
             .find(|span| span.content.as_ref() == "main")
             .expect("query term is highlighted in code");
-        assert_eq!(highlighted.style.bg, Some(Color::Rgb(250, 220, 110)));
+        assert_eq!(highlighted.style.bg, Some(theme.match_bg));
 
         assert!(
             lines
@@ -556,5 +572,20 @@ mod tests {
                 .flat_map(|line| line.spans.iter())
                 .all(|span| span.content.as_ref() != "agent:codex")
         );
+    }
+
+    #[test]
+    fn light_preview_uses_terminal_foreground_for_assistant_text() {
+        let session = session_with_content("  readable assistant response");
+        let theme = Theme::light();
+
+        let lines = render_preview_lines(&session, "", &theme);
+        let response = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == "readable assistant response")
+            .expect("assistant response is rendered");
+
+        assert_eq!(response.style.fg, Some(Color::Reset));
     }
 }

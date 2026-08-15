@@ -63,6 +63,18 @@ fr "dir:backend -agent:vibe auth"
 
 Type a partial filter such as `agent:cl` and press `Tab` to accept the suggestion.
 
+## TUI color themes
+
+The TUI detects whether the terminal has a dark or light background. Override the detected theme when needed:
+
+```bash
+fr --theme light
+fr --theme dark
+FAST_RESUME_THEME=light fr
+```
+
+The command-line option takes precedence over `FAST_RESUME_THEME`. Automatic detection falls back to the dark theme when the terminal does not report its background color.
+
 ## Non-interactive commands
 
 ```bash
@@ -142,6 +154,8 @@ Options:
                           (honors -a and -d filters)
       --agent-context     Print concise instructions for coding agents
       --yolo              Force auto-approve flags where supported
+      --theme <THEME>      Select auto, dark, or light TUI colors
+                          [env: FAST_RESUME_THEME=] [default: auto]
       --images            Enable agent artwork when supported
       --no-images         Disable agent artwork
       --image-protocol <PROTOCOL>

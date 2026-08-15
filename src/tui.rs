@@ -28,6 +28,7 @@ mod preview;
 mod render;
 mod state;
 mod text;
+mod theme;
 
 use images::AgentImages;
 use input::handle_key;
@@ -36,6 +37,7 @@ use render::draw;
 use state::{AppState, ScanMessage, SearchRequest, handle_scan_message};
 
 pub use images::ImageProtocol;
+pub use theme::ThemeMode;
 
 pub enum TuiExit {
     Quit,
@@ -51,7 +53,9 @@ pub fn run_tui(
     directory_filter: Option<String>,
     yolo: bool,
     image_protocol: Option<ImageProtocol>,
+    theme_mode: ThemeMode,
 ) -> Result<TuiExit> {
+    let theme = theme_mode.resolve();
     let engine = SearchEngine::open_default()?;
     let (scan_tx, scan_rx) = mpsc::channel();
     thread::spawn(move || {
@@ -85,7 +89,15 @@ pub fn run_tui(
     install_panic_hook();
     let mut terminal = setup_terminal()?;
     let images = image_protocol.and_then(AgentImages::load);
-    let mut state = AppState::new(query, agent_filter, directory_filter, yolo, engine, images);
+    let mut state = AppState::new(
+        query,
+        agent_filter,
+        directory_filter,
+        yolo,
+        engine,
+        images,
+        theme,
+    );
     let result = run_loop(&mut terminal, &mut state, scan_rx);
     restore_terminal(&mut terminal)?;
     result
@@ -351,6 +363,7 @@ mod tests {
 
     use super::input::handle_key;
     use super::state::{AppState, SearchRequest};
+    use super::theme::Theme;
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
@@ -466,6 +479,7 @@ mod tests {
             false,
             SearchEngine::from_index(index.clone()),
             None,
+            Theme::dark(),
         );
         (state, index)
     }

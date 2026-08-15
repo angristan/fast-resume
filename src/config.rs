@@ -30,6 +30,7 @@ pub struct AgentConfig {
     pub name: &'static str,
     pub badge: &'static str,
     pub color: ratatui::style::Color,
+    pub light_color: ratatui::style::Color,
 }
 
 pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
@@ -40,6 +41,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "antigravity",
                 badge: "agy",
                 color: ratatui::style::Color::Rgb(66, 133, 244),
+                light_color: ratatui::style::Color::Rgb(45, 100, 200),
             },
         ),
         (
@@ -48,6 +50,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "claude",
                 badge: "claude",
                 color: ratatui::style::Color::Rgb(232, 123, 53),
+                light_color: ratatui::style::Color::Rgb(180, 80, 20),
             },
         ),
         (
@@ -56,6 +59,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "codex",
                 badge: "codex",
                 color: ratatui::style::Color::Rgb(0, 166, 126),
+                light_color: ratatui::style::Color::Rgb(0, 115, 85),
             },
         ),
         (
@@ -64,6 +68,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "cursor",
                 badge: "cursor",
                 color: ratatui::style::Color::Rgb(255, 255, 255),
+                light_color: ratatui::style::Color::Rgb(30, 30, 30),
             },
         ),
         (
@@ -72,6 +77,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "grok",
                 badge: "grok",
                 color: ratatui::style::Color::Rgb(255, 255, 255),
+                light_color: ratatui::style::Color::Rgb(30, 30, 30),
             },
         ),
         (
@@ -80,6 +86,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "kimi",
                 badge: "kimi",
                 color: ratatui::style::Color::Rgb(56, 189, 248),
+                light_color: ratatui::style::Color::Rgb(0, 105, 165),
             },
         ),
         (
@@ -88,6 +95,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "opencode",
                 badge: "opencode",
                 color: ratatui::style::Color::Rgb(207, 206, 205),
+                light_color: ratatui::style::Color::Rgb(65, 65, 65),
             },
         ),
         (
@@ -96,6 +104,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "pi",
                 badge: "pi",
                 color: ratatui::style::Color::Rgb(151, 118, 255),
+                light_color: ratatui::style::Color::Rgb(100, 70, 195),
             },
         ),
         (
@@ -104,6 +113,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "vibe",
                 badge: "vibe",
                 color: ratatui::style::Color::Rgb(255, 107, 53),
+                light_color: ratatui::style::Color::Rgb(190, 65, 25),
             },
         ),
         (
@@ -112,6 +122,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "crush",
                 badge: "crush",
                 color: ratatui::style::Color::Rgb(107, 81, 255),
+                light_color: ratatui::style::Color::Rgb(85, 60, 190),
             },
         ),
         (
@@ -120,6 +131,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "copilot-cli",
                 badge: "copilot",
                 color: ratatui::style::Color::Rgb(156, 163, 175),
+                light_color: ratatui::style::Color::Rgb(75, 80, 90),
             },
         ),
         (
@@ -128,6 +140,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 name: "copilot-vscode",
                 badge: "vscode",
                 color: ratatui::style::Color::Rgb(0, 122, 204),
+                light_color: ratatui::style::Color::Rgb(0, 90, 160),
             },
         ),
     ])

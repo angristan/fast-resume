@@ -5,6 +5,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::AGENTS;
 
+use super::theme::Theme;
+
 pub(super) fn char_to_byte_idx(value: &str, char_idx: usize) -> usize {
     value
         .char_indices()
@@ -43,14 +45,14 @@ pub(super) fn truncate(value: &str, width: usize) -> String {
     out
 }
 
-pub(super) fn search_query_spans(query: &str) -> Vec<Span<'static>> {
+pub(super) fn search_query_spans(query: &str, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut token_start = None;
 
     for (idx, ch) in query.char_indices() {
         if ch.is_whitespace() {
             if let Some(start) = token_start.take() {
-                push_search_token(&mut spans, &query[start..idx]);
+                push_search_token(&mut spans, &query[start..idx], theme);
             }
             spans.push(Span::raw(ch.to_string()));
         } else if token_start.is_none() {
@@ -59,13 +61,13 @@ pub(super) fn search_query_spans(query: &str) -> Vec<Span<'static>> {
     }
 
     if let Some(start) = token_start {
-        push_search_token(&mut spans, &query[start..]);
+        push_search_token(&mut spans, &query[start..], theme);
     }
 
     spans
 }
 
-fn push_search_token(spans: &mut Vec<Span<'static>>, token: &str) {
+fn push_search_token(spans: &mut Vec<Span<'static>>, token: &str, theme: &Theme) {
     let (neg, rest) = token
         .strip_prefix('-')
         .map(|rest| (Some("-"), rest))
@@ -87,37 +89,37 @@ fn push_search_token(spans: &mut Vec<Span<'static>>, token: &str) {
     if let Some(neg) = neg {
         spans.push(Span::styled(
             neg.to_string(),
-            Style::new().fg(Color::Red).bold(),
+            Style::new().fg(theme.error).bold(),
         ));
     }
     spans.push(Span::styled(
         keyword.to_string(),
         if valid {
-            Style::new().fg(Color::Cyan).bold()
+            Style::new().fg(theme.info).bold()
         } else {
-            Style::new().fg(Color::Red).bold()
+            Style::new().fg(theme.error).bold()
         },
     ));
     if !valid {
         spans.push(Span::styled(
             value.to_string(),
             Style::new()
-                .fg(Color::Red)
+                .fg(theme.error)
                 .add_modifier(Modifier::CROSSED_OUT),
         ));
     } else if let Some(value) = value.strip_prefix('!') {
         spans.push(Span::styled(
             "!".to_string(),
-            Style::new().fg(Color::Red).bold(),
+            Style::new().fg(theme.error).bold(),
         ));
         spans.push(Span::styled(
             value.to_string(),
-            Style::new().fg(Color::Green),
+            Style::new().fg(theme.success),
         ));
     } else {
         spans.push(Span::styled(
             value.to_string(),
-            Style::new().fg(Color::Green),
+            Style::new().fg(theme.success),
         ));
     }
 }
@@ -174,23 +176,35 @@ pub(super) fn time_ago(timestamp: DateTime<Local>) -> String {
     }
 }
 
-pub(super) fn age_style(timestamp: DateTime<Local>) -> Style {
+pub(super) fn age_style(timestamp: DateTime<Local>, theme: &Theme) -> Style {
     let hours = Local::now()
         .signed_duration_since(timestamp)
         .num_hours()
         .max(0) as f64;
     let t = (1.0 - (-0.0149 * hours).exp()).clamp(0.0, 1.0);
-    let (r, g, b) = if t < 0.3 {
-        let s = t / 0.3;
-        (100.0 + s * 100.0, 200.0 - s * 20.0, 50.0 - s * 50.0)
+    let color = if t < 0.3 {
+        interpolate_color(theme.age_new, theme.age_recent, t / 0.3)
     } else if t < 0.6 {
-        let s = (t - 0.3) / 0.3;
-        (200.0, 180.0 - s * 80.0, s * 50.0)
+        interpolate_color(theme.age_recent, theme.age_middle, (t - 0.3) / 0.3)
     } else {
-        let s = (t - 0.6) / 0.4;
-        (200.0 - s * 100.0, 100.0, 50.0 + s * 50.0)
+        interpolate_color(theme.age_middle, theme.age_old, (t - 0.6) / 0.4)
     };
-    Style::new().fg(Color::Rgb(r as u8, g as u8, b as u8))
+    Style::new().fg(color)
+}
+
+fn interpolate_color(start: Color, end: Color, position: f64) -> Color {
+    let (Color::Rgb(start_r, start_g, start_b), Color::Rgb(end_r, end_g, end_b)) = (start, end)
+    else {
+        return end;
+    };
+    let channel = |start: u8, end: u8| {
+        (f64::from(start) + (f64::from(end) - f64::from(start)) * position) as u8
+    };
+    Color::Rgb(
+        channel(start_r, end_r),
+        channel(start_g, end_g),
+        channel(start_b, end_b),
+    )
 }
 
 pub(super) fn shell_join(parts: &[String]) -> String {
@@ -218,7 +232,8 @@ mod tests {
 
     #[test]
     fn search_query_spans_highlight_keywords_like_terminal_ui() {
-        let spans = search_query_spans("api -agent:claude date:nope dir:src agent:!codex");
+        let theme = Theme::dark();
+        let spans = search_query_spans("api -agent:claude date:nope dir:src agent:!codex", &theme);
         let rendered = spans
             .iter()
             .map(|span| span.content.as_ref())
@@ -226,18 +241,18 @@ mod tests {
 
         assert_eq!(rendered, "api -agent:claude date:nope dir:src agent:!codex");
         assert_eq!(spans[2].content.as_ref(), "-");
-        assert!(spans[2].style.fg == Some(Color::Red));
+        assert_eq!(spans[2].style.fg, Some(theme.error));
         assert_eq!(spans[3].content.as_ref(), "agent:");
-        assert!(spans[3].style.fg == Some(Color::Cyan));
+        assert_eq!(spans[3].style.fg, Some(theme.info));
         assert_eq!(spans[4].content.as_ref(), "claude");
-        assert!(spans[4].style.fg == Some(Color::Green));
+        assert_eq!(spans[4].style.fg, Some(theme.success));
         assert_eq!(spans[6].content.as_ref(), "date:");
-        assert!(spans[6].style.fg == Some(Color::Red));
+        assert_eq!(spans[6].style.fg, Some(theme.error));
         assert_eq!(spans[7].content.as_ref(), "nope");
         assert!(spans[7].style.add_modifier.contains(Modifier::CROSSED_OUT));
         assert_eq!(spans[13].content.as_ref(), "!");
-        assert!(spans[13].style.fg == Some(Color::Red));
+        assert_eq!(spans[13].style.fg, Some(theme.error));
         assert_eq!(spans[14].content.as_ref(), "codex");
-        assert!(spans[14].style.fg == Some(Color::Green));
+        assert_eq!(spans[14].style.fg, Some(theme.success));
     }
 }

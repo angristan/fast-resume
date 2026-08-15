@@ -9,6 +9,7 @@ use crate::search::SearchEngine;
 use super::images::AgentImages;
 use super::preview::render_preview_lines;
 use super::text::char_to_byte_idx;
+use super::theme::Theme;
 
 const DATE_SUGGESTIONS: [&str; 4] = ["today", "yesterday", "week", "month"];
 
@@ -80,6 +81,7 @@ pub(super) struct AppState {
     pub(super) show_preview: bool,
     pub(super) modal: Option<YoloModal>,
     pub(super) images: Option<AgentImages>,
+    pub(super) theme: Theme,
     search_generation: u64,
     applied_search_generation: u64,
     search_requested: bool,
@@ -100,7 +102,7 @@ impl AppState {
         {
             return cached.lines.clone();
         }
-        let lines = render_preview_lines(session, &self.query);
+        let lines = render_preview_lines(session, &self.query, &self.theme);
         *cache = Some(PreviewCache {
             session_id: session.id.clone(),
             mtime: session.mtime,
@@ -117,6 +119,7 @@ impl AppState {
         yolo: bool,
         engine: SearchEngine,
         images: Option<AgentImages>,
+        theme: Theme,
     ) -> Self {
         let mut state = Self {
             engine,
@@ -136,6 +139,7 @@ impl AppState {
             show_preview: true,
             modal: None,
             images,
+            theme,
             search_generation: 0,
             applied_search_generation: 0,
             search_requested: false,

@@ -12,7 +12,7 @@ use fast_resume::index::SessionIndex;
 use fast_resume::output::{DEFAULT_LIST_LIMIT, print_sessions_json, print_sessions_table};
 use fast_resume::search::SearchEngine;
 use fast_resume::stats::print_stats;
-use fast_resume::tui::{TuiExit, run_tui};
+use fast_resume::tui::{ThemeMode, TuiExit, run_tui};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ImageProtocolArg {
@@ -20,6 +20,13 @@ enum ImageProtocolArg {
     Kitty,
     Sixel,
     Iterm2,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum ThemeArg {
+    Auto,
+    Dark,
+    Light,
 }
 
 #[derive(Debug, Parser)]
@@ -79,6 +86,15 @@ struct Args {
     /// Retained as a hidden no-op for compatibility with the Python CLI.
     #[arg(long = "no-version-check", hide = true)]
     _no_version_check: bool,
+
+    /// Select a TUI color theme.
+    #[arg(
+        long,
+        value_enum,
+        env = "FAST_RESUME_THEME",
+        default_value_t = ThemeArg::Auto
+    )]
+    theme: ThemeArg,
 
     /// Render agent PNGs in the preview pane (enabled by default when supported).
     #[arg(long)]
@@ -175,9 +191,26 @@ fn main() -> Result<()> {
         Some(args.image_protocol.into())
     };
 
-    match run_tui(query, args.agent, args.directory, args.yolo, image_protocol)? {
+    match run_tui(
+        query,
+        args.agent,
+        args.directory,
+        args.yolo,
+        image_protocol,
+        args.theme.into(),
+    )? {
         TuiExit::Quit => Ok(()),
         TuiExit::Resume { command, directory } => exec_resume(command, directory),
+    }
+}
+
+impl From<ThemeArg> for ThemeMode {
+    fn from(value: ThemeArg) -> Self {
+        match value {
+            ThemeArg::Auto => Self::Auto,
+            ThemeArg::Dark => Self::Dark,
+            ThemeArg::Light => Self::Light,
+        }
     }
 }
 
@@ -347,5 +380,12 @@ mod tests {
 
         assert!(args._no_version_check);
         assert!(args.list_only);
+    }
+
+    #[test]
+    fn accepts_explicit_tui_theme() {
+        let args = Args::try_parse_from(["fr", "--theme", "light"]).unwrap();
+
+        assert_eq!(args.theme, ThemeArg::Light);
     }
 }
