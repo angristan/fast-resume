@@ -526,6 +526,59 @@ mod tests {
     }
 
     #[test]
+    fn f1_opens_help_and_suspends_search_input() {
+        let mut state = test_state(Vec::new());
+
+        handle_key(&mut state, key(KeyCode::F(1), KeyModifiers::NONE)).unwrap();
+        assert!(state.show_help);
+
+        handle_key(&mut state, key(KeyCode::Char('z'), KeyModifiers::NONE)).unwrap();
+        assert!(state.query.is_empty());
+
+        handle_key(&mut state, key(KeyCode::F(1), KeyModifiers::NONE)).unwrap();
+        assert!(!state.show_help);
+    }
+
+    #[test]
+    fn emacs_keys_move_the_search_cursor() {
+        let mut state = test_state(Vec::new());
+        type_query(&mut state, "alpha βeta");
+        let end = state.query.chars().count();
+
+        handle_key(&mut state, key(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.cursor, 0);
+
+        handle_key(&mut state, key(KeyCode::Char('f'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.cursor, 1);
+
+        handle_key(&mut state, key(KeyCode::Char('b'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.cursor, 0);
+
+        handle_key(&mut state, key(KeyCode::Char('e'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.cursor, end);
+    }
+
+    #[test]
+    fn emacs_keys_delete_search_text() {
+        let mut state = test_state(Vec::new());
+        type_query(&mut state, "aβc");
+        state.cursor = 1;
+
+        handle_key(&mut state, key(KeyCode::Char('d'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.query, "ac");
+        assert_eq!(state.cursor, 1);
+
+        state.cursor = state.query.chars().count();
+        type_query(&mut state, " beta  ");
+        handle_key(&mut state, key(KeyCode::Char('w'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(state.query, "ac ");
+
+        handle_key(&mut state, key(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        assert!(state.query.is_empty());
+        assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
     fn alt_plus_and_minus_scroll_preview() {
         let mut state = test_state(Vec::new());
         state.preview_scroll = 3;

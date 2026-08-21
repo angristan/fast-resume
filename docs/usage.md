@@ -166,14 +166,27 @@ Options:
 
 ## Keybindings
 
-### Search and navigation
+Press `F1` in the TUI to show all keyboard shortcuts.
+
+### Search input
+
+| Key | Action |
+| --- | --- |
+| `←` / `→` or `Ctrl+B` / `Ctrl+F` | Move the cursor |
+| `Home` / `End` or `Ctrl+A` / `Ctrl+E` | Move to the start or end |
+| `Backspace` | Delete the previous character |
+| `Delete` / `Ctrl+D` | Delete the next character |
+| `Ctrl+W` | Delete the previous word |
+| `Ctrl+U` | Delete to the start |
+| `Tab` / `Shift+Tab` | Accept a suggestion or cycle the agent filter |
+
+### Results navigation
 
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` | Move selection |
 | `Ctrl+J` / `Ctrl+K` | Move selection |
 | `Page Up` / `Page Down` | Move by 10 rows |
-| `Tab` / `Shift+Tab` | Accept a suggestion or cycle the agent filter |
 | `Enter` | Resume the selected session |
 
 ### Preview and actions
@@ -184,6 +197,7 @@ Options:
 | `Alt`+`+` / `Alt`+`-` | Scroll the preview pane |
 | Mouse wheel | Scroll the list or preview under the pointer |
 | `Ctrl+Y` | Copy the complete resume command |
+| `F1` | Show or close keyboard help |
 | `Esc` / `Ctrl+C` | Quit |
 
 ### Yolo confirmation

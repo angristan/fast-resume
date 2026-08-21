@@ -27,7 +27,9 @@ pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     draw_main(frame, layout.main, state);
     draw_footer(frame, layout.footer, state);
 
-    if let Some(modal) = &state.modal {
+    if state.show_help {
+        draw_help_modal(frame, area, &state.theme);
+    } else if let Some(modal) = &state.modal {
         draw_yolo_modal(frame, area, modal, &state.theme);
     }
 }
@@ -804,6 +806,8 @@ fn shortcut_footer(theme: &Theme) -> Line<'static> {
         Span::raw(" agent  "),
         Span::styled(" Ctrl+P ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" preview  "),
+        Span::styled(" F1 ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
+        Span::raw(" help  "),
         Span::styled(" Esc ", Style::new().fg(theme.key_fg).bg(theme.key_bg)),
         Span::raw(" quit"),
     ])
@@ -832,6 +836,46 @@ fn footer_line(status: &str, width: u16, theme: &Theme) -> Line<'static> {
     ];
     spans.extend(shortcuts.spans);
     Line::from(spans)
+}
+
+fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
+    let popup = centered_rect(68, 23, area);
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(theme.accent))
+        .title(" Keyboard shortcuts ");
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let text = vec![
+        Line::styled("Search input", Style::new().bold().fg(theme.accent)),
+        Line::raw("  Type                         Edit the search query"),
+        Line::raw("  ← / →, Ctrl+B / Ctrl+F      Move the cursor"),
+        Line::raw("  Home / End, Ctrl+A / Ctrl+E Move to the start / end"),
+        Line::raw("  Backspace / Delete, Ctrl+D  Delete a character"),
+        Line::raw("  Ctrl+W / Ctrl+U             Delete word / to start"),
+        Line::raw("  Tab / Shift+Tab             Complete / cycle agent"),
+        Line::raw(""),
+        Line::styled("Results", Style::new().bold().fg(theme.accent)),
+        Line::raw("  ↑ / ↓, Ctrl+K / Ctrl+J      Move selection"),
+        Line::raw("  Page Up / Page Down         Move by 10 results"),
+        Line::raw(""),
+        Line::styled("Preview and actions", Style::new().bold().fg(theme.accent)),
+        Line::raw("  Enter                        Resume session"),
+        Line::raw("  Ctrl+Y                      Copy resume command"),
+        Line::raw("  Ctrl+P                      Toggle preview"),
+        Line::raw("  Alt++ / Alt+-               Scroll preview"),
+        Line::raw("  Mouse wheel                 Scroll under pointer"),
+        Line::raw("  Esc / Ctrl+C                Quit"),
+        Line::raw(""),
+        Line::styled(
+            "F1 or Esc closes this help",
+            Style::new().fg(theme.muted).italic(),
+        ),
+    ];
+    frame.render_widget(Paragraph::new(text), inner);
 }
 
 fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal, theme: &Theme) {
@@ -1032,6 +1076,7 @@ mod tests {
 
         assert!(rendered.contains("copied: codex resume abc"));
         assert!(rendered.contains("Enter"));
+        assert!(rendered.contains("F1"));
     }
 
     #[test]
