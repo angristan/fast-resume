@@ -79,6 +79,7 @@ pub(super) struct AppState {
     pub(super) refresh_status: String,
     pub(super) last_search_ms: f64,
     pub(super) show_preview: bool,
+    pub(super) show_help: bool,
     pub(super) modal: Option<YoloModal>,
     pub(super) images: Option<AgentImages>,
     pub(super) theme: Theme,
@@ -137,6 +138,7 @@ impl AppState {
             refresh_status: "refreshing session stores".to_string(),
             last_search_ms: 0.0,
             show_preview: true,
+            show_help: false,
             modal: None,
             images,
             theme,
@@ -389,24 +391,40 @@ impl AppState {
     }
 
     pub(super) fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let start = char_to_byte_idx(&self.query, self.cursor - 1);
-        let end = char_to_byte_idx(&self.query, self.cursor);
-        self.query.replace_range(start..end, "");
-        self.cursor -= 1;
-        self.clear_explicit_filter_if_query_has_agent();
-        self.request_search();
+        self.delete_char_range(self.cursor.saturating_sub(1), self.cursor);
     }
 
     pub(super) fn delete(&mut self) {
-        if self.cursor >= self.query.chars().count() {
+        self.delete_char_range(self.cursor, self.cursor.saturating_add(1));
+    }
+
+    pub(super) fn delete_to_start(&mut self) {
+        self.delete_char_range(0, self.cursor);
+    }
+
+    pub(super) fn delete_previous_word(&mut self) {
+        let chars: Vec<_> = self.query.chars().collect();
+        let mut start = self.cursor.min(chars.len());
+        while start > 0 && chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        self.delete_char_range(start, self.cursor);
+    }
+
+    fn delete_char_range(&mut self, start: usize, end: usize) {
+        let char_count = self.query.chars().count();
+        let start = start.min(char_count);
+        let end = end.min(char_count);
+        if start >= end {
             return;
         }
-        let start = char_to_byte_idx(&self.query, self.cursor);
-        let end = char_to_byte_idx(&self.query, self.cursor + 1);
-        self.query.replace_range(start..end, "");
+        let start_byte = char_to_byte_idx(&self.query, start);
+        let end_byte = char_to_byte_idx(&self.query, end);
+        self.query.replace_range(start_byte..end_byte, "");
+        self.cursor = start;
         self.clear_explicit_filter_if_query_has_agent();
         self.request_search();
     }
