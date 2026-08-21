@@ -1,3 +1,10 @@
+# [2.11.0](https://github.com/angristan/fast-resume/compare/v2.10.0...v2.11.0) (2026-08-21)
+
+
+### Features
+
+* **tui:** add keyboard help and Emacs editing ([#89](https://github.com/angristan/fast-resume/issues/89)) ([a831fb0](https://github.com/angristan/fast-resume/commit/a831fb0a98467d853cec605ffd0abf1a79332355))
+
 # [2.10.0](https://github.com/angristan/fast-resume/compare/v2.9.4...v2.10.0) (2026-08-15)
 
 
