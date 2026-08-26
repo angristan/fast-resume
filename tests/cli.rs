@@ -210,6 +210,39 @@ fn list_stats_and_rebuild_work_through_the_binary() {
 }
 
 #[test]
+fn json_uses_claude_custom_title() {
+    let temp = TempDir::new().unwrap();
+    let session_file = write_claude_session(
+        temp.path(),
+        "claude-renamed",
+        "/repo/claude",
+        "Original Claude prompt",
+    );
+    let mut transcript = fs::read_to_string(&session_file).unwrap();
+    transcript.push('\n');
+    transcript.push_str(
+        &json!({
+            "type": "custom-title",
+            "customTitle": "Named Claude session",
+            "sessionId": "claude-renamed"
+        })
+        .to_string(),
+    );
+    fs::write(session_file, transcript).unwrap();
+
+    let (stdout, stderr) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--agent", "claude", "--all"],
+    ));
+    assert!(stderr.is_empty());
+    let output: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = output["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "claude-renamed");
+    assert_eq!(sessions[0]["title"], "Named Claude session");
+}
+
+#[test]
 fn list_removes_stale_sessions_on_incremental_refresh() {
     let temp = TempDir::new().unwrap();
     let session_file = write_codex_session(

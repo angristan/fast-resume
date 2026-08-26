@@ -50,6 +50,7 @@ impl ClaudeAdapter {
         let file = fs::File::open(path).ok()?;
         let mut directory = String::new();
         let mut first_user_message = String::new();
+        let mut custom_title = String::new();
         let mut ai_title = String::new();
         let mut messages = Vec::new();
         let mut turns = 0usize;
@@ -124,6 +125,11 @@ impl ClaudeAdapter {
                 if has_text {
                     turns += 1;
                 }
+            } else if msg_type == "custom-title" {
+                let title = string_at(&data, &["customTitle"]);
+                if !title.trim().is_empty() {
+                    custom_title = title;
+                }
             } else if msg_type == "ai-title" {
                 let title = string_at(&data, &["aiTitle"]);
                 if !title.trim().is_empty() {
@@ -136,7 +142,11 @@ impl ClaudeAdapter {
             return None;
         }
 
-        let title_source = claude_index_title(path)
+        // The transcript is authoritative for `/rename`: Claude may omit
+        // `customTitle` from its index or leave an older summary there.
+        let title_source = (!custom_title.is_empty())
+            .then_some(custom_title)
+            .or_else(|| claude_index_title(path))
             .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
             .unwrap_or(first_user_message);
         let title = truncate_title(&title_source, 100, true);
@@ -285,8 +295,14 @@ fn claude_project_index(project_dir: &Path) -> HashMap<String, (String, f64)> {
     };
     for entry in entries {
         let session_id = string_at(entry, &["sessionId"]);
+        let custom_title = string_at(entry, &["customTitle"]);
         let summary = string_at(entry, &["summary"]);
-        if session_id.is_empty() || summary.trim().is_empty() {
+        let title = if custom_title.trim().is_empty() {
+            summary.trim()
+        } else {
+            custom_title.trim()
+        };
+        if session_id.is_empty() || title.is_empty() {
             continue;
         }
         let modified = parse_timestamp_seconds(&string_at(entry, &["modified"])).unwrap_or(0.0);
@@ -296,7 +312,7 @@ fn claude_project_index(project_dir: &Path) -> HashMap<String, (String, f64)> {
             .map(|value| value / 1000.0)
             .unwrap_or(0.0);
         let mtime = index_mtime.max(modified).max(file_mtime);
-        titles.insert(session_id, (summary.trim().to_string(), mtime));
+        titles.insert(session_id, (title.to_string(), mtime));
     }
     titles
 }
@@ -417,6 +433,113 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+    }
+
+    #[test]
+    fn uses_latest_custom_title_before_index_and_ai_titles() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-custom-title.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "ai-title", "aiTitle": "Generated title"}).to_string(),
+                json!({"type": "custom-title", "customTitle": "First custom title"}).to_string(),
+                json!({"type": "custom-title", "customTitle": ""}).to_string(),
+                json!({"type": "custom-title", "customTitle": "Renamed Claude thread"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.join("sessions-index.json"),
+            json!({
+                "version": 1,
+                "entries": [{
+                    "sessionId": "session-custom-title",
+                    "summary": "Stale generated summary"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let sessions = ClaudeAdapter::new(projects).find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Renamed Claude thread");
+    }
+
+    #[test]
+    fn refreshes_sessions_index_custom_title() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-index-custom-title.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "assistant", "message": {"content": "Response"}}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let index_file = project.join("sessions-index.json");
+        fs::write(
+            &index_file,
+            json!({
+                "version": 1,
+                "entries": [{
+                    "sessionId": "session-index-custom-title",
+                    "customTitle": "Initial custom title",
+                    "summary": "Stale generated summary",
+                    "modified": "2030-01-01T00:00:00Z"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let adapter = ClaudeAdapter::new(projects);
+        let initial = adapter.find_sessions();
+        assert_eq!(initial[0].title, "Initial custom title");
+        let known: KnownSessions = initial
+            .iter()
+            .map(|session| (("claude".to_string(), session.id.clone()), session.mtime))
+            .collect();
+
+        fs::write(
+            index_file,
+            json!({
+                "version": 1,
+                "entries": [{
+                    "sessionId": "session-index-custom-title",
+                    "customTitle": "Updated custom title",
+                    "summary": "Stale generated summary",
+                    "modified": "2031-01-01T00:00:00Z"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].title, "Updated custom title");
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
