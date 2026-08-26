@@ -1,3 +1,10 @@
+## [2.11.1](https://github.com/angristan/fast-resume/compare/v2.11.0...v2.11.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **claude:** restore custom session titles ([#90](https://github.com/angristan/fast-resume/issues/90)) ([8785ac3](https://github.com/angristan/fast-resume/commit/8785ac38fbe7ba7df9c2a1e5f091f6cc3aa60e2e))
+
 # [2.11.0](https://github.com/angristan/fast-resume/compare/v2.10.0...v2.11.0) (2026-08-21)
 
 
