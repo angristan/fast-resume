@@ -12,6 +12,7 @@ fn run_fr(home: &Path, args: &[&str]) -> Output {
         .args(args)
         .env_clear()
         .env("HOME", home)
+        .env("USERPROFILE", home)
         .output()
         .unwrap()
 }
@@ -455,6 +456,7 @@ fn xdg_cache_home_controls_index_location() {
         .arg("--list")
         .env_clear()
         .env("HOME", temp.path())
+        .env("USERPROFILE", temp.path())
         .env("XDG_CACHE_HOME", &xdg_cache_home)
         .output()
         .unwrap();
@@ -482,6 +484,7 @@ fn relative_xdg_cache_home_is_ignored() {
         .arg("--list")
         .env_clear()
         .env("HOME", temp.path())
+        .env("USERPROFILE", temp.path())
         .env("XDG_CACHE_HOME", "relative-cache")
         .output()
         .unwrap();
@@ -539,7 +542,11 @@ fn flag_polish_covers_alias_conflicts_and_stats_filters() {
 
     let (context_stdout, _) =
         assert_success(run_fr(temp.path(), &["--agent-context", "--limit", "5"]));
-    assert!(context_stdout.starts_with("---\nname: fast-resume\n"));
+    assert!(
+        context_stdout
+            .replace("\r\n", "\n")
+            .starts_with("---\nname: fast-resume\n")
+    );
 
     let (stdout, stderr) = assert_failure(run_fr(temp.path(), &["--images", "--no-images"]));
     assert!(stdout.is_empty());
@@ -567,6 +574,7 @@ fn incremental_refresh_after_rebuild_reparses_nothing() {
         .arg("--list")
         .env_clear()
         .env("HOME", temp.path())
+        .env("USERPROFILE", temp.path())
         .env("FAST_RESUME_TRACE_REFRESH", "1")
         .output()
         .unwrap();
@@ -612,7 +620,11 @@ fn agent_context_exposes_the_portable_skill() {
     let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--agent-context"]));
 
     assert!(stderr.is_empty());
-    assert!(stdout.starts_with("---\nname: fast-resume\n"));
+    assert!(
+        stdout
+            .replace("\r\n", "\n")
+            .starts_with("---\nname: fast-resume\n")
+    );
     assert!(stdout.contains("fr --json --limit 10"));
     assert!(stdout.contains("meta.next_offset"));
 }

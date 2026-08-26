@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -113,6 +113,9 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: '2014'
+          - name: Windows (x86_64)
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -139,12 +142,32 @@ jobs:
           args: --release --locked --out dist --compatibility pypi
 
       - name: Verify wheel installs and runs
+        if: runner.os != 'Windows'
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
+
+      - name: Build Windows wheel
+        if: runner.os == 'Windows'
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          sccache: true
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Verify Windows wheel installs and runs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .wheel-test
+          .wheel-test\Scripts\pip.exe install (Get-ChildItem dist\*.whl)
+          .wheel-test\Scripts\fr.exe --version
+          .wheel-test\Scripts\fr.exe --help
+          .wheel-test\Scripts\fast-resume.exe --version
 
   release:
     name: Release
@@ -229,6 +252,9 @@ jobs:
           - name: Linux (ARM64)
             runner: ubuntu-24.04-arm
             archive: linux-arm64
+          - name: Windows (x86_64)
+            runner: windows-latest
+            archive: windows-x86_64
     permissions:
       contents: write
     steps:
@@ -253,6 +279,7 @@ jobs:
         run: cargo build --release --locked
 
       - name: Package binary
+        if: runner.os != 'Windows'
         env:
           VERSION: ${{ needs.release.outputs.new_release_version }}
           PLATFORM: ${{ matrix.platform.archive }}
@@ -263,12 +290,33 @@ jobs:
           ln -sf fr dist/fr/fast-resume
           tar -czf "dist/fast-resume-${VERSION}-${PLATFORM}.tar.gz" -C dist fr
 
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+          PLATFORM: ${{ matrix.platform.archive }}
+        run: |
+          New-Item -ItemType Directory -Force dist\fr | Out-Null
+          Copy-Item target\release\fr.exe dist\fr\fr.exe
+          Copy-Item target\release\fr.exe dist\fr\fast-resume.exe
+          tar -czf "dist/fast-resume-$env:VERSION-$env:PLATFORM.tar.gz" -C dist fr
+
       - name: Verify binary runs
+        if: runner.os != 'Windows'
         run: |
           ./dist/fr/fr --version
           ./dist/fr/fr --help
 
+      - name: Verify Windows binary runs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\dist\fr\fr.exe --version
+          .\dist\fr\fr.exe --help
+
       - name: Upload to GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -310,6 +358,11 @@ jobs:
             manylinux: '2014'
             artifact: python-wheel-linux-arm64
             npm_package: fast-resume-linux-arm64
+          - name: Windows (x86_64)
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: python-wheel-windows-x86_64
+            npm_package: fast-resume-win32-x64
     permissions:
       contents: read
     steps:
@@ -340,12 +393,23 @@ jobs:
           args: --release --locked --out dist --compatibility pypi
 
       - name: Verify wheel installs and runs
+        if: runner.os != 'Windows'
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/pip install dist/*.whl
           .wheel-test/bin/fr --version
           .wheel-test/bin/fr --help
           .wheel-test/bin/fast-resume --version
+
+      - name: Verify Windows wheel installs and runs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .wheel-test
+          .wheel-test\Scripts\pip.exe install (Get-ChildItem dist\*.whl)
+          .wheel-test\Scripts\fr.exe --version
+          .wheel-test\Scripts\fr.exe --help
+          .wheel-test\Scripts\fast-resume.exe --version
 
       - uses: actions/upload-artifact@v7
         with:
@@ -415,7 +479,9 @@ jobs:
             cp -R "$package_dir" "npm-stage/$package"
             cp -R "npm-binaries/npm-binary-$package/bin" "npm-stage/$package/bin"
             cp LICENSE "npm-stage/$package/LICENSE"
-            chmod +x "npm-stage/$package/bin/fr"
+            if [ -f "npm-stage/$package/bin/fr" ]; then
+              chmod +x "npm-stage/$package/bin/fr"
+            fi
             npm pack "./npm-stage/$package" --pack-destination npm-dist
           done
           cp LICENSE npm/fast-resume/LICENSE

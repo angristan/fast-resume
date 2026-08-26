@@ -452,7 +452,12 @@ mod tests {
     fn parses_cursor_store_database() {
         let temp = tempdir().unwrap();
         let id = "cursor-session-id";
-        let session_dir = temp.path().join("%2Fwork%2Fcursor").join(id);
+        let (encoded_directory, expected_directory) = if cfg!(windows) {
+            ("C%3A%5Cwork%5Ccursor", r"C:\work\cursor")
+        } else {
+            ("%2Fwork%2Fcursor", "/work/cursor")
+        };
+        let session_dir = temp.path().join(encoded_directory).join(id);
         fs::create_dir_all(&session_dir).unwrap();
         let db_path = session_dir.join("store.db");
         let connection = Connection::open(&db_path).unwrap();
@@ -494,7 +499,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, id);
         assert_eq!(sessions[0].title, "Cursor adapter work");
-        assert_eq!(sessions[0].directory, "/work/cursor");
+        assert_eq!(sessions[0].directory, expected_directory);
         assert_eq!(sessions[0].message_count, 1);
         assert!(sessions[0].content.contains("Added the adapter"));
         assert_eq!(
