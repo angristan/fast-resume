@@ -1,7 +1,9 @@
 use std::env;
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::process::Command;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -279,13 +281,44 @@ trait ExecBackend {
 
 struct ProcessExecBackend;
 
+#[cfg(windows)]
+fn windows_command(command: &[String]) -> Command {
+    let mut process = Command::new("cmd.exe");
+    process.arg("/C").args(command);
+    process
+}
+
+#[cfg(windows)]
+fn spawn_windows_command(command: &[String]) -> io::Result<std::process::Child> {
+    match Command::new(&command[0]).args(&command[1..]).spawn() {
+        Ok(child) => Ok(child),
+        Err(direct_error) => windows_command(command).spawn().map_err(|_| direct_error),
+    }
+}
+
 impl ExecBackend for ProcessExecBackend {
     fn set_current_dir(&mut self, directory: &str) -> io::Result<()> {
         env::set_current_dir(directory)
     }
 
     fn exec(&mut self, command: &[String]) -> io::Error {
-        Command::new(&command[0]).args(&command[1..]).exec()
+        #[cfg(unix)]
+        {
+            Command::new(&command[0]).args(&command[1..]).exec()
+        }
+
+        #[cfg(windows)]
+        {
+            match spawn_windows_command(command) {
+                Ok(mut child) => match child.wait() {
+                    Ok(status) => {
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => err,
+                },
+                Err(err) => err,
+            }
+        }
     }
 }
 
@@ -372,6 +405,33 @@ mod tests {
         assert!(backend.directories.is_empty());
         assert!(backend.commands.is_empty());
         assert!(error.to_string().contains("no resume command"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resume_runs_commands_through_cmd() {
+        let command = windows_command(&[
+            "codex".to_string(),
+            "resume".to_string(),
+            "session-1".to_string(),
+        ]);
+
+        assert_eq!(command.get_program(), "cmd.exe");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec!["/C", "codex", "resume", "session-1"]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resume_falls_back_to_batch_shims() {
+        let temp = tempfile::tempdir().unwrap();
+        let shim = temp.path().join("agent.cmd");
+        std::fs::write(&shim, "@echo off\r\nexit /b 23\r\n").unwrap();
+
+        let mut child = spawn_windows_command(&[shim.to_string_lossy().into_owned()]).unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(23));
     }
 
     #[test]
