@@ -1,3 +1,10 @@
+## [2.11.2](https://github.com/angristan/fast-resume/compare/v2.11.1...v2.11.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **claude:** read session title sidecars ([#92](https://github.com/angristan/fast-resume/issues/92)) ([b71e340](https://github.com/angristan/fast-resume/commit/b71e340ec823d21ac912ea0d4034481189f0c726))
+
 ## [2.11.1](https://github.com/angristan/fast-resume/compare/v2.11.0...v2.11.1) (2026-08-26)
 
 
