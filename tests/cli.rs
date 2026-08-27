@@ -243,6 +243,35 @@ fn json_uses_claude_custom_title() {
 }
 
 #[test]
+fn json_uses_claude_sidecar_custom_title() {
+    let temp = TempDir::new().unwrap();
+    write_claude_session(
+        temp.path(),
+        "claude-sidecar",
+        "/repo/claude",
+        "Original Claude prompt",
+    );
+    let sidecar_dir = temp.path().join(".claude/projects/project/claude-sidecar");
+    fs::create_dir_all(&sidecar_dir).unwrap();
+    fs::write(
+        sidecar_dir.join("custom-title.json"),
+        json!({"customTitle": "Sidecar Claude session"}).to_string(),
+    )
+    .unwrap();
+
+    let (stdout, stderr) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--agent", "claude", "--all"],
+    ));
+    assert!(stderr.is_empty());
+    let output: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = output["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "claude-sidecar");
+    assert_eq!(sessions[0]["title"], "Sidecar Claude session");
+}
+
+#[test]
 fn list_removes_stale_sessions_on_incremental_refresh() {
     let temp = TempDir::new().unwrap();
     let session_file = write_codex_session(
