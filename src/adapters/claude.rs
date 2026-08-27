@@ -47,6 +47,15 @@ impl ClaudeAdapter {
     }
 
     fn parse_session(&self, path: &Path) -> Option<Session> {
+        let sidecar_title = claude_sidecar_title(path).ok().flatten();
+        self.parse_session_with_sidecar_title(path, sidecar_title)
+    }
+
+    fn parse_session_with_sidecar_title(
+        &self,
+        path: &Path,
+        sidecar_title: Option<String>,
+    ) -> Option<Session> {
         let file = fs::File::open(path).ok()?;
         let mut directory = String::new();
         let mut first_user_message = String::new();
@@ -142,10 +151,10 @@ impl ClaudeAdapter {
             return None;
         }
 
-        // The transcript is authoritative for `/rename`: Claude may omit
-        // `customTitle` from its index or leave an older summary there.
-        let title_source = (!custom_title.is_empty())
-            .then_some(custom_title)
+        // Claude's sidecar stores the current `/rename` value separately
+        // from transcripts and the session index, both of which can lag.
+        let title_source = sidecar_title
+            .or_else(|| (!custom_title.is_empty()).then_some(custom_title))
             .or_else(|| claude_index_title(path))
             .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
             .unwrap_or(first_user_message);
@@ -164,7 +173,13 @@ impl ClaudeAdapter {
     }
 
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
-        incremental_parse_jsonl(path, || self.parse_session(path))
+        let sidecar_title = match claude_sidecar_title(path) {
+            Ok(title) => title,
+            Err(()) => return IncrementalParse::Retain,
+        };
+        incremental_parse_jsonl(path, || {
+            self.parse_session_with_sidecar_title(path, sidecar_title)
+        })
     }
 
     fn scan_session_files(&self) -> Option<HashMap<String, (PathBuf, f64)>> {
@@ -213,7 +228,9 @@ impl ClaudeAdapter {
                 else {
                     continue;
                 };
-                let mut mtime = file_mtime_seconds(&path);
+                let mut mtime = file_mtime_seconds(&path).max(file_mtime_seconds(
+                    &project_dir.join(&session_id).join("custom-title.json"),
+                ));
                 if let Some((_, index_mtime)) = project_index.get(&session_id) {
                     mtime = mtime.max(*index_mtime);
                 }
@@ -275,6 +292,20 @@ impl Adapter for ClaudeAdapter {
     }
 }
 
+fn claude_sidecar_title(session_file: &Path) -> Result<Option<String>, ()> {
+    let session_id = session_file.file_stem().ok_or(())?;
+    let project_dir = session_file.parent().ok_or(())?;
+    let path = project_dir.join(session_id).join("custom-title.json");
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    let data = serde_json::from_slice::<Value>(&data).map_err(|_| ())?;
+    let title = string_at(&data, &["customTitle"]);
+    Ok((!title.trim().is_empty()).then(|| title.trim().to_string()))
+}
+
 fn claude_index_title(session_file: &Path) -> Option<String> {
     let session_id = session_file.file_stem()?.to_string_lossy();
     claude_project_index(session_file.parent()?)
@@ -327,6 +358,18 @@ mod tests {
     use crate::adapters::Adapter;
 
     use super::*;
+
+    fn set_modified(path: &Path, seconds: u64) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
+            )
+            .unwrap();
+    }
 
     #[test]
     fn indexes_short_non_meta_string_user_prompts() {
@@ -475,6 +518,98 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
+    }
+
+    #[test]
+    fn sidecar_custom_title_is_authoritative_and_refreshes_incrementally() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        let session_id = "session-sidecar-title";
+        fs::create_dir_all(project.join(session_id)).unwrap();
+        fs::write(
+            project.join(format!("{session_id}.jsonl")),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "custom-title", "customTitle": "Transcript title"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.join("sessions-index.json"),
+            json!({
+                "version": 1,
+                "entries": [{
+                    "sessionId": session_id,
+                    "customTitle": "Indexed title"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let sidecar = project.join(session_id).join("custom-title.json");
+        fs::write(
+            &sidecar,
+            json!({"customTitle": "Initial sidecar title"}).to_string(),
+        )
+        .unwrap();
+        set_modified(&sidecar, 2_000_000_000);
+        let adapter = ClaudeAdapter::new(projects);
+
+        let initial = adapter.find_sessions();
+
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].title, "Initial sidecar title");
+        let known: KnownSessions = initial
+            .iter()
+            .map(|session| (("claude".to_string(), session.id.clone()), session.mtime))
+            .collect();
+        fs::write(
+            &sidecar,
+            json!({"customTitle": "Updated sidecar title"}).to_string(),
+        )
+        .unwrap();
+        set_modified(&sidecar, 2_000_000_100);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].title, "Updated sidecar title");
+        assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn malformed_sidecar_retains_the_indexed_session() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        let session_id = "session-malformed-sidecar";
+        fs::create_dir_all(project.join(session_id)).unwrap();
+        fs::write(
+            project.join(format!("{session_id}.jsonl")),
+            json!({
+                "type": "user",
+                "cwd": "/work/app",
+                "message": {"content": "Keep the indexed session"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(project.join(session_id).join("custom-title.json"), "{").unwrap();
+        let adapter = ClaudeAdapter::new(projects);
+        let mut known = KnownSessions::new();
+        known.insert(("claude".to_string(), session_id.to_string()), 0.0);
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
