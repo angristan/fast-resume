@@ -29,6 +29,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
 | OpenCode | SQLite or legacy split JSON | Joins sessions, messages, and text parts |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
+| Reasonix | `~/.reasonix/projects/<slug>/sessions/*.jsonl` | Reads per-project session transcripts and `.jsonl.meta` sidecar metadata |
 | Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
 
 Grok discovery respects `GROK_HOME`. Kimi Code discovery uses `$KIMI_CODE_HOME/sessions/`, defaulting to `~/.kimi-code/sessions/`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
@@ -131,6 +132,7 @@ Each adapter returns the command needed to continue its session:
 | Kimi Code | `kimi --session <id>` | `kimi --yolo --session <id>` |
 | OpenCode | `opencode <directory> --session <id>` | No change |
 | Pi | `pi --session <id>` | No change |
+| Reasonix | `reasonix --resume <path>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
 
 `exec()` replaces fast-resume with the agent process, and the agent receives the session's working directory.
