@@ -32,6 +32,12 @@ brew tap angristan/tap
 brew install fast-resume
 ```
 
+Nix users can run directly from the source package:
+
+```bash
+nix run github:angristan/fast-resume
+```
+
 You can also install with npm or a binary wheel with `uv`:
 
 ```bash
@@ -40,7 +46,7 @@ npm install --global fast-resume
 uv tool install fast-resume
 ```
 
-See the [installation guide](docs/installation.md) for npm, `uvx`, Cargo, supported platforms, and terminal recommendations.
+See the [installation guide](docs/installation.md) for Nix, npm, `uvx`, Cargo, supported platforms, and terminal recommendations.
 
 ## Quick start
 
