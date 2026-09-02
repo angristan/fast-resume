@@ -22,6 +22,42 @@ brew update
 brew upgrade fast-resume
 ```
 
+## Nix
+
+Run the source package without installing it:
+
+```bash
+nix run github:angristan/fast-resume
+```
+
+Install it into a user profile:
+
+```bash
+nix profile install github:angristan/fast-resume
+```
+
+For a declarative NixOS configuration, add fast-resume as a flake input:
+
+```nix
+inputs.fast-resume.url = "github:angristan/fast-resume";
+```
+
+Then include its package in the host module where `inputs` is available:
+
+```nix
+environment.systemPackages = [
+  inputs.fast-resume.packages.${pkgs.system}.default
+];
+```
+
+The flake builds `fr` from the committed Rust source and `Cargo.lock`. It
+supports Linux ARM64/x86_64 and macOS Apple Silicon. Current Nixpkgs no longer
+supports Intel macOS; use Homebrew, npm, or PyPI there.
+
+The consumer's lock file pins both fast-resume and its tested Nixpkgs revision.
+Advanced configurations can make the input follow the host's Nixpkgs after
+verifying that its Rust toolchain satisfies fast-resume's minimum version.
+
 ## npm
 
 Install globally with npm:

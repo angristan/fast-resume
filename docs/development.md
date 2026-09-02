@@ -23,6 +23,7 @@ cargo fmt --all --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 cargo build --release --locked
+nix flake check --no-update-lock-file
 git diff --check
 ```
 
@@ -52,7 +53,10 @@ fast-resume/
 ├── skills/                 # Portable Agent Skills embedded by the CLI
 ├── docs/                   # User and contributor documentation
 ├── Cargo.toml              # Rust dependencies and binary metadata
-└── pyproject.toml          # Maturin/PyPI metadata
+├── pyproject.toml          # Maturin/PyPI metadata
+├── flake.nix               # Nix package, app, checks, and development shell
+├── flake.lock              # Pinned standalone Nixpkgs revision
+└── nix/package.nix         # Source-based Rust package derivation
 ```
 
 ## Main components
@@ -67,6 +71,10 @@ fast-resume/
 | SQLite | [rusqlite](https://docs.rs/rusqlite/latest/rusqlite/) |
 
 ## Packaging
+
+The Nix flake builds directly from the repository source and committed
+`Cargo.lock`. Its package version comes from `Cargo.toml`, so release commits do
+not need a separate Nix version bump. CI checks the package on Linux and macOS.
 
 `maturin` builds PyPI wheels containing the Rust binary and compatibility commands. The same wheel builds supply npm's native variants. All variants use the `fast-resume` package name with platform prerelease versions such as `2.7.0-linux-x64`. The launcher selects one through an npm alias in `optionalDependencies`; it does not download code from an install script.
 
