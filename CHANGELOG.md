@@ -1,3 +1,10 @@
+# [2.12.0](https://github.com/angristan/fast-resume/compare/v2.11.2...v2.12.0) (2026-09-02)
+
+
+### Features
+
+* **nix:** add first-class flake package ([#94](https://github.com/angristan/fast-resume/issues/94)) ([e93b32e](https://github.com/angristan/fast-resume/commit/e93b32ea9724e17b0cc5098ce104369de3c065db))
+
 ## [2.11.2](https://github.com/angristan/fast-resume/compare/v2.11.1...v2.11.2) (2026-08-27)
 
 
