@@ -50,8 +50,11 @@ environment.systemPackages = [
 ];
 ```
 
-The flake builds `fr` from the committed Rust source and `Cargo.lock`. The
-consumer's lock file pins both fast-resume and its tested Nixpkgs revision.
+The flake builds `fr` from the committed Rust source and `Cargo.lock`. It
+supports Linux ARM64/x86_64 and macOS Apple Silicon. Current Nixpkgs no longer
+supports Intel macOS; use Homebrew, npm, or PyPI there.
+
+The consumer's lock file pins both fast-resume and its tested Nixpkgs revision.
 Advanced configurations can make the input follow the host's Nixpkgs after
 verifying that its Rust toolchain satisfies fast-resume's minimum version.
 
