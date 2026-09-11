@@ -210,6 +210,7 @@ impl VibeAdapter {
             }
         }
 
+        let named = !title.is_empty();
         if title.is_empty() {
             title = if first_user.is_empty() {
                 "Vibe session".to_string()
@@ -229,6 +230,7 @@ impl VibeAdapter {
         );
         session.mtime = vibe_session_mtime(session_dir);
         session.yolo = yolo;
+        session.named = named;
         Some(session)
     }
 

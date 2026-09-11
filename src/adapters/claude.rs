@@ -151,11 +151,15 @@ impl ClaudeAdapter {
             return None;
         }
 
+        let index_title = claude_index_title(path);
+        // "named" means a user-curated title (a /rename, or the session-list
+        // summary) — not an AI-generated title, which nearly every session has.
+        let named = sidecar_title.is_some() || !custom_title.is_empty() || index_title.is_some();
         // Claude's sidecar stores the current `/rename` value separately
         // from transcripts and the session index, both of which can lag.
         let title_source = sidecar_title
             .or_else(|| (!custom_title.is_empty()).then_some(custom_title))
-            .or_else(|| claude_index_title(path))
+            .or(index_title)
             .or_else(|| (!ai_title.is_empty()).then_some(ai_title))
             .unwrap_or(first_user_message);
         let title = truncate_title(&title_source, 100, true);
@@ -169,6 +173,7 @@ impl ClaudeAdapter {
             turns,
         );
         session.mtime = file_mtime_seconds(path);
+        session.named = named;
         Some(session)
     }
 
@@ -476,6 +481,36 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Renamed Claude thread");
         assert_eq!(sessions[0].directory, "/work/app");
+        assert!(sessions[0].named);
+    }
+
+    #[test]
+    fn uses_custom_title_over_ai_title() {
+        let temp = tempdir().unwrap();
+        let projects = temp.path().join("projects");
+        let project = projects.join("project-a");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("session-custom.jsonl"),
+            [
+                json!({
+                    "type": "user",
+                    "cwd": "/work/app",
+                    "message": {"content": "Original first prompt for this session"}
+                })
+                .to_string(),
+                json!({"type": "ai-title", "aiTitle": "AI guessed topic"}).to_string(),
+                json!({"type": "custom-title", "customTitle": "My renamed session"}).to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let adapter = ClaudeAdapter::new(projects);
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "My renamed session");
+        assert!(sessions[0].named);
     }
 
     #[test]
@@ -708,6 +743,8 @@ mod tests {
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].title, "Fix login token validation");
+        // An AI-generated title is shown, but it is not a user-curated name.
+        assert!(!sessions[0].named);
         assert!(sessions[0].content.contains("Help me fix this bug"));
     }
 
@@ -808,6 +845,7 @@ mod tests {
         let scan = adapter.find_sessions_incremental(&known);
 
         assert_eq!(scan.new_or_modified.len(), 1);
+        assert!(!scan.new_or_modified[0].named);
         assert!(
             scan.new_or_modified[0]
                 .content

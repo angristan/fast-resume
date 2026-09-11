@@ -187,6 +187,7 @@ Press `F1` in the TUI to show all keyboard shortcuts.
 | `↑` / `↓` | Move selection |
 | `Ctrl+J` / `Ctrl+K` | Move selection |
 | `Page Up` / `Page Down` | Move by 10 rows |
+| `Ctrl+N` | Toggle showing only named sessions |
 | `Enter` | Resume the selected session |
 
 ### Preview and actions

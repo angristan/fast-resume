@@ -46,7 +46,12 @@ fn header_line(state: &AppState, width: u16) -> Line<'static> {
     let count_agent_filter = state.count_agent_filter();
     let count = state.engine.count_for_agent(count_agent_filter.as_deref());
     let right = format!(
-        "{} shown / {} indexed   {:.1}ms",
+        "{}{} shown / {} indexed   {:.1}ms",
+        if state.named_only {
+            "named only · "
+        } else {
+            ""
+        },
         state.visible.len(),
         count,
         state.last_search_ms
@@ -839,7 +844,7 @@ fn footer_line(status: &str, width: u16, theme: &Theme) -> Line<'static> {
 }
 
 fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let popup = centered_rect(68, 23, area);
+    let popup = centered_rect(68, 24, area);
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -861,6 +866,7 @@ fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
         Line::styled("Results", Style::new().bold().fg(theme.accent)),
         Line::raw("  ↑ / ↓, Ctrl+K / Ctrl+J      Move selection"),
         Line::raw("  Page Up / Page Down         Move by 10 results"),
+        Line::raw("  Ctrl+N                      Toggle named-only filter"),
         Line::raw(""),
         Line::styled("Preview and actions", Style::new().bold().fg(theme.accent)),
         Line::raw("  Enter                        Resume session"),
