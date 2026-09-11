@@ -19,7 +19,7 @@ const SEARCH_PLACEHOLDER: &str = "Search titles, messages, paths. Try agent:clau
 
 pub(super) fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
-    let layout = layout::app(area, state.show_preview);
+    let layout = layout::app(area, state.show_preview, state.preview_ratio);
 
     draw_header(frame, layout.header, state);
     draw_search(frame, layout.search, state);
@@ -839,7 +839,7 @@ fn footer_line(status: &str, width: u16, theme: &Theme) -> Line<'static> {
 }
 
 fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let popup = centered_rect(68, 23, area);
+    let popup = centered_rect(68, 24, area);
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -867,6 +867,7 @@ fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
         Line::raw("  Ctrl+Y                      Copy resume command"),
         Line::raw("  Ctrl+P                      Toggle preview"),
         Line::raw("  Alt++ / Alt+-               Scroll preview"),
+        Line::raw("  Ctrl+← / Ctrl+→             Resize preview"),
         Line::raw("  Mouse wheel                 Scroll under pointer"),
         Line::raw("  Esc / Ctrl+C                Quit"),
         Line::raw(""),
