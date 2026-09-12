@@ -854,7 +854,13 @@ mod tests {
         connection
             .execute("INSERT INTO trajectory_meta (cascade_id) VALUES (?1)", [id])
             .unwrap();
-        let workspace = proto_bytes(1, &proto_string(1, "file:///work/sqlite"));
+        let workspace_path = if cfg!(windows) {
+            PathBuf::from(r"C:\work\sqlite")
+        } else {
+            PathBuf::from("/work/sqlite")
+        };
+        let workspace_uri = Url::from_file_path(&workspace_path).unwrap().to_string();
+        let workspace = proto_bytes(1, &proto_string(1, &workspace_uri));
         connection
             .execute(
                 "INSERT INTO trajectory_metadata_blob (id, data) VALUES ('main', ?1)",
@@ -891,7 +897,7 @@ mod tests {
         let adapter = AntigravityAdapter::new(temp.path().to_path_buf());
         let session = adapter.find_sessions().pop().unwrap();
         assert_eq!(session.id, id);
-        assert_eq!(session.directory, "/work/sqlite");
+        assert_eq!(session.directory, workspace_path.to_string_lossy());
         assert_eq!(session.title, "SQLite prompt");
         assert_eq!(session.message_count, 1);
         assert!(session.content.contains("SQLite response"));

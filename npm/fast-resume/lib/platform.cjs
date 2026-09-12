@@ -3,6 +3,7 @@ const PLATFORM_PACKAGES = Object.freeze({
   "darwin-x64": "fast-resume-darwin-x64",
   "linux-arm64": "fast-resume-linux-arm64",
   "linux-x64": "fast-resume-linux-x64",
+  "win32-x64": "fast-resume-win32-x64",
 });
 
 function packageFor(platform = process.platform, arch = process.arch) {
@@ -19,7 +20,7 @@ function packageFor(platform = process.platform, arch = process.arch) {
 
 function resolveBinary(platform = process.platform, arch = process.arch) {
   const packageName = packageFor(platform, arch);
-  const executable = "fr";
+  const executable = platform === "win32" ? "fr.exe" : "fr";
 
   try {
     return require.resolve(`${packageName}/bin/${executable}`);

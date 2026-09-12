@@ -151,7 +151,11 @@ pub fn is_agent(value: &str) -> bool {
 }
 
 pub fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn cache_dir() -> PathBuf {

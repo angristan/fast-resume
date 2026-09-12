@@ -73,7 +73,7 @@ Or run without a permanent installation:
 npx fast-resume
 ```
 
-npm provides native binaries for macOS ARM64 and Intel, and Linux glibc ARM64 and x86_64.
+npm provides native binaries for Windows x64, macOS ARM64 and Intel, and Linux glibc ARM64 and x86_64.
 
 ## PyPI with uv
 
@@ -94,6 +94,7 @@ PyPI publishes Rust binary wheels for:
 
 - macOS Apple Silicon and Intel
 - Linux ARM64 and x86_64
+- Windows x64
 
 No source distribution is published yet. Platforms without a wheel should install through Cargo.
 

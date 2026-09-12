@@ -1,7 +1,15 @@
 use std::env;
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::io;
-use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::path::Path;
 use std::process::Command;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -279,13 +287,123 @@ trait ExecBackend {
 
 struct ProcessExecBackend;
 
+#[cfg(windows)]
+fn windows_command_line(command: &[String]) -> io::Result<String> {
+    command
+        .iter()
+        .map(|argument| {
+            if argument
+                .chars()
+                .any(|character| matches!(character, '%' | '!' | '\r' | '\n'))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Windows cmd.exe arguments cannot contain %, !, or newlines",
+                ));
+            }
+
+            let mut quoted = String::with_capacity(argument.len() + 2);
+            quoted.push('"');
+            for character in argument.chars() {
+                match character {
+                    '"' => quoted.push_str("^\""),
+                    '^' => quoted.push_str("^^"),
+                    _ => quoted.push(character),
+                }
+            }
+            quoted.push('"');
+            Ok(quoted)
+        })
+        .collect::<io::Result<Vec<_>>>()
+        .map(|arguments| arguments.join(" "))
+}
+
+#[cfg(windows)]
+fn windows_command(command: &[String]) -> io::Result<Command> {
+    let mut process = Command::new("cmd.exe");
+    let command_line = windows_command_line(command)?;
+    process.raw_arg(format!(" /D /S /C \"{command_line}\""));
+    Ok(process)
+}
+
+#[cfg(windows)]
+fn is_windows_shim(command: &[String]) -> bool {
+    let path = env::var_os("PATH").unwrap_or_default();
+    let pathext = env::var_os("PATHEXT").unwrap_or_default();
+    is_windows_shim_with_env(command, &path, &pathext.to_string_lossy())
+}
+
+#[cfg(windows)]
+fn is_windows_shim_with_env(command: &[String], path: &OsStr, pathext: &str) -> bool {
+    let Some(program) = command.first() else {
+        return false;
+    };
+
+    if matches!(
+        Path::new(program).extension().and_then(|extension| extension.to_str()),
+        Some(extension) if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+    ) {
+        return true;
+    }
+
+    if program.contains(['/', '\\']) || Path::new(program).extension().is_some() {
+        return false;
+    }
+
+    for directory in env::split_paths(path) {
+        for extension in pathext
+            .split(';')
+            .map(str::trim)
+            .filter(|ext| !ext.is_empty())
+        {
+            let candidate = directory.join(format!("{program}{extension}"));
+            if candidate.is_file() {
+                return extension.eq_ignore_ascii_case(".cmd")
+                    || extension.eq_ignore_ascii_case(".bat");
+            }
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn spawn_windows_command(command: &[String]) -> io::Result<std::process::Child> {
+    match Command::new(&command[0]).args(&command[1..]).spawn() {
+        Ok(child) => Ok(child),
+        // Windows cannot spawn .cmd/.bat files directly; retry through cmd.exe
+        // so npm-installed agent shims remain usable.
+        Err(direct_error) if is_windows_shim(command) => match windows_command(command) {
+            Ok(mut process) => process.spawn().map_err(|_| direct_error),
+            Err(error) => Err(error),
+        },
+        Err(direct_error) => Err(direct_error),
+    }
+}
+
 impl ExecBackend for ProcessExecBackend {
     fn set_current_dir(&mut self, directory: &str) -> io::Result<()> {
         env::set_current_dir(directory)
     }
 
     fn exec(&mut self, command: &[String]) -> io::Error {
-        Command::new(&command[0]).args(&command[1..]).exec()
+        #[cfg(unix)]
+        {
+            Command::new(&command[0]).args(&command[1..]).exec()
+        }
+
+        #[cfg(windows)]
+        {
+            match spawn_windows_command(command) {
+                Ok(mut child) => match child.wait() {
+                    Ok(status) => {
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => err,
+                },
+                Err(err) => err,
+            }
+        }
     }
 }
 
@@ -372,6 +490,97 @@ mod tests {
         assert!(backend.directories.is_empty());
         assert!(backend.commands.is_empty());
         assert!(error.to_string().contains("no resume command"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_quotes_shell_metacharacters() {
+        let command_line = windows_command_line(&[
+            "codex".to_string(),
+            "resume".to_string(),
+            "session&^1".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(command_line, "\"codex\" \"resume\" \"session&^^1\"");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resume_does_not_fallback_for_non_shims() {
+        let error = spawn_windows_command(&["missing-agent.exe".to_string()]).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bare_windows_command_falls_back_to_cmd_shim() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("agent.cmd"), "@echo off\r\n").unwrap();
+
+        assert!(is_windows_shim_with_env(
+            &["agent".to_string()],
+            temp.path().as_os_str(),
+            ".EXE;.CMD"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bare_windows_command_falls_back_to_bat_shim() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("agent.bat"), "@echo off\r\n").unwrap();
+
+        assert!(is_windows_shim_with_env(
+            &["agent".to_string()],
+            temp.path().as_os_str(),
+            ".EXE;.BAT"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bare_windows_command_does_not_fallback_to_exe() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("agent.exe"), "not an executable").unwrap();
+
+        assert!(!is_windows_shim_with_env(
+            &["agent".to_string()],
+            temp.path().as_os_str(),
+            ".EXE;.CMD"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bare_windows_command_does_not_fallback_when_not_found() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert!(!is_windows_shim_with_env(
+            &["agent".to_string()],
+            temp.path().as_os_str(),
+            ".CMD;.BAT"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resume_falls_back_to_batch_shims() {
+        let temp = tempfile::tempdir().unwrap();
+        let shim_dir = temp.path().join("path with spaces");
+        std::fs::create_dir(&shim_dir).unwrap();
+        let shim = shim_dir.join("agent.cmd");
+        std::fs::write(
+            &shim,
+            "@echo off\r\nif \"%~1\"==\"23&^23\" (exit /b 23) else (exit /b 42)\r\n",
+        )
+        .unwrap();
+
+        let mut child =
+            spawn_windows_command(&[shim.to_string_lossy().into_owned(), "23&^23".to_string()])
+                .unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(23));
     }
 
     #[test]

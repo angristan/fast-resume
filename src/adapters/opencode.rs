@@ -78,7 +78,6 @@ impl Adapter for OpenCodeAdapter {
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
         vec![
             "opencode".to_string(),
-            session.directory.clone(),
             "--session".to_string(),
             session.id.clone(),
         ]
@@ -985,7 +984,7 @@ mod tests {
         assert!(sessions[0].content.contains("» Hello OpenCode"));
         assert_eq!(
             adapter.resume_command(&sessions[0], false),
-            vec!["opencode", "/work/opencode", "--session", "opencode-1"]
+            vec!["opencode", "--session", "opencode-1"]
         );
     }
 

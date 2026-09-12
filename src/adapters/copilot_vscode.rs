@@ -89,12 +89,8 @@ impl Adapter for CopilotVsCodeAdapter {
         self.find_sessions_incremental_with(known, on_session)
     }
 
-    fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
-        if session.directory.is_empty() {
-            vec!["code".to_string()]
-        } else {
-            vec!["code".to_string(), session.directory.clone()]
-        }
+    fn resume_command(&self, _session: &Session, _yolo: bool) -> Vec<String> {
+        vec!["code".to_string()]
     }
 
     fn raw_stats(&self) -> RawAdapterStats {
@@ -384,10 +380,7 @@ mod tests {
         assert_eq!(sessions[0].title, "VS Code thread");
         assert_eq!(sessions[0].directory, "/work/vscode");
         assert_eq!(sessions[0].message_count, 2);
-        assert_eq!(
-            adapter.resume_command(&sessions[0], false),
-            vec!["code", "/work/vscode"]
-        );
+        assert_eq!(adapter.resume_command(&sessions[0], false), vec!["code"]);
     }
 
     #[test]
