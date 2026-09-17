@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::adapters::adapter_for;
 
 use super::TuiExit;
-use super::state::{AppState, PENDING_SEARCH_STATUS, PendingAction, YoloModal};
+use super::state::{AppState, PENDING_SEARCH_STATUS, PendingAction, YoloModal, YoloMode};
 use super::text::{shell_join, shell_quote};
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<Option<TuiExit>> {
@@ -95,8 +95,9 @@ fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<Tu
     let supports_yolo = adapter_for(&session.agent)
         .as_ref()
         .is_some_and(|adapter| adapter.supports_yolo());
-    if state.yolo || session.yolo || !supports_yolo {
-        return finish_action(state, action, state.yolo || session.yolo, session);
+    let forced_yolo = state.yolo_mode == YoloMode::Always || session.yolo;
+    if forced_yolo || state.yolo_mode == YoloMode::Never || !supports_yolo {
+        return finish_action(state, action, forced_yolo, session);
     }
 
     state.modal = Some(YoloModal {

@@ -154,6 +154,8 @@ Options:
                           (honors -a and -d filters)
       --agent-context     Print concise instructions for coding agents
       --yolo              Force auto-approve flags where supported
+      --no-yolo           Never ask about yolo mode; resume without
+                          auto-approve flags
       --theme <THEME>      Select auto, dark, or light TUI colors
                           [env: FAST_RESUME_THEME=] [default: auto]
       --images            Enable agent artwork when supported
@@ -229,7 +231,7 @@ Yolo mode resumes an agent with its auto-approve or skip-permissions option when
 | Pi | Not applicable | — |
 | Copilot in VS Code | Not applicable | — |
 
-Codex and Vibe record their permission mode in session data, so fast-resume can preserve it automatically. Antigravity CLI, Claude, Copilot CLI, Crush, Cursor CLI, Grok Build, and Kimi Code do not; the TUI asks before resuming them. Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one.
+Codex and Vibe record their permission mode in session data, so fast-resume can preserve it automatically. Antigravity CLI, Claude, Copilot CLI, Crush, Cursor CLI, Grok Build, and Kimi Code do not; the TUI asks before resuming them. Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one. Pass `fr --no-yolo` to skip prompts and never add them; sessions that recorded their own permission mode still keep it.
 
 ## Statistics
 
