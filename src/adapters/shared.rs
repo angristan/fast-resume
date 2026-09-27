@@ -2,8 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
 
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use rayon::prelude::*;
+use serde::de::IgnoredAny;
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -22,10 +26,47 @@ pub(super) enum IncrementalParse {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum JsonlHealth {
+pub(super) enum JsonlHealth {
     Clean,
     Partial,
     Invalid,
+}
+
+/// Classifies a JSONL file row by row, so parsers that already decode every
+/// row can report health without a second pass over the file.
+///
+/// A file is `Partial` when malformed rows are followed by valid rows (for
+/// example a torn write in the middle of a session), and `Invalid` when it has
+/// no valid rows or ends in a malformed row (typically a writer still
+/// appending). Unreadable files should be reported as `Invalid` directly.
+#[derive(Debug, Default)]
+pub(super) struct JsonlHealthTracker {
+    valid_rows: usize,
+    malformed_rows: usize,
+    valid_after_last_malformed: bool,
+}
+
+impl JsonlHealthTracker {
+    pub(super) fn valid_row(&mut self) {
+        self.valid_rows += 1;
+        if self.malformed_rows > 0 {
+            self.valid_after_last_malformed = true;
+        }
+    }
+
+    pub(super) fn malformed_row(&mut self) {
+        self.malformed_rows += 1;
+        self.valid_after_last_malformed = false;
+    }
+
+    pub(super) fn finish(&self) -> JsonlHealth {
+        match (self.valid_rows, self.malformed_rows) {
+            (_, 0) => JsonlHealth::Clean,
+            (0, _) => JsonlHealth::Invalid,
+            _ if self.valid_after_last_malformed => JsonlHealth::Partial,
+            _ => JsonlHealth::Invalid,
+        }
+    }
 }
 
 pub(super) fn session_needs_update(
@@ -89,40 +130,72 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 /// `scanned` is None when the file scan itself failed. An incomplete scan
 /// (`complete == false`) reports no deletions: files that could not be
 /// listed may still exist, and deleting them would drop good indexed data.
+///
+/// Changed files are parsed in parallel on the rayon pool. Transcripts vary
+/// from a few kilobytes to hundreds of megabytes, so a serial loop makes a
+/// refresh as slow as the sum of every changed file. Parsed results are sent
+/// back to the calling thread, which owns `on_session` (it is `FnMut`, not
+/// `Sync`) and streams sessions in completion order.
 pub(super) fn incremental_scan<F>(
     agent: &'static str,
     known: &KnownSessions,
     scanned: Option<SessionFileScan>,
-    mut parse: F,
+    parse: F,
     mut on_session: Option<&mut SessionCallback<'_>>,
 ) -> IncrementalScan
 where
-    F: FnMut(&Path) -> IncrementalParse,
+    F: Fn(&Path) -> IncrementalParse + Sync,
 {
     let Some((current_files, complete)) = scanned else {
         return failed_incremental_scan(agent);
     };
-    let mut current_ids = HashSet::new();
-    let mut new_or_modified = Vec::new();
-
+    let mut current_ids = HashSet::with_capacity(current_files.len());
+    let mut changed = Vec::new();
     for (session_id, (path, mtime)) in current_files {
-        current_ids.insert(session_id.clone());
-        if !session_needs_update(known, agent, &session_id, mtime) {
-            continue;
+        if session_needs_update(known, agent, &session_id, mtime) {
+            changed.push((session_id.clone(), path, mtime));
         }
-        match parse(&path) {
-            IncrementalParse::Session(mut session) => {
-                session.mtime = mtime;
-                if let Some(on_session) = on_session.as_mut() {
-                    on_session(session.clone());
+        current_ids.insert(session_id);
+    }
+
+    let mut new_or_modified = Vec::with_capacity(changed.len());
+    if !changed.is_empty() {
+        let parse = &parse;
+        thread::scope(|scope| {
+            let (tx, rx) = mpsc::channel();
+            // The producer runs on its own scoped thread so this thread can
+            // stream results while rayon workers are still parsing. Blocking
+            // on the channel from inside a rayon worker could starve the pool.
+            scope.spawn(move || {
+                changed
+                    .into_par_iter()
+                    .for_each_with(tx, |tx, (session_id, path, mtime)| {
+                        // The receiver only disappears if this thread panicked.
+                        let _ = tx.send((session_id, mtime, parse(&path)));
+                    });
+            });
+
+            for (session_id, mtime, parsed) in rx {
+                match parsed {
+                    IncrementalParse::Session(mut session) => {
+                        session.mtime = mtime;
+                        // Keep the parsed id alive as well as the file key.
+                        // They match for well-formed files, but if a file's
+                        // key and embedded id ever diverge, deleting the
+                        // parsed id would drop the session we just indexed.
+                        current_ids.insert(session.id.clone());
+                        if let Some(on_session) = on_session.as_mut() {
+                            on_session(session.clone());
+                        }
+                        new_or_modified.push(session);
+                    }
+                    IncrementalParse::Delete => {
+                        current_ids.remove(&session_id);
+                    }
+                    IncrementalParse::Retain => {}
                 }
-                new_or_modified.push(session);
             }
-            IncrementalParse::Delete => {
-                current_ids.remove(&session_id);
-            }
-            IncrementalParse::Retain => {}
-        }
+        });
     }
 
     IncrementalScan {
@@ -195,10 +268,28 @@ where
 {
     match jsonl_health(path) {
         JsonlHealth::Invalid => IncrementalParse::Retain,
-        JsonlHealth::Partial => parse()
+        health => incremental_parse_with_health(health, parse(), partial_session_is_usable),
+    }
+}
+
+/// Map a parse result and the file's JSONL health to an incremental decision.
+/// Invalid files keep their indexed data, partial files only replace it when
+/// the parsed session is still usable, and clean files that yield no session
+/// are deleted.
+pub(super) fn incremental_parse_with_health<P>(
+    health: JsonlHealth,
+    session: Option<Session>,
+    partial_session_is_usable: P,
+) -> IncrementalParse
+where
+    P: FnOnce(&Session) -> bool,
+{
+    match health {
+        JsonlHealth::Invalid => IncrementalParse::Retain,
+        JsonlHealth::Partial => session
             .filter(partial_session_is_usable)
             .map_or(IncrementalParse::Retain, IncrementalParse::Session),
-        JsonlHealth::Clean => incremental_parse_from_option(parse()),
+        JsonlHealth::Clean => incremental_parse_from_option(session),
     }
 }
 
@@ -213,9 +304,7 @@ fn jsonl_health(path: &Path) -> JsonlHealth {
     let Ok(file) = fs::File::open(path) else {
         return JsonlHealth::Invalid;
     };
-    let mut valid_rows = 0usize;
-    let mut malformed_rows = 0usize;
-    let mut valid_after_last_malformed = false;
+    let mut health = JsonlHealthTracker::default();
     for line in BufReader::new(file).lines() {
         let Ok(line) = line else {
             return JsonlHealth::Invalid;
@@ -223,22 +312,15 @@ fn jsonl_health(path: &Path) -> JsonlHealth {
         if line.trim().is_empty() {
             continue;
         }
-        if serde_json::from_str::<Value>(&line).is_err() {
-            malformed_rows += 1;
-            valid_after_last_malformed = false;
+        // `IgnoredAny` validates the syntax without building a `Value` tree,
+        // which matters for multi-hundred-megabyte agent transcripts.
+        if serde_json::from_str::<IgnoredAny>(&line).is_err() {
+            health.malformed_row();
         } else {
-            valid_rows += 1;
-            if malformed_rows > 0 {
-                valid_after_last_malformed = true;
-            }
+            health.valid_row();
         }
     }
-    match (valid_rows, malformed_rows) {
-        (_, 0) => JsonlHealth::Clean,
-        (0, _) => JsonlHealth::Invalid,
-        _ if valid_after_last_malformed => JsonlHealth::Partial,
-        _ => JsonlHealth::Invalid,
-    }
+    health.finish()
 }
 
 pub(super) fn content_texts(content: &Value) -> Vec<String> {
@@ -486,6 +568,64 @@ mod tests {
         assert!(streamed.is_empty());
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["abc123"]);
+    }
+
+    #[test]
+    fn parallel_parsing_routes_every_outcome_to_the_caller() {
+        // Enough files to spread across rayon workers, with every outcome
+        // mixed together. Each result must reach the streaming callback and
+        // the returned scan exactly once, keyed to the right session.
+        let ids: Vec<String> = (0..200).map(|index| format!("s{index}")).collect();
+        let known: KnownSessions = ids
+            .iter()
+            .map(|id| (("codex".to_string(), id.clone()), 1.0))
+            .collect();
+        let files = ids
+            .iter()
+            .map(|id| (id.clone(), (PathBuf::from(id), 2.0)))
+            .collect();
+        let outcome = |id: &str| id[1..].parse::<usize>().unwrap() % 3;
+        let mut streamed = Vec::new();
+
+        let scan = incremental_scan(
+            "codex",
+            &known,
+            Some((files, true)),
+            |path| {
+                let id = path.to_str().unwrap();
+                match outcome(id) {
+                    0 => IncrementalParse::Session(Session::new(
+                        id,
+                        "codex",
+                        "title",
+                        "/repo",
+                        Local::now(),
+                        "content",
+                        1,
+                    )),
+                    1 => IncrementalParse::Delete,
+                    _ => IncrementalParse::Retain,
+                }
+            },
+            Some(&mut |session| streamed.push(session.id)),
+        );
+
+        let expected = |wanted| -> HashSet<String> {
+            ids.iter()
+                .filter(|id| outcome(id) == wanted)
+                .cloned()
+                .collect()
+        };
+        let returned: Vec<_> = scan.new_or_modified.iter().map(|s| s.id.clone()).collect();
+        assert_eq!(streamed.len(), expected(0).len());
+        assert_eq!(streamed.into_iter().collect::<HashSet<_>>(), expected(0));
+        assert_eq!(returned.len(), expected(0).len());
+        assert_eq!(returned.into_iter().collect::<HashSet<_>>(), expected(0));
+        assert!(scan.new_or_modified.iter().all(|s| s.mtime == 2.0));
+        assert_eq!(
+            scan.deleted_ids.into_iter().collect::<HashSet<_>>(),
+            expected(1)
+        );
     }
 
     #[test]

@@ -65,7 +65,7 @@ On an incremental refresh, fast-resume:
 2. Reloads the latest committed index state.
 3. Loads indexed session IDs and refresh markers.
 4. Scans each adapter concurrently.
-5. Parses new or changed sessions.
+5. Parses new or changed sessions. File-backed adapters parse changed files in parallel.
 6. Retains old documents when a source is temporarily incomplete or malformed.
 7. Infers deletions only when the relevant scan is complete.
 8. Applies changes through one index writer and reports progress to the TUI. A TUI refresh commits about once per second so new results appear while it runs; non-interactive refreshes commit once at the end.
