@@ -35,14 +35,19 @@ const STREAMING_COMMIT_INTERVAL: Duration = Duration::from_secs(1);
 const RECENCY_HALF_LIFE_SECONDS: f64 = 14.0 * 24.0 * 60.0 * 60.0;
 const RECENCY_BOOST_WEIGHT: f64 = 1.5;
 
-fn recency_adjusted_score(text_score: Score, timestamp: f64, now: f64) -> Score {
+///
+/// The result stays in `f64`. Sessions created milliseconds apart get boosts
+/// that differ by less than `f32` precision, and rounding would tie or order
+/// them depending on `now`. Separate paginated calls would then disagree.
+fn recency_adjusted_score(text_score: Score, timestamp: f64, now: f64) -> f64 {
+    let text_score = f64::from(text_score);
     if !timestamp.is_finite() || !now.is_finite() {
         return text_score;
     }
 
     let age_seconds = (now - timestamp).max(0.0);
     let freshness = 2.0_f64.powf(-age_seconds / RECENCY_HALF_LIFE_SECONDS);
-    (f64::from(text_score) * (1.0 + RECENCY_BOOST_WEIGHT * freshness)) as Score
+    text_score * (1.0 + RECENCY_BOOST_WEIGHT * freshness)
 }
 
 struct IndexLock {
@@ -324,6 +329,20 @@ impl SessionIndex {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<SearchHit>> {
+        let now = Utc::now().timestamp_millis() as f64 / 1_000.0;
+        self.search_at(query, agent_filter, directory_filter, offset, limit, now)
+    }
+
+    /// Search with recency measured from `now` (Unix seconds).
+    fn search_at(
+        &self,
+        query: &str,
+        agent_filter: Option<&str>,
+        directory_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+        now: f64,
+    ) -> Result<Vec<SearchHit>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -341,7 +360,6 @@ impl SessionIndex {
                     .map(|(score, addr)| (score.unwrap_or_default() as f32, addr)),
             )
         } else {
-            let now = Utc::now().timestamp_millis() as f64 / 1_000.0;
             let collector =
                 TopDocs::with_limit(limit)
                     .and_offset(offset)
@@ -352,11 +370,20 @@ impl SessionIndex {
                                 .as_ref()
                                 .and_then(|values| values.first(doc))
                                 .unwrap_or_default();
-                            recency_adjusted_score(text_score, timestamp, now)
+                            // Exact score ties list the newer session first
+                            // instead of falling back to index insertion order.
+                            (
+                                recency_adjusted_score(text_score, timestamp, now),
+                                timestamp,
+                            )
                         }
                     });
-            let hits: Vec<(Score, DocAddress)> = searcher.search(&query, &collector)?;
-            self.hits_to_sessions(&searcher, hits.into_iter())
+            let hits: Vec<((f64, f64), DocAddress)> = searcher.search(&query, &collector)?;
+            self.hits_to_sessions(
+                &searcher,
+                hits.into_iter()
+                    .map(|((score, _timestamp), addr)| (score as f32, addr)),
+            )
         }
     }
 
@@ -562,7 +589,7 @@ impl IndexUpdater<'_> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Datelike, Duration as ChronoDuration, Local, Timelike};
+    use chrono::{Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
     use tempfile::tempdir;
 
     use super::*;
@@ -595,8 +622,51 @@ mod tests {
 
         assert!((current - 25.0).abs() < 0.001);
         assert!((after_half_life - 17.5).abs() < 0.001);
-        assert!(after_ninety_days > text_score);
+        assert!(after_ninety_days > f64::from(text_score));
         assert!(after_ninety_days < 10.2);
+    }
+
+    #[test]
+    fn ranking_does_not_depend_on_when_the_search_runs() {
+        // Paginated `--json` calls each measure recency from their own "now".
+        // Equally relevant sessions created milliseconds apart must keep the
+        // same order across calls, or pages repeat and skip sessions.
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        let created = Local.timestamp_millis_opt(1_780_000_000_000).unwrap();
+        // Index oldest first so an insertion-order tie-break would put the
+        // oldest session first.
+        let sessions: Vec<_> = ["page-a", "page-b", "page-c"]
+            .into_iter()
+            .enumerate()
+            .map(|(position, id)| {
+                let mut session = Session::new(
+                    id,
+                    "codex",
+                    "Pagination",
+                    "/repo",
+                    created + ChronoDuration::milliseconds(10 * position as i64),
+                    "shared pagination phrase",
+                    1,
+                );
+                session.mtime = 1.0;
+                session
+            })
+            .collect();
+        index.update_sessions(&sessions).unwrap();
+
+        let created_seconds = created.timestamp_millis() as f64 / 1_000.0;
+        for step in 0..500 {
+            // Searches from seconds to about a month after creation.
+            let now = created_seconds + 1.0 + f64::from(step) * 5_311.7;
+            let ids: Vec<_> = index
+                .search_at("shared pagination phrase", None, None, 0, 10, now)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.session.id)
+                .collect();
+            assert_eq!(ids, ["page-c", "page-b", "page-a"], "now = {now}");
+        }
     }
 
     #[test]
