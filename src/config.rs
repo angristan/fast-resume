@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 24;
 
-pub const AGENT_ORDER: [&str; 12] = [
+pub const AGENT_ORDER: [&str; 13] = [
     "antigravity",
     "claude",
     "codex",
@@ -21,6 +21,7 @@ pub const AGENT_ORDER: [&str; 12] = [
     "kimi",
     "opencode",
     "pi",
+    "reasonix",
     "vibe",
     "copilot-vscode",
 ];
@@ -114,6 +115,14 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 badge: "vibe",
                 color: ratatui::style::Color::Rgb(255, 107, 53),
                 light_color: ratatui::style::Color::Rgb(190, 65, 25),
+            },
+        ),
+        (
+            "reasonix",
+            AgentConfig {
+                name: "reasonix",
+                badge: "reasonix",
+                color: ratatui::style::Color::Rgb(79, 70, 229),
             },
         ),
         (
@@ -259,6 +268,10 @@ pub fn opencode_legacy_dir() -> PathBuf {
 
 pub fn vibe_dir() -> PathBuf {
     home_dir().join(".vibe").join("logs").join("session")
+}
+
+pub fn reasonix_sessions_dir() -> PathBuf {
+    home_dir().join(".reasonix").join("projects")
 }
 
 pub fn crush_projects_file() -> PathBuf {

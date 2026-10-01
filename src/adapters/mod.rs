@@ -13,6 +13,7 @@ mod grok;
 mod kimi;
 mod opencode;
 mod pi;
+mod reasonix;
 mod shared;
 mod vibe;
 
@@ -27,6 +28,7 @@ pub use grok::GrokAdapter;
 pub use kimi::KimiAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::PiAdapter;
+pub use reasonix::ReasonixAdapter;
 pub use vibe::VibeAdapter;
 
 pub const MTIME_TOLERANCE: f64 = 0.001;
@@ -90,6 +92,7 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(KimiAdapter::default()),
         Box::new(OpenCodeAdapter::default()),
         Box::new(PiAdapter::default()),
+        Box::new(ReasonixAdapter::default()),
         Box::new(VibeAdapter::default()),
     ]
 }
