@@ -1,3 +1,10 @@
+## [2.13.1](https://github.com/angristan/fast-resume/compare/v2.13.0...v2.13.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **opencode:** read OpenCode 2 session_v2 database ([#101](https://github.com/angristan/fast-resume/issues/101)) ([0adfc99](https://github.com/angristan/fast-resume/commit/0adfc99f2b82fea8147f75907112687278a8e423))
+
 # [2.13.0](https://github.com/angristan/fast-resume/compare/v2.12.0...v2.13.0) (2026-09-27)
 
 
