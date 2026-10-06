@@ -162,6 +162,30 @@ fn write_kimi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> P
     wire_file
 }
 
+fn write_opencode_v2_session(home: &Path, id: &str, directory: &str, prompt: &str) {
+    let data_dir = home.join(".local/share/opencode");
+    fs::create_dir_all(&data_dir).unwrap();
+    let connection = rusqlite::Connection::open(data_dir.join("opencode.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+             CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO session_v2 VALUES (?1, ?2, 'OpenCode 2 thread', 1784110800000, 1784110801000)",
+            (id, directory),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO session_message VALUES ('msg-1', ?1, 'user', 0, 1784110800500, 1784110800500, ?2)",
+            (id, json!({"text": prompt}).to_string()),
+        )
+        .unwrap();
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -397,6 +421,32 @@ fn lists_antigravity_cursor_and_grok_sessions() {
         );
     }
     assert!(stdout.contains("Showing 3 of 3 sessions"));
+}
+
+#[test]
+fn lists_opencode_v2_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_opencode_v2_session(
+        temp.path(),
+        "ses_v2",
+        "/repo/opencode",
+        "OpenCode 2 binary coverage",
+    );
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--json", "binary coverage"]));
+
+    assert!(stderr.is_empty());
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "opencode");
+    assert_eq!(sessions[0]["id"], "ses_v2");
+    assert_eq!(sessions[0]["title"], "OpenCode 2 thread");
+    assert_eq!(sessions[0]["directory"], "/repo/opencode");
+    assert_eq!(
+        sessions[0]["resume_command"],
+        json!(["opencode", "/repo/opencode", "--session", "ses_v2"])
+    );
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -114,36 +114,335 @@ impl Adapter for OpenCodeAdapter {
     }
 }
 
+/// Table set that holds one OpenCode session and its conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum DbSchema {
+    /// OpenCode 1.x: `session`, `message`, and `part` tables.
+    V1,
+    /// OpenCode 2.x: `session_v2` plus one `session_message` row per turn.
+    V2,
+}
+
+impl DbSchema {
+    fn activity_tables(self) -> &'static [&'static str] {
+        match self {
+            Self::V1 => &["message", "part"],
+            Self::V2 => &["session_message"],
+        }
+    }
+}
+
+/// OpenCode 2 tracks its 1.x import under this `kv` key.
+const V1_MIGRATION_STATE_KEY: &str = "migration.v1-v2";
+
+const SESSION_COLUMNS: &str = "id, title, directory, time_created, time_updated";
+
+/// Where an OpenCode database currently keeps its sessions.
+///
+/// Fresh OpenCode 2 databases only have `session_v2`. When OpenCode 2 opens a
+/// 1.x database, it adds `session_v2` and copies 1.x sessions in the
+/// background, one transaction per session, newest id first. It saves its
+/// progress in `kv['migration.v1-v2']` and leaves the 1.x tables behind.
+#[derive(Debug, PartialEq, Eq)]
+enum DbLayout {
+    V1,
+    V2,
+    /// OpenCode 2 has not finished copying 1.x sessions. Sessions with an id
+    /// at or above `cursor` are already in `session_v2`; older ones still
+    /// live only in the 1.x tables. A missing cursor means nothing was copied.
+    Migrating {
+        cursor: Option<String>,
+    },
+}
+
+impl DbLayout {
+    /// Returns `None` when there is no session table or SQLite cannot tell.
+    fn detect(conn: &Connection) -> Option<Self> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'session_v2', 'kv')",
+            )
+            .ok()?;
+        let tables = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()?
+            .collect::<rusqlite::Result<HashSet<_>>>()
+            .ok()?;
+        match (tables.contains("session_v2"), tables.contains("session")) {
+            (false, false) => None,
+            (false, true) => Some(Self::V1),
+            (true, false) => Some(Self::V2),
+            (true, true) if !tables.contains("kv") => Some(Self::Migrating { cursor: None }),
+            (true, true) => Self::detect_migration(conn),
+        }
+    }
+
+    /// Mirrors how OpenCode reads its migration state: a missing or unknown
+    /// value means the copy has not started yet.
+    fn detect_migration(conn: &Connection) -> Option<Self> {
+        let state = conn
+            .query_row(
+                "SELECT value FROM kv WHERE key = ?1",
+                [V1_MIGRATION_STATE_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()?
+            .and_then(|value| serde_json::from_str::<Value>(&value).ok());
+        let field = |key: &str| {
+            state
+                .as_ref()
+                .and_then(|state| state.get(key))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        };
+        Some(match field("phase").as_deref() {
+            // After the copy, OpenCode deletes sessions only from
+            // `session_v2`. Reading the 1.x leftovers would resurrect them.
+            Some("completed") => Self::V2,
+            Some("sessions") => Self::Migrating {
+                cursor: field("cursor"),
+            },
+            _ => Self::Migrating { cursor: None },
+        })
+    }
+
+    fn sources(&self) -> &'static [DbSchema] {
+        match self {
+            Self::V1 => &[DbSchema::V1],
+            Self::V2 => &[DbSchema::V2],
+            Self::Migrating { .. } => &[DbSchema::V2, DbSchema::V1],
+        }
+    }
+
+    /// Reads the session rows of every source. A full rebuild skips
+    /// unreadable rows; an incremental scan (`strict`) fails on them instead
+    /// of reporting the missing sessions as deleted.
+    fn session_rows(&self, conn: &Connection, strict: bool) -> Option<Vec<DbSessionRow>> {
+        let mut sessions = Vec::new();
+        for &source in self.sources() {
+            let (query, params): (String, Vec<&dyn ToSql>) = match (self, source) {
+                (_, DbSchema::V2) => (format!("SELECT {SESSION_COLUMNS} FROM session_v2"), vec![]),
+                (Self::Migrating { cursor }, DbSchema::V1) => (
+                    // Only the 1.x sessions OpenCode has not copied yet. The
+                    // `NOT IN` guard covers ids that were already present in
+                    // `session_v2`, which the copy skips with `INSERT OR IGNORE`.
+                    format!(
+                        "SELECT {SESSION_COLUMNS} FROM session
+                         WHERE (?1 IS NULL OR id < ?1) AND id NOT IN (SELECT id FROM session_v2)"
+                    ),
+                    vec![cursor as &dyn ToSql],
+                ),
+                (_, DbSchema::V1) => (format!("SELECT {SESSION_COLUMNS} FROM session"), vec![]),
+            };
+            let mut stmt = conn.prepare(&query).ok()?;
+            let rows = stmt
+                .query_map(params.as_slice(), |row| DbSessionRow::from_row(row, source))
+                .ok()?;
+            for row in rows {
+                match row {
+                    Ok(row) => sessions.push(row),
+                    Err(_) if strict => return None,
+                    Err(_) => {}
+                }
+            }
+        }
+        Some(sessions)
+    }
+}
+
+struct DbSessionRow {
+    source: DbSchema,
+    id: String,
+    title: String,
+    directory: String,
+    time_created: i64,
+    time_updated: i64,
+}
+
+impl DbSessionRow {
+    fn from_row(row: &rusqlite::Row<'_>, source: DbSchema) -> rusqlite::Result<Self> {
+        Ok(Self {
+            source,
+            id: row.get(0)?,
+            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            directory: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            time_created: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+            time_updated: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+        })
+    }
+
+    // Full and incremental scans must agree on this value, or the next launch
+    // re-parses every session that a rebuild just indexed.
+    fn mtime(&self, activity_mtimes: &ActivityMtimes, db_path: &Path) -> f64 {
+        let activity_ms = activity_mtimes
+            .get(&self.source)
+            .and_then(|mtimes| mtimes.get(&self.id))
+            .copied()
+            .unwrap_or_default();
+        let timestamp_ms = self.time_created.max(self.time_updated).max(activity_ms);
+        timestamp_from_ms(Some(timestamp_ms))
+            .map(datetime_to_seconds)
+            .unwrap_or_else(|| file_mtime_seconds(db_path))
+    }
+}
+
+/// Latest message activity per session, kept per source because a migrated
+/// session also has stale 1.x rows under the same id.
+type ActivityMtimes = HashMap<DbSchema, HashMap<String, i64>>;
+
+fn activity_mtimes(conn: &Connection, layout: &DbLayout) -> ActivityMtimes {
+    layout
+        .sources()
+        .iter()
+        .map(|&source| (source, opencode_activity_mtimes_by_session(conn, source)))
+        .collect()
+}
+
+/// Conversation rows grouped for rendering, independent of the schema.
+#[derive(Default)]
+struct DbContent {
+    /// Ordered `(message id, role)` pairs per session.
+    messages_by_session: HashMap<String, Vec<(String, String)>>,
+    texts_by_message: HashMap<String, Vec<String>>,
+}
+
+impl DbContent {
+    /// Loads conversation rows for every session in `source`, or only `ids`.
+    /// Loading every row skips unreadable ones; loading `ids` fails on them.
+    fn load(conn: &Connection, source: DbSchema, ids: Option<&[String]>) -> Option<Self> {
+        match (source, ids) {
+            (DbSchema::V1, None) => Some(load_opencode_v1_content(conn)),
+            (DbSchema::V1, Some(ids)) => load_opencode_v1_content_for(conn, ids),
+            (DbSchema::V2, ids) => load_opencode_v2_content(conn, ids),
+        }
+    }
+
+    fn session(&mut self, agent: &'static str, row: DbSessionRow, mtime: f64) -> Session {
+        let session_messages = self.messages_by_session.remove(&row.id).unwrap_or_default();
+        let mut rendered = Vec::new();
+        for (message_id, role) in &session_messages {
+            let prefix = if role == "user" { "» " } else { "  " };
+            for text in self.texts_by_message.get(message_id).into_iter().flatten() {
+                rendered.push(format!("{prefix}{text}"));
+            }
+        }
+        let timestamp = timestamp_from_ms(Some(row.time_created.max(row.time_updated)))
+            .unwrap_or_else(Local::now);
+        let mut session = Session::new(
+            row.id,
+            agent,
+            if row.title.is_empty() {
+                "Untitled session".to_string()
+            } else {
+                row.title
+            },
+            row.directory,
+            timestamp,
+            rendered.join("\n\n"),
+            session_messages.len(),
+        );
+        session.mtime = mtime;
+        session
+    }
+}
+
+/// Renders rows with the content of their own source. Migrated OpenCode 2
+/// messages keep their 1.x ids, so the sources cannot share one map.
+fn render_sessions(
+    agent: &'static str,
+    rows: impl IntoIterator<Item = (DbSessionRow, f64)>,
+    contents: &mut HashMap<DbSchema, DbContent>,
+) -> Vec<Session> {
+    rows.into_iter()
+        .filter_map(|(row, mtime)| {
+            let content = contents.get_mut(&row.source)?;
+            Some(content.session(agent, row, mtime))
+        })
+        .collect()
+}
+
 fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
     let Ok(conn) = Connection::open(db_path) else {
         return Vec::new();
     };
+    let Some(layout) = DbLayout::detect(&conn) else {
+        return Vec::new();
+    };
+    let Some(mut rows) = layout.session_rows(&conn, false) else {
+        return Vec::new();
+    };
+    rows.sort_by_key(|row| std::cmp::Reverse(row.time_updated));
 
-    let mut sessions_meta = Vec::new();
-    let mut stmt = match conn.prepare(
-        "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC",
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
-    let rows = match stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return Vec::new(),
-    };
-    for row in rows.filter_map(Result::ok) {
-        sessions_meta.push(row);
+    let mut contents = HashMap::new();
+    for &source in layout.sources() {
+        let Some(content) = DbContent::load(&conn, source, None) else {
+            return Vec::new();
+        };
+        contents.insert(source, content);
     }
-    drop(stmt);
+    let activity_mtimes = activity_mtimes(&conn, &layout);
+    let rows = rows.into_iter().map(|row| {
+        let mtime = row.mtime(&activity_mtimes, db_path);
+        (row, mtime)
+    });
+    render_sessions(agent, rows, &mut contents)
+}
 
-    let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
+fn load_opencode_db_incremental(
+    agent: &'static str,
+    db_path: &Path,
+    known: &KnownSessions,
+) -> IncrementalScan {
+    let Ok(conn) = Connection::open(db_path) else {
+        return failed_incremental_scan(agent);
+    };
+    let Some(layout) = DbLayout::detect(&conn) else {
+        return failed_incremental_scan(agent);
+    };
+    let Some(rows) = layout.session_rows(&conn, true) else {
+        return failed_incremental_scan(agent);
+    };
+
+    let mut current_ids = HashSet::new();
+    let mut sessions_to_fetch = Vec::new();
+    let activity_mtimes = activity_mtimes(&conn, &layout);
+    for row in rows {
+        current_ids.insert(row.id.clone());
+        let mtime = row.mtime(&activity_mtimes, db_path);
+        if session_needs_update(known, agent, &row.id, mtime) {
+            sessions_to_fetch.push((row, mtime));
+        }
+    }
+
+    let deleted_ids = deleted_ids_for_agent(known, agent, &current_ids);
+    let mut contents = HashMap::new();
+    for &source in layout.sources() {
+        let fetch_ids: Vec<_> = sessions_to_fetch
+            .iter()
+            .filter(|(row, _)| row.source == source)
+            .map(|(row, _)| row.id.clone())
+            .collect();
+        if fetch_ids.is_empty() {
+            continue;
+        }
+        let Some(content) = DbContent::load(&conn, source, Some(&fetch_ids)) else {
+            return failed_incremental_scan(agent);
+        };
+        contents.insert(source, content);
+    }
+
+    IncrementalScan {
+        agent,
+        new_or_modified: render_sessions(agent, sessions_to_fetch, &mut contents),
+        deleted_ids,
+    }
+}
+
+/// Loads every OpenCode 1.x message for a full rebuild. Unreadable rows are
+/// skipped so one bad row does not hide the rest of the history.
+fn load_opencode_v1_content(conn: &Connection) -> DbContent {
+    let mut content = DbContent::default();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message ORDER BY time_created ASC",
     )
@@ -155,14 +454,14 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
             ))
         }) {
             for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
-                messages_by_session
+                content
+                    .messages_by_session
                     .entry(session_id)
                     .or_default()
                     .push((msg_id, role));
             }
         }
 
-    let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT message_id, json_extract(data, '$.text') FROM part WHERE json_extract(data, '$.type') = 'text' ORDER BY time_created ASC",
     )
@@ -174,221 +473,180 @@ fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
         }) {
             for (message_id, text) in rows.filter_map(Result::ok) {
                 if !text.is_empty() {
-                    parts_by_message.entry(message_id).or_default().push(text);
+                    content.texts_by_message.entry(message_id).or_default().push(text);
                 }
             }
         }
-
-    let mut sessions = Vec::new();
-    let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
-    for (id, title, directory, time_created, time_updated) in sessions_meta {
-        // Match the incremental scan's mtime exactly, or the next launch
-        // re-parses every session that a rebuild just indexed.
-        let timestamp_ms = time_created
-            .max(time_updated)
-            .max(activity_mtimes.get(&id).copied().unwrap_or_default());
-        let mtime = timestamp_from_ms(Some(timestamp_ms))
-            .map(datetime_to_seconds)
-            .unwrap_or_else(|| file_mtime_seconds(db_path));
-        let mut rendered = Vec::new();
-        let session_messages = messages_by_session.remove(&id).unwrap_or_default();
-        for (message_id, role) in &session_messages {
-            let prefix = if role == "user" { "» " } else { "  " };
-            for text in parts_by_message
-                .get(message_id)
-                .cloned()
-                .unwrap_or_default()
-            {
-                rendered.push(format!("{prefix}{text}"));
-            }
-        }
-        let timestamp =
-            timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
-        let mut session = Session::new(
-            id,
-            agent,
-            if title.is_empty() {
-                "Untitled session".to_string()
-            } else {
-                title
-            },
-            directory,
-            timestamp,
-            rendered.join("\n\n"),
-            session_messages.len(),
-        );
-        session.mtime = mtime;
-        sessions.push(session);
-    }
-    sessions
+    content
 }
 
-fn load_opencode_db_incremental(
-    agent: &'static str,
-    db_path: &Path,
-    known: &KnownSessions,
-) -> IncrementalScan {
-    let Ok(conn) = Connection::open(db_path) else {
-        return failed_incremental_scan(agent);
-    };
-
-    let mut stmt = match conn
-        .prepare("SELECT id, title, directory, time_created, time_updated FROM session")
-    {
-        Ok(stmt) => stmt,
-        Err(_) => return failed_incremental_scan(agent),
-    };
-
-    let rows = match stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return failed_incremental_scan(agent),
-    };
-
-    let mut current_ids = HashSet::new();
-    let mut sessions_to_fetch = Vec::new();
-    let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
-    for row in rows {
-        let Ok((id, title, directory, time_created, time_updated)) = row else {
-            return failed_incremental_scan(agent);
-        };
-        current_ids.insert(id.clone());
-        let timestamp_ms = time_created
-            .max(time_updated)
-            .max(activity_mtimes.get(&id).copied().unwrap_or_default());
-        let mtime = timestamp_from_ms(Some(timestamp_ms))
-            .map(datetime_to_seconds)
-            .unwrap_or_else(|| file_mtime_seconds(db_path));
-        if session_needs_update(known, agent, &id, mtime) {
-            sessions_to_fetch.push((id, title, directory, time_created, time_updated, mtime));
-        }
-    }
-    drop(stmt);
-
-    let deleted_ids = deleted_ids_for_agent(known, agent, &current_ids);
-    if sessions_to_fetch.is_empty() {
-        return IncrementalScan {
-            agent,
-            new_or_modified: Vec::new(),
-            deleted_ids,
-        };
-    }
-
-    let fetch_ids: Vec<_> = sessions_to_fetch
-        .iter()
-        .map(|(id, _, _, _, _, _)| id.clone())
-        .collect();
-    let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    for chunk in fetch_ids.chunks(900) {
+/// Loads OpenCode 1.x messages for the given sessions. Any error fails the
+/// whole fetch so an incremental refresh never replaces good indexed data.
+fn load_opencode_v1_content_for(conn: &Connection, ids: &[String]) -> Option<DbContent> {
+    let mut content = DbContent::default();
+    for chunk in ids.chunks(900) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let query = format!(
             "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
         );
-        let mut stmt = match conn.prepare(&query) {
-            Ok(stmt) => stmt,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return failed_incremental_scan(agent),
-        };
+        let mut stmt = conn.prepare(&query).ok()?;
+        let rows = stmt
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .ok()?;
         for row in rows {
-            let Ok((msg_id, session_id, role)) = row else {
-                return failed_incremental_scan(agent);
-            };
-            messages_by_session
+            let (msg_id, session_id, role) = row.ok()?;
+            content
+                .messages_by_session
                 .entry(session_id)
                 .or_default()
                 .push((msg_id, role));
         }
     }
 
-    let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
-    for chunk in fetch_ids.chunks(900) {
+    for chunk in ids.chunks(900) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let query = format!(
             "SELECT message_id, json_extract(data, '$.text') FROM part WHERE session_id IN ({placeholders}) AND json_extract(data, '$.type') = 'text' ORDER BY time_created ASC"
         );
-        let mut stmt = match conn.prepare(&query) {
-            Ok(stmt) => stmt,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            ))
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return failed_incremental_scan(agent),
-        };
+        let mut stmt = conn.prepare(&query).ok()?;
+        let rows = stmt
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ))
+            })
+            .ok()?;
         for row in rows {
-            let Ok((message_id, text)) = row else {
-                return failed_incremental_scan(agent);
-            };
+            let (message_id, text) = row.ok()?;
             if !text.is_empty() {
-                parts_by_message.entry(message_id).or_default().push(text);
+                content
+                    .texts_by_message
+                    .entry(message_id)
+                    .or_default()
+                    .push(text);
             }
         }
     }
-
-    let mut new_or_modified = Vec::new();
-    for (id, title, directory, time_created, time_updated, mtime) in sessions_to_fetch {
-        let mut rendered = Vec::new();
-        let session_messages = messages_by_session.remove(&id).unwrap_or_default();
-        for (message_id, role) in &session_messages {
-            let prefix = if role == "user" { "» " } else { "  " };
-            for text in parts_by_message
-                .get(message_id)
-                .cloned()
-                .unwrap_or_default()
-            {
-                rendered.push(format!("{prefix}{text}"));
-            }
-        }
-        let timestamp =
-            timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
-        let mut session = Session::new(
-            id,
-            agent,
-            if title.is_empty() {
-                "Untitled session".to_string()
-            } else {
-                title
-            },
-            directory,
-            timestamp,
-            rendered.join("\n\n"),
-            session_messages.len(),
-        );
-        session.mtime = mtime;
-        new_or_modified.push(session);
-    }
-
-    IncrementalScan {
-        agent,
-        new_or_modified,
-        deleted_ids,
-    }
+    Some(content)
 }
 
-fn opencode_activity_mtimes_by_session(conn: &Connection) -> HashMap<String, i64> {
+/// Loads OpenCode 2.x conversation rows for every session, or only `ids`.
+///
+/// Only user prompts and assistant text are indexed; reasoning, tool calls,
+/// synthetic and system context, shell output, and lifecycle rows are
+/// skipped. Like the 1.x loaders, a full rebuild skips unreadable rows while
+/// an incremental fetch fails on them, so it never replaces an indexed
+/// session with partial content.
+fn load_opencode_v2_content(conn: &Connection, ids: Option<&[String]>) -> Option<DbContent> {
+    const QUERY: &str = "SELECT id, session_id, type, data FROM session_message WHERE type IN ('user', 'assistant')";
+    let mut content = DbContent::default();
+    match ids {
+        None => collect_opencode_v2_rows(
+            conn,
+            &format!("{QUERY} ORDER BY session_id, seq"),
+            [],
+            false,
+            &mut content,
+        )?,
+        Some(ids) => {
+            for chunk in ids.chunks(900) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                collect_opencode_v2_rows(
+                    conn,
+                    &format!("{QUERY} AND session_id IN ({placeholders}) ORDER BY session_id, seq"),
+                    params_from_iter(chunk.iter()),
+                    true,
+                    &mut content,
+                )?;
+            }
+        }
+    }
+    Some(content)
+}
+
+fn collect_opencode_v2_rows(
+    conn: &Connection,
+    query: &str,
+    params: impl rusqlite::Params,
+    strict: bool,
+    content: &mut DbContent,
+) -> Option<()> {
+    let mut stmt = conn.prepare(query).ok()?;
+    let rows = stmt
+        .query_map(params, |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .ok()?;
+    for row in rows {
+        let parsed = row.ok().and_then(|(message_id, session_id, role, data)| {
+            let data = serde_json::from_str::<Value>(&data).ok()?;
+            Some((message_id, session_id, role, data))
+        });
+        let Some((message_id, session_id, role, data)) = parsed else {
+            if strict {
+                return None;
+            }
+            continue;
+        };
+        let texts = opencode_v2_message_texts(&role, &data);
+        if !texts.is_empty() {
+            content.texts_by_message.insert(message_id.clone(), texts);
+        }
+        content
+            .messages_by_session
+            .entry(session_id)
+            .or_default()
+            .push((message_id, role));
+    }
+    Some(())
+}
+
+/// User rows keep the prompt in `text`; assistant rows keep an ordered
+/// `content` array whose `text` items are the visible reply.
+fn opencode_v2_message_texts(role: &str, data: &Value) -> Vec<String> {
+    let texts: Vec<&str> = match role {
+        "user" => data
+            .get("text")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect(),
+        "assistant" => data
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect(),
+        _ => Vec::new(),
+    };
+    texts
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn opencode_activity_mtimes_by_session(
+    conn: &Connection,
+    schema: DbSchema,
+) -> HashMap<String, i64> {
     let mut mtimes = HashMap::new();
-    collect_opencode_activity_mtimes(conn, "message", &mut mtimes);
-    collect_opencode_activity_mtimes(conn, "part", &mut mtimes);
+    for table in schema.activity_tables() {
+        collect_opencode_activity_mtimes(conn, table, &mut mtimes);
+    }
     mtimes
 }
 
@@ -1723,5 +1981,389 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    const V2_SCHEMA: &str = r#"
+        CREATE TABLE kv (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL
+        );
+        CREATE TABLE session_v2 (
+            id TEXT PRIMARY KEY,
+            directory TEXT NOT NULL,
+            title TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL
+        );
+        CREATE TABLE session_message (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+    "#;
+
+    fn v2_adapter(temp: &tempfile::TempDir) -> (OpenCodeAdapter, Connection) {
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(V2_SCHEMA).unwrap();
+        let adapter = OpenCodeAdapter {
+            data_dir,
+            db_path,
+            legacy_dir: temp.path().join("legacy"),
+        };
+        (adapter, conn)
+    }
+
+    fn insert_v2_session(conn: &Connection, id: &str, title: &str, time_ms: i64) {
+        conn.execute(
+            "INSERT INTO session_v2 (id, directory, title, time_created, time_updated)
+             VALUES (?1, '/work/opencode', ?2, ?3, ?3)",
+            (id, title, time_ms),
+        )
+        .unwrap();
+    }
+
+    fn insert_v2_message(
+        conn: &Connection,
+        session_id: &str,
+        seq: i64,
+        kind: &str,
+        time_ms: i64,
+        data: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+            (
+                format!("{session_id}-msg-{seq}"),
+                session_id,
+                kind,
+                seq,
+                time_ms,
+                data,
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn parses_v2_sqlite_conversation_text_only() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        insert_v2_session(&conn, "ses_v2", "OpenCode 2 thread", 1_720_000_000_000);
+        let rows = [
+            (
+                "synthetic",
+                json!({"text": "AGENTS.md instructions", "time": {"created": 1}}),
+            ),
+            (
+                "user",
+                json!({"text": "Find the flaky test", "files": [], "time": {"created": 2}}),
+            ),
+            (
+                "assistant",
+                json!({"content": [
+                    {"type": "reasoning", "text": "private reasoning"},
+                    {"type": "tool", "name": "bash", "state": {"output": "tool output"}},
+                    {"type": "text", "text": "The flaky test is in cli.rs"},
+                ]}),
+            ),
+            (
+                "shell",
+                json!({"command": "ls", "output": {"output": "shell output"}}),
+            ),
+            ("idle", json!({"outcome": "completed"})),
+        ];
+        for (seq, (kind, data)) in rows.iter().enumerate() {
+            insert_v2_message(
+                &conn,
+                "ses_v2",
+                seq as i64,
+                kind,
+                1_720_000_000_001 + seq as i64,
+                &data.to_string(),
+            );
+        }
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&KnownSessions::new());
+
+        assert_eq!(full.len(), 1);
+        assert_eq!(scan.new_or_modified.len(), 1);
+        for session in [&full[0], &scan.new_or_modified[0]] {
+            assert_eq!(session.id, "ses_v2");
+            assert_eq!(session.title, "OpenCode 2 thread");
+            assert_eq!(session.directory, "/work/opencode");
+            assert_eq!(
+                session.content,
+                "» Find the flaky test\n\n  The flaky test is in cli.rs"
+            );
+            assert_eq!(session.message_count, 2);
+        }
+        assert_eq!(full[0].mtime, scan.new_or_modified[0].mtime);
+        assert_eq!(
+            adapter.resume_command(&full[0], false),
+            vec!["opencode", "/work/opencode", "--session", "ses_v2"]
+        );
+    }
+
+    #[test]
+    fn v2_incremental_tracks_message_updates_and_deletions() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        for id in ["ses_a", "ses_b"] {
+            insert_v2_session(&conn, id, "Thread", 1_720_000_000_000);
+            insert_v2_message(
+                &conn,
+                id,
+                0,
+                "user",
+                1_720_000_000_001,
+                &json!({"text": format!("{id} prompt")}).to_string(),
+            );
+        }
+        let known: KnownSessions = adapter
+            .find_sessions()
+            .into_iter()
+            .map(|session| (("opencode".to_string(), session.id), session.mtime))
+            .collect();
+        assert_eq!(known.len(), 2);
+        assert!(
+            adapter
+                .find_sessions_incremental(&known)
+                .new_or_modified
+                .is_empty()
+        );
+
+        insert_v2_message(
+            &conn,
+            "ses_b",
+            1,
+            "assistant",
+            1_720_000_005_000,
+            &json!({"content": [{"type": "text", "text": "New reply"}]}).to_string(),
+        );
+        conn.execute("DELETE FROM session_v2 WHERE id = 'ses_a'", [])
+            .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "ses_b");
+        assert!(scan.new_or_modified[0].content.contains("  New reply"));
+        assert_eq!(scan.deleted_ids, vec!["ses_a".to_string()]);
+    }
+
+    #[test]
+    fn v2_malformed_message_keeps_indexed_session_until_repaired() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        insert_v2_session(&conn, "ses_v2", "Thread", 1_720_000_000_000);
+        insert_v2_message(
+            &conn,
+            "ses_v2",
+            0,
+            "user",
+            1_720_000_000_001,
+            &json!({"text": "Original prompt"}).to_string(),
+        );
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("opencode".to_string(), "ses_v2".to_string()),
+            adapter.find_sessions()[0].mtime,
+        );
+
+        insert_v2_message(&conn, "ses_v2", 1, "assistant", 1_720_000_005_000, "{");
+        let malformed = adapter.find_sessions_incremental(&known);
+
+        assert!(malformed.new_or_modified.is_empty());
+        assert!(malformed.deleted_ids.is_empty());
+        let rebuilt = adapter.find_sessions();
+        assert_eq!(rebuilt.len(), 1);
+        assert_eq!(rebuilt[0].content, "» Original prompt");
+
+        conn.execute(
+            "UPDATE session_message SET data = ?1 WHERE seq = 1",
+            [json!({"content": [{"type": "text", "text": "Repaired reply"}]}).to_string()],
+        )
+        .unwrap();
+        let repaired = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(repaired.new_or_modified.len(), 1);
+        assert!(
+            repaired.new_or_modified[0]
+                .content
+                .contains("Repaired reply")
+        );
+        assert!(repaired.deleted_ids.is_empty());
+    }
+
+    /// Adds the 1.x tables that OpenCode 2 leaves behind after an upgrade.
+    fn create_v1_tables(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn insert_v1_session(conn: &Connection, id: &str, title: &str, prompt: &str) {
+        conn.execute(
+            "INSERT INTO session VALUES (?1, ?2, '/work/opencode', 1720000000000, 1720000000000)",
+            (id, title),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES (?1 || '-msg', ?1, 1720000000001, '{\"role\":\"user\"}')",
+            [id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part VALUES (?1 || '-part', ?1 || '-msg', ?1, 1720000000002, ?2)",
+            (id, json!({"type": "text", "text": prompt}).to_string()),
+        )
+        .unwrap();
+    }
+
+    fn set_v1_migration_state(conn: &Connection, state: Value) {
+        conn.execute(
+            "INSERT INTO kv (key, value, time_created, time_updated) VALUES ('migration.v1-v2', ?1, 1, 1)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [state.to_string()],
+        )
+        .unwrap();
+    }
+
+    /// Mimics OpenCode 2 copying one 1.x session into `session_v2`.
+    fn copy_v1_session_to_v2(conn: &Connection, id: &str, prompt: &str) {
+        insert_v2_session(conn, id, &format!("{id} 2.x"), 1_720_000_000_000);
+        insert_v2_message(
+            conn,
+            id,
+            0,
+            "user",
+            1_720_000_000_001,
+            &json!({"text": prompt}).to_string(),
+        );
+    }
+
+    fn session_ids(sessions: &[Session]) -> Vec<&str> {
+        let mut ids: Vec<_> = sessions.iter().map(|session| session.id.as_str()).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn known_from(sessions: &[Session]) -> KnownSessions {
+        sessions
+            .iter()
+            .map(|session| (("opencode".to_string(), session.id.clone()), session.mtime))
+            .collect()
+    }
+
+    #[test]
+    fn v2_tables_take_precedence_over_leftover_v1_tables() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        // OpenCode 2 finished copying both sessions, then the user deleted
+        // `ses_deleted` in 2.x. Both 1.x rows stay behind.
+        create_v1_tables(&conn);
+        insert_v1_session(&conn, "ses_copied", "Stale 1.x title", "Stale 1.x copy");
+        insert_v1_session(&conn, "ses_deleted", "Deleted in 2.x", "Deleted prompt");
+        copy_v1_session_to_v2(&conn, "ses_copied", "Copied prompt");
+        set_v1_migration_state(&conn, json!({"phase": "completed"}));
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "ses_deleted".to_string()), 1.0);
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [&full, &scan.new_or_modified] {
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, "ses_copied");
+            assert_eq!(sessions[0].title, "ses_copied 2.x");
+            assert_eq!(sessions[0].content, "» Copied prompt");
+        }
+        assert_eq!(scan.deleted_ids, vec!["ses_deleted".to_string()]);
+    }
+
+    #[test]
+    fn v2_migration_in_progress_keeps_uncopied_v1_sessions() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        create_v1_tables(&conn);
+        for id in ["ses_a", "ses_b", "ses_c"] {
+            insert_v1_session(&conn, id, id, &format!("{id} 1.x prompt"));
+        }
+        insert_v2_session(&conn, "ses_new", "New in 2.x", 1_720_000_000_000);
+
+        // OpenCode 2 has created `session_v2` but not copied anything yet.
+        let started = adapter.find_sessions();
+        assert_eq!(
+            session_ids(&started),
+            ["ses_a", "ses_b", "ses_c", "ses_new"]
+        );
+        let known = known_from(&started);
+        let unchanged = adapter.find_sessions_incremental(&known);
+        assert!(unchanged.new_or_modified.is_empty());
+        assert!(unchanged.deleted_ids.is_empty());
+
+        // The copy runs newest id first and stops after `ses_b`; the user
+        // then deletes the copied `ses_c` in 2.x.
+        copy_v1_session_to_v2(&conn, "ses_c", "ses_c 2.x prompt");
+        copy_v1_session_to_v2(&conn, "ses_b", "ses_b 2.x prompt");
+        set_v1_migration_state(&conn, json!({"phase": "sessions", "cursor": "ses_b"}));
+        conn.execute("DELETE FROM session_v2 WHERE id = 'ses_c'", [])
+            .unwrap();
+
+        let partial = adapter.find_sessions_incremental(&known);
+        assert_eq!(partial.deleted_ids, vec!["ses_c".to_string()]);
+        let rebuilt = adapter.find_sessions();
+        assert_eq!(session_ids(&rebuilt), ["ses_a", "ses_b", "ses_new"]);
+        let content = |id: &str| {
+            rebuilt
+                .iter()
+                .find(|session| session.id == id)
+                .map(|session| session.content.as_str())
+        };
+        assert_eq!(content("ses_a"), Some("» ses_a 1.x prompt"));
+        assert_eq!(content("ses_b"), Some("» ses_b 2.x prompt"));
+
+        // Once the copy completes, every session comes from `session_v2`.
+        copy_v1_session_to_v2(&conn, "ses_a", "ses_a 2.x prompt");
+        set_v1_migration_state(&conn, json!({"phase": "completed"}));
+        let completed = adapter.find_sessions_incremental(&known_from(&rebuilt));
+        assert!(completed.deleted_ids.is_empty());
+        assert_eq!(
+            session_ids(&adapter.find_sessions()),
+            ["ses_a", "ses_b", "ses_new"]
+        );
     }
 }
