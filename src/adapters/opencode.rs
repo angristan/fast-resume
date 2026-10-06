@@ -114,113 +114,158 @@ impl Adapter for OpenCodeAdapter {
     }
 }
 
-fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
-    let Ok(conn) = Connection::open(db_path) else {
-        return Vec::new();
-    };
+/// SQLite layouts written by different OpenCode releases.
+#[derive(Clone, Copy)]
+enum DbSchema {
+    /// OpenCode 1.x: `session`, `message`, and `part` tables.
+    V1,
+    /// OpenCode 2.x: `session_v2` plus one `session_message` row per turn.
+    V2,
+}
 
-    let mut sessions_meta = Vec::new();
-    let mut stmt = match conn.prepare(
-        "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC",
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
-    let rows = match stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return Vec::new(),
-    };
-    for row in rows.filter_map(Result::ok) {
-        sessions_meta.push(row);
+impl DbSchema {
+    /// Returns `None` when there is no session table or SQLite cannot tell.
+    ///
+    /// OpenCode 2 copies 1.x history into `session_v2` but leaves the 1.x
+    /// tables behind, and from then on reads and deletes sessions only in
+    /// `session_v2`. Reading the leftovers would resurrect deleted sessions.
+    fn detect(conn: &Connection) -> Option<Self> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'session_v2')",
+            )
+            .ok()?;
+        let tables = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .ok()?
+            .collect::<rusqlite::Result<HashSet<_>>>()
+            .ok()?;
+        if tables.contains("session_v2") {
+            Some(Self::V2)
+        } else if tables.contains("session") {
+            Some(Self::V1)
+        } else {
+            None
+        }
     }
-    drop(stmt);
 
-    let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message ORDER BY time_created ASC",
-    )
-        && let Ok(rows) = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        }) {
-            for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
-                messages_by_session
-                    .entry(session_id)
-                    .or_default()
-                    .push((msg_id, role));
-            }
+    fn session_query(self) -> &'static str {
+        match self {
+            Self::V1 => "SELECT id, title, directory, time_created, time_updated FROM session",
+            Self::V2 => "SELECT id, title, directory, time_created, time_updated FROM session_v2",
         }
+    }
 
-    let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT message_id, json_extract(data, '$.text') FROM part WHERE json_extract(data, '$.type') = 'text' ORDER BY time_created ASC",
-    )
-        && let Ok(rows) = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            ))
-        }) {
-            for (message_id, text) in rows.filter_map(Result::ok) {
-                if !text.is_empty() {
-                    parts_by_message.entry(message_id).or_default().push(text);
-                }
-            }
+    fn activity_tables(self) -> &'static [&'static str] {
+        match self {
+            Self::V1 => &["message", "part"],
+            Self::V2 => &["session_message"],
         }
+    }
+}
 
-    let mut sessions = Vec::new();
-    let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
-    for (id, title, directory, time_created, time_updated) in sessions_meta {
-        // Match the incremental scan's mtime exactly, or the next launch
-        // re-parses every session that a rebuild just indexed.
-        let timestamp_ms = time_created
-            .max(time_updated)
-            .max(activity_mtimes.get(&id).copied().unwrap_or_default());
-        let mtime = timestamp_from_ms(Some(timestamp_ms))
+struct DbSessionRow {
+    id: String,
+    title: String,
+    directory: String,
+    time_created: i64,
+    time_updated: i64,
+}
+
+impl DbSessionRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            directory: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            time_created: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+            time_updated: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+        })
+    }
+
+    // Full and incremental scans must agree on this value, or the next launch
+    // re-parses every session that a rebuild just indexed.
+    fn mtime(&self, activity_mtimes: &HashMap<String, i64>, db_path: &Path) -> f64 {
+        let timestamp_ms = self
+            .time_created
+            .max(self.time_updated)
+            .max(activity_mtimes.get(&self.id).copied().unwrap_or_default());
+        timestamp_from_ms(Some(timestamp_ms))
             .map(datetime_to_seconds)
-            .unwrap_or_else(|| file_mtime_seconds(db_path));
+            .unwrap_or_else(|| file_mtime_seconds(db_path))
+    }
+}
+
+/// Conversation rows grouped for rendering, independent of the schema.
+#[derive(Default)]
+struct DbContent {
+    /// Ordered `(message id, role)` pairs per session.
+    messages_by_session: HashMap<String, Vec<(String, String)>>,
+    texts_by_message: HashMap<String, Vec<String>>,
+}
+
+impl DbContent {
+    fn session(&mut self, agent: &'static str, row: DbSessionRow, mtime: f64) -> Session {
+        let session_messages = self.messages_by_session.remove(&row.id).unwrap_or_default();
         let mut rendered = Vec::new();
-        let session_messages = messages_by_session.remove(&id).unwrap_or_default();
         for (message_id, role) in &session_messages {
             let prefix = if role == "user" { "» " } else { "  " };
-            for text in parts_by_message
-                .get(message_id)
-                .cloned()
-                .unwrap_or_default()
-            {
+            for text in self.texts_by_message.get(message_id).into_iter().flatten() {
                 rendered.push(format!("{prefix}{text}"));
             }
         }
-        let timestamp =
-            timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
+        let timestamp = timestamp_from_ms(Some(row.time_created.max(row.time_updated)))
+            .unwrap_or_else(Local::now);
         let mut session = Session::new(
-            id,
+            row.id,
             agent,
-            if title.is_empty() {
+            if row.title.is_empty() {
                 "Untitled session".to_string()
             } else {
-                title
+                row.title
             },
-            directory,
+            row.directory,
             timestamp,
             rendered.join("\n\n"),
             session_messages.len(),
         );
         session.mtime = mtime;
-        sessions.push(session);
+        session
     }
-    sessions
+}
+
+fn load_opencode_db(agent: &'static str, db_path: &Path) -> Vec<Session> {
+    let Ok(conn) = Connection::open(db_path) else {
+        return Vec::new();
+    };
+    let Some(schema) = DbSchema::detect(&conn) else {
+        return Vec::new();
+    };
+
+    let query = format!("{} ORDER BY time_updated DESC", schema.session_query());
+    let Ok(mut stmt) = conn.prepare(&query) else {
+        return Vec::new();
+    };
+    let rows: Vec<_> = match stmt.query_map([], DbSessionRow::from_row) {
+        Ok(rows) => rows.filter_map(Result::ok).collect(),
+        Err(_) => return Vec::new(),
+    };
+    drop(stmt);
+
+    let content = match schema {
+        DbSchema::V1 => Some(load_opencode_v1_content(&conn)),
+        DbSchema::V2 => load_opencode_v2_content(&conn, None),
+    };
+    let Some(mut content) = content else {
+        return Vec::new();
+    };
+    let activity_mtimes = opencode_activity_mtimes_by_session(&conn, schema);
+    rows.into_iter()
+        .map(|row| {
+            let mtime = row.mtime(&activity_mtimes, db_path);
+            content.session(agent, row, mtime)
+        })
+        .collect()
 }
 
 fn load_opencode_db_incremental(
@@ -231,43 +276,30 @@ fn load_opencode_db_incremental(
     let Ok(conn) = Connection::open(db_path) else {
         return failed_incremental_scan(agent);
     };
+    let Some(schema) = DbSchema::detect(&conn) else {
+        return failed_incremental_scan(agent);
+    };
 
-    let mut stmt = match conn
-        .prepare("SELECT id, title, directory, time_created, time_updated FROM session")
-    {
+    let mut stmt = match conn.prepare(schema.session_query()) {
         Ok(stmt) => stmt,
         Err(_) => return failed_incremental_scan(agent),
     };
-
-    let rows = match stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-        ))
-    }) {
+    let rows = match stmt.query_map([], DbSessionRow::from_row) {
         Ok(rows) => rows,
         Err(_) => return failed_incremental_scan(agent),
     };
 
     let mut current_ids = HashSet::new();
     let mut sessions_to_fetch = Vec::new();
-    let activity_mtimes = opencode_activity_mtimes_by_session(&conn);
+    let activity_mtimes = opencode_activity_mtimes_by_session(&conn, schema);
     for row in rows {
-        let Ok((id, title, directory, time_created, time_updated)) = row else {
+        let Ok(row) = row else {
             return failed_incremental_scan(agent);
         };
-        current_ids.insert(id.clone());
-        let timestamp_ms = time_created
-            .max(time_updated)
-            .max(activity_mtimes.get(&id).copied().unwrap_or_default());
-        let mtime = timestamp_from_ms(Some(timestamp_ms))
-            .map(datetime_to_seconds)
-            .unwrap_or_else(|| file_mtime_seconds(db_path));
-        if session_needs_update(known, agent, &id, mtime) {
-            sessions_to_fetch.push((id, title, directory, time_created, time_updated, mtime));
+        current_ids.insert(row.id.clone());
+        let mtime = row.mtime(&activity_mtimes, db_path);
+        if session_needs_update(known, agent, &row.id, mtime) {
+            sessions_to_fetch.push((row, mtime));
         }
     }
     drop(stmt);
@@ -283,100 +315,19 @@ fn load_opencode_db_incremental(
 
     let fetch_ids: Vec<_> = sessions_to_fetch
         .iter()
-        .map(|(id, _, _, _, _, _)| id.clone())
+        .map(|(row, _)| row.id.clone())
         .collect();
-    let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    for chunk in fetch_ids.chunks(900) {
-        let placeholders = vec!["?"; chunk.len()].join(",");
-        let query = format!(
-            "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
-        );
-        let mut stmt = match conn.prepare(&query) {
-            Ok(stmt) => stmt,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        for row in rows {
-            let Ok((msg_id, session_id, role)) = row else {
-                return failed_incremental_scan(agent);
-            };
-            messages_by_session
-                .entry(session_id)
-                .or_default()
-                .push((msg_id, role));
-        }
-    }
-
-    let mut parts_by_message: HashMap<String, Vec<String>> = HashMap::new();
-    for chunk in fetch_ids.chunks(900) {
-        let placeholders = vec!["?"; chunk.len()].join(",");
-        let query = format!(
-            "SELECT message_id, json_extract(data, '$.text') FROM part WHERE session_id IN ({placeholders}) AND json_extract(data, '$.type') = 'text' ORDER BY time_created ASC"
-        );
-        let mut stmt = match conn.prepare(&query) {
-            Ok(stmt) => stmt,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        let rows = match stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            ))
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return failed_incremental_scan(agent),
-        };
-        for row in rows {
-            let Ok((message_id, text)) = row else {
-                return failed_incremental_scan(agent);
-            };
-            if !text.is_empty() {
-                parts_by_message.entry(message_id).or_default().push(text);
-            }
-        }
-    }
-
-    let mut new_or_modified = Vec::new();
-    for (id, title, directory, time_created, time_updated, mtime) in sessions_to_fetch {
-        let mut rendered = Vec::new();
-        let session_messages = messages_by_session.remove(&id).unwrap_or_default();
-        for (message_id, role) in &session_messages {
-            let prefix = if role == "user" { "» " } else { "  " };
-            for text in parts_by_message
-                .get(message_id)
-                .cloned()
-                .unwrap_or_default()
-            {
-                rendered.push(format!("{prefix}{text}"));
-            }
-        }
-        let timestamp =
-            timestamp_from_ms(Some(time_created.max(time_updated))).unwrap_or_else(Local::now);
-        let mut session = Session::new(
-            id,
-            agent,
-            if title.is_empty() {
-                "Untitled session".to_string()
-            } else {
-                title
-            },
-            directory,
-            timestamp,
-            rendered.join("\n\n"),
-            session_messages.len(),
-        );
-        session.mtime = mtime;
-        new_or_modified.push(session);
-    }
+    let content = match schema {
+        DbSchema::V1 => load_opencode_v1_content_for(&conn, &fetch_ids),
+        DbSchema::V2 => load_opencode_v2_content(&conn, Some(&fetch_ids)),
+    };
+    let Some(mut content) = content else {
+        return failed_incremental_scan(agent);
+    };
+    let new_or_modified = sessions_to_fetch
+        .into_iter()
+        .map(|(row, mtime)| content.session(agent, row, mtime))
+        .collect();
 
     IncrementalScan {
         agent,
@@ -385,10 +336,214 @@ fn load_opencode_db_incremental(
     }
 }
 
-fn opencode_activity_mtimes_by_session(conn: &Connection) -> HashMap<String, i64> {
+/// Loads every OpenCode 1.x message for a full rebuild. Unreadable rows are
+/// skipped so one bad row does not hide the rest of the history.
+fn load_opencode_v1_content(conn: &Connection) -> DbContent {
+    let mut content = DbContent::default();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message ORDER BY time_created ASC",
+    )
+        && let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for (msg_id, session_id, role) in rows.filter_map(Result::ok) {
+                content
+                    .messages_by_session
+                    .entry(session_id)
+                    .or_default()
+                    .push((msg_id, role));
+            }
+        }
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT message_id, json_extract(data, '$.text') FROM part WHERE json_extract(data, '$.type') = 'text' ORDER BY time_created ASC",
+    )
+        && let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
+        }) {
+            for (message_id, text) in rows.filter_map(Result::ok) {
+                if !text.is_empty() {
+                    content.texts_by_message.entry(message_id).or_default().push(text);
+                }
+            }
+        }
+    content
+}
+
+/// Loads OpenCode 1.x messages for the given sessions. Any error fails the
+/// whole fetch so an incremental refresh never replaces good indexed data.
+fn load_opencode_v1_content_for(conn: &Connection, ids: &[String]) -> Option<DbContent> {
+    let mut content = DbContent::default();
+    for chunk in ids.chunks(900) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let query = format!(
+            "SELECT id, session_id, COALESCE(json_extract(data, '$.role'), '') FROM message WHERE session_id IN ({placeholders}) ORDER BY time_created ASC"
+        );
+        let mut stmt = conn.prepare(&query).ok()?;
+        let rows = stmt
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .ok()?;
+        for row in rows {
+            let (msg_id, session_id, role) = row.ok()?;
+            content
+                .messages_by_session
+                .entry(session_id)
+                .or_default()
+                .push((msg_id, role));
+        }
+    }
+
+    for chunk in ids.chunks(900) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let query = format!(
+            "SELECT message_id, json_extract(data, '$.text') FROM part WHERE session_id IN ({placeholders}) AND json_extract(data, '$.type') = 'text' ORDER BY time_created ASC"
+        );
+        let mut stmt = conn.prepare(&query).ok()?;
+        let rows = stmt
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ))
+            })
+            .ok()?;
+        for row in rows {
+            let (message_id, text) = row.ok()?;
+            if !text.is_empty() {
+                content
+                    .texts_by_message
+                    .entry(message_id)
+                    .or_default()
+                    .push(text);
+            }
+        }
+    }
+    Some(content)
+}
+
+/// Loads OpenCode 2.x conversation rows for every session, or only `ids`.
+///
+/// Only user prompts and assistant text are indexed; reasoning, tool calls,
+/// synthetic and system context, shell output, and lifecycle rows are
+/// skipped. Like the 1.x loaders, a full rebuild skips unreadable rows while
+/// an incremental fetch fails on them, so it never replaces an indexed
+/// session with partial content.
+fn load_opencode_v2_content(conn: &Connection, ids: Option<&[String]>) -> Option<DbContent> {
+    const QUERY: &str = "SELECT id, session_id, type, data FROM session_message WHERE type IN ('user', 'assistant')";
+    let mut content = DbContent::default();
+    match ids {
+        None => collect_opencode_v2_rows(
+            conn,
+            &format!("{QUERY} ORDER BY session_id, seq"),
+            [],
+            false,
+            &mut content,
+        )?,
+        Some(ids) => {
+            for chunk in ids.chunks(900) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                collect_opencode_v2_rows(
+                    conn,
+                    &format!("{QUERY} AND session_id IN ({placeholders}) ORDER BY session_id, seq"),
+                    params_from_iter(chunk.iter()),
+                    true,
+                    &mut content,
+                )?;
+            }
+        }
+    }
+    Some(content)
+}
+
+fn collect_opencode_v2_rows(
+    conn: &Connection,
+    query: &str,
+    params: impl rusqlite::Params,
+    strict: bool,
+    content: &mut DbContent,
+) -> Option<()> {
+    let mut stmt = conn.prepare(query).ok()?;
+    let rows = stmt
+        .query_map(params, |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .ok()?;
+    for row in rows {
+        let parsed = row.ok().and_then(|(message_id, session_id, role, data)| {
+            let data = serde_json::from_str::<Value>(&data).ok()?;
+            Some((message_id, session_id, role, data))
+        });
+        let Some((message_id, session_id, role, data)) = parsed else {
+            if strict {
+                return None;
+            }
+            continue;
+        };
+        let texts = opencode_v2_message_texts(&role, &data);
+        if !texts.is_empty() {
+            content.texts_by_message.insert(message_id.clone(), texts);
+        }
+        content
+            .messages_by_session
+            .entry(session_id)
+            .or_default()
+            .push((message_id, role));
+    }
+    Some(())
+}
+
+/// User rows keep the prompt in `text`; assistant rows keep an ordered
+/// `content` array whose `text` items are the visible reply.
+fn opencode_v2_message_texts(role: &str, data: &Value) -> Vec<String> {
+    let texts: Vec<&str> = match role {
+        "user" => data
+            .get("text")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect(),
+        "assistant" => data
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect(),
+        _ => Vec::new(),
+    };
+    texts
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn opencode_activity_mtimes_by_session(
+    conn: &Connection,
+    schema: DbSchema,
+) -> HashMap<String, i64> {
     let mut mtimes = HashMap::new();
-    collect_opencode_activity_mtimes(conn, "message", &mut mtimes);
-    collect_opencode_activity_mtimes(conn, "part", &mut mtimes);
+    for table in schema.activity_tables() {
+        collect_opencode_activity_mtimes(conn, table, &mut mtimes);
+    }
     mtimes
 }
 
@@ -1723,5 +1878,286 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    const V2_SCHEMA: &str = r#"
+        CREATE TABLE session_v2 (
+            id TEXT PRIMARY KEY,
+            directory TEXT NOT NULL,
+            title TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL
+        );
+        CREATE TABLE session_message (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+    "#;
+
+    fn v2_adapter(temp: &tempfile::TempDir) -> (OpenCodeAdapter, Connection) {
+        let data_dir = temp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let db_path = data_dir.join("opencode.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(V2_SCHEMA).unwrap();
+        let adapter = OpenCodeAdapter {
+            data_dir,
+            db_path,
+            legacy_dir: temp.path().join("legacy"),
+        };
+        (adapter, conn)
+    }
+
+    fn insert_v2_session(conn: &Connection, id: &str, title: &str, time_ms: i64) {
+        conn.execute(
+            "INSERT INTO session_v2 (id, directory, title, time_created, time_updated)
+             VALUES (?1, '/work/opencode', ?2, ?3, ?3)",
+            (id, title, time_ms),
+        )
+        .unwrap();
+    }
+
+    fn insert_v2_message(
+        conn: &Connection,
+        session_id: &str,
+        seq: i64,
+        kind: &str,
+        time_ms: i64,
+        data: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+            (
+                format!("{session_id}-msg-{seq}"),
+                session_id,
+                kind,
+                seq,
+                time_ms,
+                data,
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn parses_v2_sqlite_conversation_text_only() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        insert_v2_session(&conn, "ses_v2", "OpenCode 2 thread", 1_720_000_000_000);
+        let rows = [
+            (
+                "synthetic",
+                json!({"text": "AGENTS.md instructions", "time": {"created": 1}}),
+            ),
+            (
+                "user",
+                json!({"text": "Find the flaky test", "files": [], "time": {"created": 2}}),
+            ),
+            (
+                "assistant",
+                json!({"content": [
+                    {"type": "reasoning", "text": "private reasoning"},
+                    {"type": "tool", "name": "bash", "state": {"output": "tool output"}},
+                    {"type": "text", "text": "The flaky test is in cli.rs"},
+                ]}),
+            ),
+            (
+                "shell",
+                json!({"command": "ls", "output": {"output": "shell output"}}),
+            ),
+            ("idle", json!({"outcome": "completed"})),
+        ];
+        for (seq, (kind, data)) in rows.iter().enumerate() {
+            insert_v2_message(
+                &conn,
+                "ses_v2",
+                seq as i64,
+                kind,
+                1_720_000_000_001 + seq as i64,
+                &data.to_string(),
+            );
+        }
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&KnownSessions::new());
+
+        assert_eq!(full.len(), 1);
+        assert_eq!(scan.new_or_modified.len(), 1);
+        for session in [&full[0], &scan.new_or_modified[0]] {
+            assert_eq!(session.id, "ses_v2");
+            assert_eq!(session.title, "OpenCode 2 thread");
+            assert_eq!(session.directory, "/work/opencode");
+            assert_eq!(
+                session.content,
+                "» Find the flaky test\n\n  The flaky test is in cli.rs"
+            );
+            assert_eq!(session.message_count, 2);
+        }
+        assert_eq!(full[0].mtime, scan.new_or_modified[0].mtime);
+        assert_eq!(
+            adapter.resume_command(&full[0], false),
+            vec!["opencode", "/work/opencode", "--session", "ses_v2"]
+        );
+    }
+
+    #[test]
+    fn v2_incremental_tracks_message_updates_and_deletions() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        for id in ["ses_a", "ses_b"] {
+            insert_v2_session(&conn, id, "Thread", 1_720_000_000_000);
+            insert_v2_message(
+                &conn,
+                id,
+                0,
+                "user",
+                1_720_000_000_001,
+                &json!({"text": format!("{id} prompt")}).to_string(),
+            );
+        }
+        let known: KnownSessions = adapter
+            .find_sessions()
+            .into_iter()
+            .map(|session| (("opencode".to_string(), session.id), session.mtime))
+            .collect();
+        assert_eq!(known.len(), 2);
+        assert!(
+            adapter
+                .find_sessions_incremental(&known)
+                .new_or_modified
+                .is_empty()
+        );
+
+        insert_v2_message(
+            &conn,
+            "ses_b",
+            1,
+            "assistant",
+            1_720_000_005_000,
+            &json!({"content": [{"type": "text", "text": "New reply"}]}).to_string(),
+        );
+        conn.execute("DELETE FROM session_v2 WHERE id = 'ses_a'", [])
+            .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].id, "ses_b");
+        assert!(scan.new_or_modified[0].content.contains("  New reply"));
+        assert_eq!(scan.deleted_ids, vec!["ses_a".to_string()]);
+    }
+
+    #[test]
+    fn v2_malformed_message_keeps_indexed_session_until_repaired() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        insert_v2_session(&conn, "ses_v2", "Thread", 1_720_000_000_000);
+        insert_v2_message(
+            &conn,
+            "ses_v2",
+            0,
+            "user",
+            1_720_000_000_001,
+            &json!({"text": "Original prompt"}).to_string(),
+        );
+        let mut known = KnownSessions::new();
+        known.insert(
+            ("opencode".to_string(), "ses_v2".to_string()),
+            adapter.find_sessions()[0].mtime,
+        );
+
+        insert_v2_message(&conn, "ses_v2", 1, "assistant", 1_720_000_005_000, "{");
+        let malformed = adapter.find_sessions_incremental(&known);
+
+        assert!(malformed.new_or_modified.is_empty());
+        assert!(malformed.deleted_ids.is_empty());
+        let rebuilt = adapter.find_sessions();
+        assert_eq!(rebuilt.len(), 1);
+        assert_eq!(rebuilt[0].content, "» Original prompt");
+
+        conn.execute(
+            "UPDATE session_message SET data = ?1 WHERE seq = 1",
+            [json!({"content": [{"type": "text", "text": "Repaired reply"}]}).to_string()],
+        )
+        .unwrap();
+        let repaired = adapter.find_sessions_incremental(&known);
+
+        assert_eq!(repaired.new_or_modified.len(), 1);
+        assert!(
+            repaired.new_or_modified[0]
+                .content
+                .contains("Repaired reply")
+        );
+        assert!(repaired.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn v2_tables_take_precedence_over_leftover_v1_tables() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        // OpenCode 2 copied `ses_copied` into `session_v2`, then the user
+        // deleted `ses_deleted` there. Both 1.x rows stay behind.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER,
+                time_updated INTEGER
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT,
+                session_id TEXT,
+                time_created INTEGER,
+                data TEXT
+            );
+            INSERT INTO session VALUES
+                ('ses_copied', 'Stale 1.x title', '/work/opencode', 1720000000000, 1720000000000),
+                ('ses_deleted', 'Deleted in 2.x', '/work/opencode', 1720000000000, 1720000000000);
+            INSERT INTO message VALUES
+                ('msg-copied', 'ses_copied', 1720000000001, '{"role":"user"}'),
+                ('msg-deleted', 'ses_deleted', 1720000000001, '{"role":"user"}');
+            INSERT INTO part VALUES
+                ('part-copied', 'msg-copied', 'ses_copied', 1720000000002, '{"type":"text","text":"Stale 1.x copy"}'),
+                ('part-deleted', 'msg-deleted', 'ses_deleted', 1720000000002, '{"type":"text","text":"Deleted prompt"}');
+            "#,
+        )
+        .unwrap();
+        insert_v2_session(&conn, "ses_copied", "Copied title", 1_720_000_000_000);
+        insert_v2_message(
+            &conn,
+            "ses_copied",
+            0,
+            "user",
+            1_720_000_000_001,
+            &json!({"text": "Copied prompt"}).to_string(),
+        );
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "ses_deleted".to_string()), 1.0);
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [&full, &scan.new_or_modified] {
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, "ses_copied");
+            assert_eq!(sessions[0].title, "Copied title");
+            assert_eq!(sessions[0].content, "» Copied prompt");
+        }
+        assert_eq!(scan.deleted_ids, vec!["ses_deleted".to_string()]);
     }
 }
