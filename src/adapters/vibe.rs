@@ -15,6 +15,12 @@ use super::shared::{
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
+mod unified;
+
+use unified::UnifiedParse;
+
+/// Reads both Vibe session stores under `~/.vibe/logs/session`: legacy
+/// `session_*` folders and the Unified Harness store in `unified/`.
 #[derive(Debug, Clone)]
 pub struct VibeAdapter {
     sessions_dir: PathBuf,
@@ -44,7 +50,7 @@ impl Adapter for VibeAdapter {
         let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
             return Vec::new();
         };
-        entries
+        let legacy = entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| {
@@ -54,8 +60,18 @@ impl Adapter for VibeAdapter {
                         .and_then(|n| n.to_str())
                         .is_some_and(|name| name.starts_with("session_"))
             })
-            .filter_map(|path| self.parse_session(&path))
-            .collect()
+            .filter_map(|path| self.parse_session(&path));
+        let unified = unified::scan_session_dirs(&self.sessions_dir)
+            .map(|(sessions, _)| sessions)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(
+                |(_, (path, _))| match unified::parse_session(self.name(), &path) {
+                    UnifiedParse::Session(session) => Some(session),
+                    UnifiedParse::Skip | UnifiedParse::Unreadable => None,
+                },
+            );
+        legacy.chain(unified).collect()
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
@@ -95,7 +111,13 @@ impl VibeAdapter {
             self.name(),
             known,
             self.scan_session_files(),
-            |path| self.parse_session_incremental(path),
+            |path| {
+                if unified::is_unified_session_dir(&self.sessions_dir, path) {
+                    unified::parse_session(self.name(), path).into()
+                } else {
+                    self.parse_session_incremental(path)
+                }
+            },
             on_session,
         )
     }
@@ -152,6 +174,16 @@ impl VibeAdapter {
                 session_id,
                 (session_dir.clone(), vibe_session_mtime(&session_dir)),
             );
+        }
+
+        match unified::scan_session_dirs(&self.sessions_dir) {
+            Some((unified_sessions, unified_complete)) => {
+                complete &= unified_complete;
+                current_files.extend(unified_sessions);
+            }
+            // Keep legacy updates, but an unlistable unified store must not
+            // look empty, or every indexed unified session would be deleted.
+            None => complete = false,
         }
 
         Some((current_files, complete))

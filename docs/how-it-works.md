@@ -29,7 +29,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
 | OpenCode | `~/.local/share/opencode/opencode.db` or legacy split JSON | Reads OpenCode 2 `session_v2` and `session_message` rows, or joins OpenCode 1 sessions, messages, and text parts. While OpenCode 2 is still copying 1.x history, it also reads the 1.x sessions not copied yet. Indexes user prompts and assistant text only |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
-| Vibe | `meta.json` and `messages.jsonl` | Reads metadata, role-based content, and auto-approve state |
+| Vibe | `~/.vibe/logs/session/unified/<id>/` or legacy `session_*/{meta.json,messages.jsonl}` | Reads the Unified Harness store's published history snapshot and replays journal updates, or reads legacy metadata and role-based content. Indexes user and assistant text, records the auto-approve agent, and skips subagent and ephemeral sessions |
 
 Grok discovery respects `GROK_HOME`. Kimi Code discovery uses `$KIMI_CODE_HOME/sessions/`, defaulting to `~/.kimi-code/sessions/`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 

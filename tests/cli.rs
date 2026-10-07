@@ -186,6 +186,61 @@ fn write_opencode_v2_session(home: &Path, id: &str, directory: &str, prompt: &st
         .unwrap();
 }
 
+/// Minimal Vibe Unified Harness store: a published generation with an inline
+/// history and a journal segment that appends the assistant reply.
+fn write_vibe_unified_session(home: &Path, id: &str, directory: &str, prompt: &str) {
+    let session_dir = home.join(".vibe/logs/session/unified").join(id);
+    let generation_dir = session_dir.join("generations/0000000000000001");
+    fs::create_dir_all(&generation_dir).unwrap();
+    fs::create_dir_all(session_dir.join("journal")).unwrap();
+    let message = |entry_id: &str, role: &str, text: &str| json!({"type": "message", "id": entry_id, "role": role, "content": [{"type": "text", "text": text}]});
+    fs::write(
+        generation_dir.join("runtime-state.json"),
+        json!({
+            "session_id": id,
+            "storage_lifetime": "persistent",
+            "session_metadata": {"cwd": directory, "agent_name": "auto-approve"},
+            "identity": {"kind": "root", "session_id": id},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        generation_dir.join("projection-state.json"),
+        json!({"snapshot": {
+            "session": {"id": id, "title": null, "createdAt": 1_784_110_800_000_i64},
+            "history": {"entries": [message("u1", "user", prompt)]},
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        generation_dir.join("manifest.json"),
+        json!({
+            "session_id": id,
+            "runtime_state": {"path": "runtime-state.json"},
+            "projection_state": {"path": "projection-state.json"},
+            "recovery_journal_segment": {"path": "journal/0000000000000002.jsonl"},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let reply = json!({
+        "type": "projection_delta",
+        "payload": {"delta": [{"op": "append_entry", "entry": message("a1", "assistant", "Journal reply")}]},
+    });
+    fs::write(
+        session_dir.join("journal/0000000000000002.jsonl"),
+        format!("{reply}\n"),
+    )
+    .unwrap();
+    fs::write(
+        session_dir.join("CURRENT"),
+        json!({"session_id": id, "generation": "0000000000000001"}).to_string(),
+    )
+    .unwrap();
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -421,6 +476,37 @@ fn lists_antigravity_cursor_and_grok_sessions() {
         );
     }
     assert!(stdout.contains("Showing 3 of 3 sessions"));
+}
+
+#[test]
+fn lists_vibe_unified_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_vibe_unified_session(
+        temp.path(),
+        "78d0ee76-eab3-2b24-2ce9-bcea786ae55b",
+        "/repo/vibe",
+        "Vibe unified binary coverage",
+    );
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--json", "journal reply"]));
+
+    assert!(stderr.is_empty());
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "vibe");
+    assert_eq!(sessions[0]["title"], "Vibe unified binary coverage");
+    assert_eq!(sessions[0]["directory"], "/repo/vibe");
+    assert_eq!(
+        sessions[0]["resume_command"],
+        json!([
+            "vibe",
+            "--agent",
+            "auto-approve",
+            "--resume",
+            "78d0ee76-eab3-2b24-2ce9-bcea786ae55b"
+        ])
+    );
 }
 
 #[test]
