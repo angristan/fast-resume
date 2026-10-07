@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 24;
 
-pub const AGENT_ORDER: [&str; 12] = [
+pub const AGENT_ORDER: [&str; 13] = [
     "antigravity",
     "claude",
     "codex",
@@ -21,6 +21,7 @@ pub const AGENT_ORDER: [&str; 12] = [
     "kimi",
     "opencode",
     "pi",
+    "pi-go",
     "vibe",
     "copilot-vscode",
 ];
@@ -105,6 +106,14 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
                 badge: "pi",
                 color: ratatui::style::Color::Rgb(151, 118, 255),
                 light_color: ratatui::style::Color::Rgb(100, 70, 195),
+            },
+        ),
+        (
+            "pi-go",
+            AgentConfig {
+                name: "pi-go",
+                badge: "pi-go",
+                color: ratatui::style::Color::Rgb(255, 140, 0),
             },
         ),
         (
@@ -230,6 +239,10 @@ pub fn pi_sessions_dir() -> PathBuf {
 
 fn pi_agent_dir() -> PathBuf {
     env_path("PI_CODING_AGENT_DIR").unwrap_or_else(|| home_dir().join(".pi").join("agent"))
+}
+
+pub fn pi_go_sessions_dir() -> PathBuf {
+    home_dir().join(".pi-go").join("sessions")
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
