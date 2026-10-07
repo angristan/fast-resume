@@ -1,3 +1,10 @@
+## [2.13.2](https://github.com/angristan/fast-resume/compare/v2.13.1...v2.13.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **vibe:** read Unified Harness session store ([385c5c2](https://github.com/angristan/fast-resume/commit/385c5c24fe2e29e16d99f853010f01cfad2b91dd))
+
 ## [2.13.1](https://github.com/angristan/fast-resume/compare/v2.13.0...v2.13.1) (2026-10-06)
 
 
