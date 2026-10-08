@@ -36,6 +36,8 @@ use layout::ScrollTarget;
 use render::draw;
 use state::{AppState, ScanMessage, SearchRequest, handle_scan_message};
 
+pub use state::YoloMode;
+
 pub use images::ImageProtocol;
 pub use theme::ThemeMode;
 
@@ -51,7 +53,7 @@ pub fn run_tui(
     query: String,
     agent_filter: Option<String>,
     directory_filter: Option<String>,
-    yolo: bool,
+    yolo_mode: YoloMode,
     image_protocol: Option<ImageProtocol>,
     theme_mode: ThemeMode,
 ) -> Result<TuiExit> {
@@ -93,7 +95,7 @@ pub fn run_tui(
         query,
         agent_filter,
         directory_filter,
-        yolo,
+        yolo_mode,
         engine,
         images,
         theme,
@@ -362,7 +364,7 @@ mod tests {
     use crate::search::SearchEngine;
 
     use super::input::handle_key;
-    use super::state::{AppState, SearchRequest};
+    use super::state::{AppState, SearchRequest, YoloMode};
     use super::theme::Theme;
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -476,7 +478,7 @@ mod tests {
             String::new(),
             None,
             directory_filter,
-            false,
+            YoloMode::Ask,
             SearchEngine::from_index(index.clone()),
             None,
             Theme::dark(),
@@ -1218,11 +1220,58 @@ mod tests {
     }
 
     #[test]
+    fn no_yolo_skips_modal_and_resumes_without_yolo_flags() {
+        let mut crush = session("crush-1");
+        crush.agent = "crush".to_string();
+        let mut state = test_state(vec![crush]);
+        state.yolo_mode = YoloMode::Never;
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        assert!(state.modal.is_none());
+        match exit {
+            super::TuiExit::Resume { command, directory } => {
+                assert_eq!(command, vec!["crush", "--session", "crush-1"]);
+                assert_eq!(directory, "/tmp/fast-resume");
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
+
+    #[test]
+    fn no_yolo_preserves_permission_mode_recorded_in_session() {
+        let mut codex = session("codex-1");
+        codex.agent = "codex".to_string();
+        codex.yolo = true;
+        let mut state = test_state(vec![codex]);
+        state.yolo_mode = YoloMode::Never;
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        assert!(state.modal.is_none());
+        match exit {
+            super::TuiExit::Resume { command, .. } => {
+                assert!(
+                    command
+                        .iter()
+                        .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"),
+                    "expected codex yolo flag in {command:?}"
+                );
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
+
+    #[test]
     fn enter_resumes_crush_sessions() {
         let mut crush = session("crush-1");
         crush.agent = "crush".to_string();
         let mut state = test_state(vec![crush]);
-        state.yolo = true;
+        state.yolo_mode = YoloMode::Always;
 
         let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap()

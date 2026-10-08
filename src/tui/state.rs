@@ -63,6 +63,19 @@ struct PreviewCache {
     lines: Vec<ratatui::text::Line<'static>>,
 }
 
+/// How the TUI decides whether to add auto-approve/skip-permissions flags
+/// when resuming an agent that supports them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum YoloMode {
+    /// Ask before resuming agents that do not record their permission mode.
+    #[default]
+    Ask,
+    /// Always add the flags without asking.
+    Always,
+    /// Never add the flags and never ask.
+    Never,
+}
+
 pub(super) struct AppState {
     pub(super) engine: SearchEngine,
     preview_cache: RefCell<Option<PreviewCache>>,
@@ -73,7 +86,7 @@ pub(super) struct AppState {
     pub(super) preview_scroll: u16,
     pub(super) agent_filter: Option<String>,
     pub(super) directory_filter: Option<String>,
-    pub(super) yolo: bool,
+    pub(super) yolo_mode: YoloMode,
     pub(super) scanning: bool,
     pub(super) status: String,
     pub(super) refresh_status: String,
@@ -117,7 +130,7 @@ impl AppState {
         query: String,
         agent_filter: Option<String>,
         directory_filter: Option<String>,
-        yolo: bool,
+        yolo_mode: YoloMode,
         engine: SearchEngine,
         images: Option<AgentImages>,
         theme: Theme,
@@ -132,7 +145,7 @@ impl AppState {
             preview_scroll: 0,
             agent_filter,
             directory_filter,
-            yolo,
+            yolo_mode,
             scanning: true,
             status: String::new(),
             refresh_status: "refreshing session stores".to_string(),

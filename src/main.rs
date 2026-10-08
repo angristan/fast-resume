@@ -12,7 +12,7 @@ use fast_resume::index::SessionIndex;
 use fast_resume::output::{DEFAULT_LIST_LIMIT, print_sessions_json, print_sessions_table};
 use fast_resume::search::SearchEngine;
 use fast_resume::stats::print_stats;
-use fast_resume::tui::{ThemeMode, TuiExit, run_tui};
+use fast_resume::tui::{ThemeMode, TuiExit, YoloMode, run_tui};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ImageProtocolArg {
@@ -82,6 +82,10 @@ struct Args {
     /// Resume sessions with auto-approve/skip-permissions flags where supported.
     #[arg(long)]
     yolo: bool,
+
+    /// Never ask about yolo mode; resume without auto-approve/skip-permissions flags.
+    #[arg(long, conflicts_with = "yolo")]
+    no_yolo: bool,
 
     /// Retained as a hidden no-op for compatibility with the Python CLI.
     #[arg(long = "no-version-check", hide = true)]
@@ -185,6 +189,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let yolo_mode = if args.yolo {
+        YoloMode::Always
+    } else if args.no_yolo {
+        YoloMode::Never
+    } else {
+        YoloMode::Ask
+    };
+
     let image_protocol = if args.no_images {
         None
     } else {
@@ -195,7 +207,7 @@ fn main() -> Result<()> {
         query,
         args.agent,
         args.directory,
-        args.yolo,
+        yolo_mode,
         image_protocol,
         args.theme.into(),
     )? {
@@ -380,6 +392,19 @@ mod tests {
 
         assert!(args._no_version_check);
         assert!(args.list_only);
+    }
+
+    #[test]
+    fn accepts_no_yolo_flag() {
+        let args = Args::try_parse_from(["fr", "--no-yolo"]).unwrap();
+
+        assert!(args.no_yolo);
+        assert!(!args.yolo);
+    }
+
+    #[test]
+    fn rejects_yolo_together_with_no_yolo() {
+        assert!(Args::try_parse_from(["fr", "--yolo", "--no-yolo"]).is_err());
     }
 
     #[test]
