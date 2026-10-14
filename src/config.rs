@@ -168,6 +168,10 @@ fn cache_dir_from(xdg_cache_home: Option<PathBuf>, home: &Path) -> PathBuf {
         .join("fast-resume")
 }
 
+pub fn config_dir() -> PathBuf {
+    home_dir().join(".config").join("fast-resume")
+}
+
 pub fn index_dir() -> PathBuf {
     cache_dir().join("tantivy_index")
 }
