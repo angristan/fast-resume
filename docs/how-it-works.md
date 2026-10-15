@@ -25,6 +25,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
+| fx | `~/.fx/sessions/<id>/{session.json,events.jsonl}` | Reads session metadata and the event log, indexes user, steering, and assistant text, excludes tool calls, tool results, and compaction summaries, and skips subagent sessions |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
 | OpenCode | `~/.local/share/opencode/opencode.db` or legacy split JSON | Reads OpenCode 2 `session_v2` and `session_message` rows, or joins OpenCode 1 sessions, messages, and text parts. While OpenCode 2 is still copying 1.x history, it also reads the 1.x sessions not copied yet. Indexes user prompts and assistant text only |
@@ -129,6 +130,7 @@ Each adapter returns the command needed to continue its session:
 | Copilot in VS Code | `code <directory>` | No change |
 | Crush | `crush --session <id>` | `crush --yolo --session <id>` |
 | Cursor CLI | `agent --resume <id>` | `agent --yolo --resume <id>` |
+| fx | `fx resume --id <id>` | No change |
 | Grok Build | `grok --resume <id>` | `grok --always-approve --resume <id>` |
 | Kimi Code | `kimi --session <id>` | `kimi --yolo --session <id>` |
 | OpenCode | `opencode <directory> --session <id>` | No change |

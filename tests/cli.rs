@@ -478,6 +478,65 @@ fn lists_antigravity_cursor_and_grok_sessions() {
     assert!(stdout.contains("Showing 3 of 3 sessions"));
 }
 
+fn write_fx_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home.join(".fx/sessions").join(id);
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::write(
+        session_dir.join("session.json"),
+        json!({
+            "schema_version": 4,
+            "id": id,
+            "workspace_root": directory,
+            "origin_workspace_root": directory,
+            "created_at_ms": 1792043605269i64,
+            "updated_at_ms": 1792043664676i64,
+            "title": prompt,
+            "subagent_child": false
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let events = session_dir.join("events.jsonl");
+    write_jsonl(
+        &events,
+        &[
+            json!({"schema_version": 3, "seq": 1, "timestamp_ms": 1792043664676i64, "event": {"user": {"text": prompt, "images": [], "work_id": null}}}),
+            json!({"schema_version": 3, "seq": 2, "timestamp_ms": 1792043664676i64, "event": {"assistant": {"text": "fx event log reply", "standalone_response": false}}}),
+        ],
+    );
+    events
+}
+
+#[test]
+fn lists_and_filters_fx_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_fx_session(
+        temp.path(),
+        "-H_3CwaOxcI3",
+        "/repo/fx",
+        "fx binary coverage",
+    );
+    write_pi_session(temp.path(), "pi123", "/repo/pi", "Pi neighbour session");
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list", "agent:fx"]));
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("fx binary coverage"));
+    assert!(!stdout.contains("Pi neighbour session"));
+    assert!(stdout.contains("Showing 1 of 1 sessions"));
+
+    let (stdout, _) = assert_success(run_fr(temp.path(), &["--json", "event log reply"]));
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "fx");
+    assert_eq!(sessions[0]["id"], "-H_3CwaOxcI3");
+    assert_eq!(sessions[0]["directory"], "/repo/fx");
+    assert_eq!(
+        sessions[0]["resume_command"],
+        json!(["fx", "resume", "--id", "-H_3CwaOxcI3"])
+    );
+}
+
 #[test]
 fn lists_vibe_unified_sessions() {
     let temp = TempDir::new().unwrap();
