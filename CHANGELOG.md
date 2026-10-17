@@ -1,3 +1,10 @@
+# [2.14.0](https://github.com/angristan/fast-resume/compare/v2.13.2...v2.14.0) (2026-10-17)
+
+
+### Features
+
+* **fx:** add fx session support ([#103](https://github.com/angristan/fast-resume/issues/103)) ([6a53b65](https://github.com/angristan/fast-resume/commit/6a53b65e2001ee20d70b780fd18c8b9cc9d3737a))
+
 ## [2.13.2](https://github.com/angristan/fast-resume/compare/v2.13.1...v2.13.2) (2026-10-07)
 
 
