@@ -2,6 +2,10 @@
 //! `session.json` holds metadata and `events.jsonl` is the append-only event
 //! log, which always starts at sequence 1 and so contains the full history.
 //! Older (schema v3) sessions keep their title in `display.json`.
+//!
+//! fx also has an experimental session store under `~/.fx/sessions/v2/`
+//! (`--sessions-v2`), with a different on-disk format. This adapter does not
+//! read it yet; the `v2` folder has no `events.jsonl`, so the scan skips it.
 
 use std::collections::HashMap;
 use std::fs;
@@ -14,8 +18,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, build_resume_command, incremental_parse_jsonl, incremental_scan,
-    json_file_has_parse_errors, timestamp_from_ms, value_i64_at,
+    IncrementalParse, JsonlHealth, JsonlHealthTracker, build_resume_command,
+    incremental_parse_with_health, incremental_scan, timestamp_from_ms, value_i64_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -93,12 +97,82 @@ impl FxAdapter {
     }
 
     fn parse_session(&self, events_path: &Path) -> Option<Session> {
-        let session_dir = events_path.parent()?;
-        let metadata: Value =
-            serde_json::from_slice(&fs::read(session_dir.join(FX_METADATA_FILE)).ok()?).ok()?;
+        self.parse_file(events_path).0
+    }
+
+    /// Parse a session and classify its event log's JSONL health in a single
+    /// pass over `events.jsonl`.
+    fn parse_file(&self, events_path: &Path) -> (Option<Session>, JsonlHealth) {
+        let Some(session_dir) = events_path.parent() else {
+            return (None, JsonlHealth::Invalid);
+        };
+        // A missing or half-written session.json is usually a write in
+        // progress. Report it as unreadable so refresh keeps the indexed copy.
+        let Some(metadata) = fs::read(session_dir.join(FX_METADATA_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        else {
+            return (None, JsonlHealth::Invalid);
+        };
+        // Subagent children are never listed, so incremental refresh sees them
+        // as new on every pass. Return before opening their event log to keep
+        // that cheap; `Clean` with no session makes refresh drop the id.
         if metadata.get("subagent_child").and_then(Value::as_bool) == Some(true) {
-            return None;
+            return (None, JsonlHealth::Clean);
         }
+        let Ok(file) = fs::File::open(events_path) else {
+            return (None, JsonlHealth::Invalid);
+        };
+
+        let mut health = JsonlHealthTracker::default();
+        let mut read_failed = false;
+        let mut transcript = FxTranscript::default();
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {}
+                // Unreadable bytes or invalid UTF-8: keep what was parsed for
+                // full scans, but report the log as invalid so incremental
+                // refresh retains the indexed copy.
+                Err(_) => {
+                    read_failed = true;
+                    break;
+                }
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<Value>(&line) else {
+                health.malformed_row();
+                continue;
+            };
+            health.valid_row();
+            transcript.add_record(&record);
+        }
+        let health = if read_failed {
+            JsonlHealth::Invalid
+        } else {
+            health.finish()
+        };
+        let session = self.build_session(session_dir, events_path, &metadata, transcript);
+        (session, health)
+    }
+
+    fn build_session(
+        &self,
+        session_dir: &Path,
+        events_path: &Path,
+        metadata: &Value,
+        transcript: FxTranscript,
+    ) -> Option<Session> {
+        let FxTranscript {
+            messages,
+            user_turns,
+            last_event_ms,
+        } = transcript;
         let id = metadata
             .get("id")
             .and_then(Value::as_str)
@@ -107,43 +181,9 @@ impl FxAdapter {
             .or_else(|| Some(session_dir.file_name()?.to_str()?.to_string()))?;
         let directory = ["workspace_root", "origin_workspace_root"]
             .into_iter()
-            .find_map(|field| non_empty_str(&metadata, field))
+            .find_map(|field| non_empty_str(metadata, field))
             .unwrap_or_default()
             .to_string();
-
-        let file = fs::File::open(events_path).ok()?;
-        let mut messages: Vec<(bool, String)> = Vec::new();
-        let mut user_turns = 0;
-        let mut last_event_ms = None;
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            let Ok(record) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            if let Some(timestamp) = value_i64_at(&record, &["timestamp_ms"]) {
-                last_event_ms = last_event_ms.max(Some(timestamp));
-            }
-            let Some(event) = record.get("event") else {
-                continue;
-            };
-            if let Some(text) = event_text(event, "user", "text") {
-                user_turns += 1;
-                messages.push((true, text));
-            } else if let Some(text) = event_text(event, "steering", "text") {
-                messages.push((true, text));
-            } else if let Some(text) = event_text(event, "assistant", "text")
-                .or_else(|| event_text(event, "interrupted", "partial_text"))
-            {
-                match messages.last_mut() {
-                    // One turn records an assistant event around every tool
-                    // call; keep the reply together in the preview.
-                    Some((false, current)) => {
-                        current.push_str("\n\n");
-                        current.push_str(&text);
-                    }
-                    _ => messages.push((false, text)),
-                }
-            }
-        }
 
         let first_user = messages
             .iter()
@@ -152,12 +192,12 @@ impl FxAdapter {
         let display: Option<Value> = fs::read(session_dir.join(FX_DISPLAY_FILE))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-        let title = non_empty_str(&metadata, "title")
+        let title = non_empty_str(metadata, "title")
             .or_else(|| display.as_ref().and_then(|d| non_empty_str(d, "title")))
             .unwrap_or(&first_user);
-        let timestamp = timestamp_from_ms(value_i64_at(&metadata, &["updated_at_ms"]))
+        let timestamp = timestamp_from_ms(value_i64_at(metadata, &["updated_at_ms"]))
             .or_else(|| timestamp_from_ms(last_event_ms))
-            .or_else(|| timestamp_from_ms(value_i64_at(&metadata, &["created_at_ms"])))
+            .or_else(|| timestamp_from_ms(value_i64_at(metadata, &["created_at_ms"])))
             .unwrap_or_else(|| file_timestamp(events_path));
         let content = messages
             .into_iter()
@@ -179,16 +219,46 @@ impl FxAdapter {
     }
 
     fn parse_incremental(&self, path: &Path) -> IncrementalParse {
-        let metadata = path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .join(FX_METADATA_FILE);
-        // A missing or half-written session.json is usually a write in
-        // progress; keep the indexed copy until it is readable again.
-        if json_file_has_parse_errors(&metadata) {
-            return IncrementalParse::Retain;
+        let (session, health) = self.parse_file(path);
+        incremental_parse_with_health(health, session, |_| true)
+    }
+}
+
+/// Conversation text collected from an fx event log.
+#[derive(Default)]
+struct FxTranscript {
+    /// `(is_user, text)` in log order; consecutive assistant events are merged.
+    messages: Vec<(bool, String)>,
+    user_turns: usize,
+    last_event_ms: Option<i64>,
+}
+
+impl FxTranscript {
+    fn add_record(&mut self, record: &Value) {
+        if let Some(timestamp) = value_i64_at(record, &["timestamp_ms"]) {
+            self.last_event_ms = self.last_event_ms.max(Some(timestamp));
         }
-        incremental_parse_jsonl(path, || self.parse_session(path))
+        let Some(event) = record.get("event") else {
+            return;
+        };
+        if let Some(text) = event_text(event, "user", "text") {
+            self.user_turns += 1;
+            self.messages.push((true, text));
+        } else if let Some(text) = event_text(event, "steering", "text") {
+            self.messages.push((true, text));
+        } else if let Some(text) = event_text(event, "assistant", "text")
+            .or_else(|| event_text(event, "interrupted", "partial_text"))
+        {
+            match self.messages.last_mut() {
+                // One turn records an assistant event around every tool
+                // call; keep the reply together in the preview.
+                Some((false, current)) => {
+                    current.push_str("\n\n");
+                    current.push_str(&text);
+                }
+                _ => self.messages.push((false, text)),
+            }
+        }
     }
 }
 
@@ -471,6 +541,23 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert_eq!(scan.deleted_ids, vec!["gone"]);
+    }
+
+    #[test]
+    fn incremental_refresh_drops_subagent_children_without_reading_their_log() {
+        let temp = tempdir().unwrap();
+        let mut child = metadata("child");
+        child["subagent_child"] = json!(true);
+        let events = write_session(temp.path(), "child", child, &conversation());
+        // A torn log would make refresh keep the indexed copy if it were read.
+        fs::write(&events, "{\"event\":{\"user\"").unwrap();
+
+        let mut known = KnownSessions::new();
+        known.insert(("fx".to_string(), "child".to_string()), 1.0);
+        let scan = adapter(&temp).find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert_eq!(scan.deleted_ids, vec!["child"]);
     }
 
     #[test]
