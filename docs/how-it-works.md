@@ -22,7 +22,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Claude Code | `~/.claude/projects/<project>/*.jsonl`, title sidecars, and `sessions-index.json` | Reads user and assistant entries, prefers explicit custom titles, and skips agent subprocess files |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records |
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
-| Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
+| Copilot in VS Code | VS Code chat-session JSON, or `.jsonl` session logs since VS Code 1.109 | Replays session logs and reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
 | fx | `~/.fx/sessions/<id>/{session.json,events.jsonl}` | Reads session metadata and the event log, indexes user, steering, and assistant text, excludes tool calls, tool results, and compaction summaries, and skips subagent sessions. The experimental `--sessions-v2` store under `~/.fx/sessions/v2/` is not read yet |
