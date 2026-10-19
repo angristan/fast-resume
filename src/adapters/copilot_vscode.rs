@@ -28,7 +28,12 @@ struct VscodeSessionFile {
 
 impl VscodeSessionFile {
     fn read_data(&self) -> Option<Value> {
-        serde_json::from_slice(&fs::read(&self.path).ok()?).ok()
+        let bytes = fs::read(&self.path).ok()?;
+        if self.path.extension().is_some_and(|ext| ext == "jsonl") {
+            replay_session_log(&bytes)
+        } else {
+            serde_json::from_slice(&bytes).ok()
+        }
     }
 
     fn session_id(&self, data: &Value) -> Option<String> {
@@ -188,7 +193,7 @@ impl CopilotVsCodeAdapter {
                     continue;
                 };
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if is_session_file(&path) {
                     files.push(VscodeSessionFile {
                         path,
                         workspace_dir: None,
@@ -227,7 +232,7 @@ impl CopilotVsCodeAdapter {
                         continue;
                     };
                     let path = chat_file.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    if is_session_file(&path) {
                         files.push(VscodeSessionFile {
                             path,
                             workspace_dir: Some(ws_dir.clone()),
@@ -300,8 +305,10 @@ impl CopilotVsCodeAdapter {
             title = truncate_title(messages[0].trim_start_matches("» ").trim(), 100, true);
         }
 
+        // VS Code 1.109+ dates a session by its last request, not `lastMessageDate`.
         let timestamp = timestamp_from_ms(
             data.get("lastMessageDate")
+                .or_else(|| requests.last().and_then(|request| request.get("timestamp")))
                 .or_else(|| data.get("creationDate"))
                 .and_then(Value::as_i64),
         )
@@ -338,6 +345,86 @@ fn workspace_directory(workspace_dir: &Path) -> String {
             .unwrap_or_default();
     }
     String::new()
+}
+
+/// VS Code 1.109+ writes `<id>.jsonl` session logs. It reads them before an
+/// older `<id>.json`, which it leaves in place.
+fn is_session_file(path: &Path) -> bool {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("jsonl") => true,
+        Some("json") => !path.with_extension("jsonl").exists(),
+        _ => false,
+    }
+}
+
+/// Replays a session log like VS Code's `ObjectMutationLog`: a `kind` 0
+/// snapshot, then set (1), push (2), and delete (3) entries at a key path. A
+/// push with `i` first truncates the array, which is how VS Code rewrites a
+/// streamed response. A delete sets `undefined`, which reads like null here.
+/// Unlike VS Code, an unparsable last line is skipped as a write in progress.
+fn replay_session_log(bytes: &[u8]) -> Option<Value> {
+    let mut state = None;
+    let mut lines = bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .peekable();
+    while let Some(line) = lines.next() {
+        let Ok(mut entry) = serde_json::from_slice::<Value>(line) else {
+            if lines.peek().is_none() && state.is_some() {
+                break;
+            }
+            return None;
+        };
+        let value = entry.get_mut("v").map(Value::take);
+        let path = entry.get_mut("k").map(Value::take).unwrap_or_default();
+        let path = path.as_array().map(Vec::as_slice).unwrap_or_default();
+        match entry.get("kind").and_then(Value::as_u64)? {
+            0 => state = Some(value?),
+            1 | 3 if path.is_empty() => {}
+            1 | 3 => *slot_at(state.as_mut()?, path)? = value.unwrap_or_default(),
+            2 => {
+                let slot = slot_at(state.as_mut()?, path)?;
+                if slot.is_null() {
+                    *slot = Value::Array(Vec::new());
+                }
+                let items = slot.as_array_mut()?;
+                if let Some(len) = entry.get("i").and_then(Value::as_u64) {
+                    items.truncate(usize::try_from(len).ok()?);
+                }
+                if let Some(Value::Array(pushed)) = value {
+                    items.extend(pushed);
+                }
+            }
+            _ => return None,
+        }
+    }
+    state
+}
+
+fn container_at<'a>(root: &'a mut Value, path: &[Value]) -> Option<&'a mut Value> {
+    path.iter().try_fold(root, |value, key| match key {
+        Value::String(key) => value.get_mut(key.as_str()),
+        Value::Number(index) => value.get_mut(usize::try_from(index.as_u64()?).ok()?),
+        _ => None,
+    })
+}
+
+/// The value at `path`, adding a null slot when only the last key is missing.
+fn slot_at<'a>(root: &'a mut Value, path: &[Value]) -> Option<&'a mut Value> {
+    let (last, parents) = path.split_last()?;
+    match (container_at(root, parents)?, last) {
+        (Value::Object(map), Value::String(key)) => {
+            Some(map.entry(key.clone()).or_insert(Value::Null))
+        }
+        (Value::Array(items), Value::Number(index)) => {
+            let index = usize::try_from(index.as_u64()?).ok()?;
+            if index == items.len() {
+                items.push(Value::Null);
+            }
+            items.get_mut(index)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -388,6 +475,80 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["code", "/work/vscode"]
         );
+    }
+
+    #[test]
+    fn replays_jsonl_session_log() {
+        let temp = tempdir().unwrap();
+        let workspace_dir = temp.path().join("workspaceStorage/ws1");
+        fs::create_dir_all(workspace_dir.join("chatSessions")).unwrap();
+        fs::write(
+            workspace_dir.join("workspace.json"),
+            json!({"folder": "file:///work/vscode"}).to_string(),
+        )
+        .unwrap();
+        let entries = [
+            json!({"kind": 0, "v": {"version": 3, "sessionId": "vscode-log", "creationDate": 1_720_000_000_000_i64, "requests": []}}),
+            json!({"kind": 2, "k": ["requests"], "v": [{"timestamp": 1_720_000_060_000_i64, "message": {"text": "what can you do?"}, "response": []}]}),
+            json!({"kind": 2, "k": ["requests", 0, "response"], "v": [{"value": "I can help"}]}),
+            // Streaming rewrites the growing last part.
+            json!({"kind": 2, "k": ["requests", 0, "response"], "i": 0, "v": [{"value": "I can help with code and tests."}]}),
+            json!({"kind": 1, "k": ["requests", 0, "modelState"], "v": {"value": 1}}),
+            json!({"kind": 1, "k": ["customTitle"], "v": "Removed title"}),
+            json!({"kind": 3, "k": ["customTitle"]}),
+        ];
+        let mut log: String = entries.iter().map(|entry| format!("{entry}\n")).collect();
+        // A write in progress.
+        log.push_str(r#"{"kind":1,"k":["custom"#);
+        fs::write(workspace_dir.join("chatSessions/vscode-log.jsonl"), log).unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir: temp.path().join("chat"),
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "vscode-log");
+        assert_eq!(sessions[0].title, "what can you do?");
+        assert_eq!(sessions[0].directory, "/work/vscode");
+        assert_eq!(
+            sessions[0].content,
+            "» what can you do?\n\n  I can help with code and tests."
+        );
+        assert_eq!(
+            sessions[0].timestamp,
+            timestamp_from_ms(Some(1_720_000_060_000)).unwrap()
+        );
+    }
+
+    #[test]
+    fn prefers_session_log_over_stale_json() {
+        let temp = tempdir().unwrap();
+        let chat_sessions_dir = temp.path().join("chat");
+        fs::create_dir_all(&chat_sessions_dir).unwrap();
+        let request = json!({"message": {"text": "Same session"}, "response": [{"value": "Done"}]});
+        fs::write(
+            chat_sessions_dir.join("vscode-1.json"),
+            json!({"sessionId": "vscode-1", "customTitle": "Before 1.109", "requests": [request]})
+                .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            chat_sessions_dir.join("vscode-1.jsonl"),
+            json!({"kind": 0, "v": {"sessionId": "vscode-1", "customTitle": "After 1.109", "requests": [request]}})
+                .to_string(),
+        )
+        .unwrap();
+
+        let adapter = CopilotVsCodeAdapter {
+            chat_sessions_dir,
+            workspace_storage_dir: temp.path().join("workspaceStorage"),
+        };
+        let sessions = adapter.find_sessions();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "After 1.109");
     }
 
     #[test]
@@ -532,6 +693,38 @@ mod tests {
 
         assert!(scan.new_or_modified.is_empty());
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn incremental_retains_malformed_session_log() {
+        let snapshot = json!({"kind": 0, "v": {"sessionId": "vscode-log", "requests": []}});
+        for log in [
+            // VS Code 1.109 to 1.116 could write a log without its snapshot.
+            format!(
+                "{}\n",
+                json!({"kind": 1, "k": ["customTitle"], "v": "No snapshot"})
+            ),
+            format!("{snapshot}\n{{\n{snapshot}\n"),
+        ] {
+            let temp = tempdir().unwrap();
+            let chat_sessions_dir = temp.path().join("chat");
+            fs::create_dir_all(&chat_sessions_dir).unwrap();
+            fs::write(chat_sessions_dir.join("vscode-log.jsonl"), log).unwrap();
+            let adapter = CopilotVsCodeAdapter {
+                chat_sessions_dir,
+                workspace_storage_dir: temp.path().join("workspaceStorage"),
+            };
+            let mut known = KnownSessions::new();
+            known.insert(
+                ("copilot-vscode".to_string(), "vscode-log".to_string()),
+                0.0,
+            );
+
+            let scan = adapter.find_sessions_incremental(&known);
+
+            assert!(scan.new_or_modified.is_empty());
+            assert!(scan.deleted_ids.is_empty());
+        }
     }
 
     #[test]
