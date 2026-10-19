@@ -168,13 +168,13 @@ fn write_opencode_v2_session(home: &Path, id: &str, directory: &str, prompt: &st
     let connection = rusqlite::Connection::open(data_dir.join("opencode.db")).unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
              CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
         )
         .unwrap();
     connection
         .execute(
-            "INSERT INTO session_v2 VALUES (?1, ?2, 'OpenCode 2 thread', 1784110800000, 1784110801000)",
+            "INSERT INTO session_v2 (id, directory, title, time_created, time_updated) VALUES (?1, ?2, 'OpenCode 2 thread', 1784110800000, 1784110801000)",
             (id, directory),
         )
         .unwrap();
@@ -592,6 +592,41 @@ fn lists_opencode_v2_sessions() {
         sessions[0]["resume_command"],
         json!(["opencode", "/repo/opencode", "--session", "ses_v2"])
     );
+}
+
+#[test]
+fn skips_subagent_sessions() {
+    let temp = TempDir::new().unwrap();
+    let main = write_codex_session(temp.path(), "codex-main", "/repo/codex", "Fix the bug");
+    write_jsonl(
+        &main.with_file_name("rollout-2026-06-28T12-00-00-codex-review.jsonl"),
+        &[
+            json!({"type": "session_meta", "payload": {"id": "codex-review", "source": {"subagent": "review"}}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Review the fix"}}),
+        ],
+    );
+    write_opencode_v2_session(temp.path(), "ses_main", "/repo/opencode", "Fix the bug");
+    rusqlite::Connection::open(temp.path().join(".local/share/opencode/opencode.db"))
+        .unwrap()
+        .execute_batch(
+            r#"INSERT INTO session_v2 (id, parent_id, directory, title, time_created, time_updated)
+               VALUES ('ses_child', 'ses_main', '/repo/opencode', 'Explore', 1784110800000, 1784110801000);
+               INSERT INTO session_message
+               VALUES ('msg-2', 'ses_child', 'user', 0, 1784110800500, 1784110800500, '{"text":"Explore"}');"#,
+        )
+        .unwrap();
+
+    let (stdout, _) = assert_success(run_fr(temp.path(), &["--json"]));
+
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let mut ids: Vec<_> = payload["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["codex-main", "ses_main"]);
 }
 
 #[test]

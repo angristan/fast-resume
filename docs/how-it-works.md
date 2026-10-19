@@ -20,15 +20,15 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | --- | --- | --- |
 | Antigravity CLI | `~/.gemini/antigravity-cli/conversations/<id>.db` or `brain/<id>/.system_generated/logs/*.jsonl` | Reads native protobuf-backed SQLite conversations with WAL support, falls back to generated transcripts, and excludes tool results |
 | Claude Code | `~/.claude/projects/<project>/*.jsonl`, title sidecars, and `sessions-index.json` | Reads user and assistant entries, prefers explicit custom titles, and skips agent subprocess files |
-| Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records |
+| Codex | `~/.codex/sessions/**/*.jsonl` | Reads `session_meta`, `response_item`, and `event_msg` records, and skips subagent sessions |
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles |
 | Copilot in VS Code | VS Code chat-session JSON | Reads request text, response values, and workspace references |
-| Crush | Per-project SQLite database | Queries sessions and messages and parses JSON message parts |
+| Crush | Per-project SQLite database | Queries sessions and messages, parses JSON message parts, and skips subagent sessions |
 | Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
 | fx | `~/.fx/sessions/<id>/{session.json,events.jsonl}` | Reads session metadata and the event log, indexes user, steering, and assistant text, excludes tool calls, tool results, and compaction summaries, and skips subagent sessions. The experimental `--sessions-v2` store under `~/.fx/sessions/v2/` is not read yet |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, and applies rewind markers |
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
-| OpenCode | `~/.local/share/opencode/opencode.db` or legacy split JSON | Reads OpenCode 2 `session_v2` and `session_message` rows, or joins OpenCode 1 sessions, messages, and text parts. While OpenCode 2 is still copying 1.x history, it also reads the 1.x sessions not copied yet. Indexes user prompts and assistant text only |
+| OpenCode | `~/.local/share/opencode/opencode.db` or legacy split JSON | Reads OpenCode 2 `session_v2` and `session_message` rows, or joins OpenCode 1 sessions, messages, and text parts. While OpenCode 2 is still copying 1.x history, it also reads the 1.x sessions not copied yet. Indexes user prompts and assistant text only, and skips subagent sessions |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Reads session headers, user and assistant messages, names, visible custom messages, and summaries |
 | Vibe | `~/.vibe/logs/session/unified/<id>/` or legacy `session_*/{meta.json,messages.jsonl}` | Reads the Unified Harness store's published history snapshot and replays journal updates, or reads legacy metadata and role-based content. Indexes user and assistant text, records the auto-approve agent, and skips subagent and ephemeral sessions |
 

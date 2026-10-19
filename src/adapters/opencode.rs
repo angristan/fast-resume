@@ -215,25 +215,33 @@ impl DbLayout {
         }
     }
 
-    /// Reads the session rows of every source. A full rebuild skips
+    /// Reads the session rows of every source, except subagent child sessions,
+    /// which OpenCode's session list also hides. A full rebuild skips
     /// unreadable rows; an incremental scan (`strict`) fails on them instead
     /// of reporting the missing sessions as deleted.
     fn session_rows(&self, conn: &Connection, strict: bool) -> Option<Vec<DbSessionRow>> {
         let mut sessions = Vec::new();
         for &source in self.sources() {
             let (query, params): (String, Vec<&dyn ToSql>) = match (self, source) {
-                (_, DbSchema::V2) => (format!("SELECT {SESSION_COLUMNS} FROM session_v2"), vec![]),
+                (_, DbSchema::V2) => (
+                    format!("SELECT {SESSION_COLUMNS} FROM session_v2 WHERE parent_id IS NULL"),
+                    vec![],
+                ),
                 (Self::Migrating { cursor }, DbSchema::V1) => (
                     // Only the 1.x sessions OpenCode has not copied yet. The
                     // `NOT IN` guard covers ids that were already present in
                     // `session_v2`, which the copy skips with `INSERT OR IGNORE`.
                     format!(
                         "SELECT {SESSION_COLUMNS} FROM session
-                         WHERE (?1 IS NULL OR id < ?1) AND id NOT IN (SELECT id FROM session_v2)"
+                         WHERE parent_id IS NULL AND (?1 IS NULL OR id < ?1)
+                         AND id NOT IN (SELECT id FROM session_v2)"
                     ),
                     vec![cursor as &dyn ToSql],
                 ),
-                (_, DbSchema::V1) => (format!("SELECT {SESSION_COLUMNS} FROM session"), vec![]),
+                (_, DbSchema::V1) => (
+                    format!("SELECT {SESSION_COLUMNS} FROM session WHERE parent_id IS NULL"),
+                    vec![],
+                ),
             };
             let mut stmt = conn.prepare(&query).ok()?;
             let rows = stmt
@@ -912,7 +920,7 @@ fn load_opencode_legacy_with_health(
             continue;
         };
         let id = string_at(&data, &["id"]);
-        if id.is_empty() {
+        if id.is_empty() || is_legacy_child_session(&data) {
             continue;
         }
         if only.is_some_and(|ids| !ids.contains(&id)) {
@@ -1069,12 +1077,20 @@ fn scan_opencode_legacy_sessions(legacy_dir: &Path) -> (HashMap<String, (PathBuf
             complete = false;
             continue;
         }
+        if is_legacy_child_session(&data) {
+            continue;
+        }
         let mtime = opencode_legacy_mtime(&data, path)
             .max(activity_mtimes.get(&id).copied().unwrap_or(0.0));
         current_files.insert(id, (path.to_path_buf(), mtime));
     }
 
     (current_files, complete)
+}
+
+/// Legacy task-tool subagent sessions record their parent as `parentID`.
+fn is_legacy_child_session(data: &Value) -> bool {
+    !string_at(data, &["parentID"]).is_empty()
 }
 
 fn opencode_legacy_activity_mtimes(legacy_dir: &Path) -> (HashMap<String, f64>, bool) {
@@ -1220,6 +1236,18 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            session_dir.join("ses_opencode-child.json"),
+            json!({
+                "id": "opencode-child",
+                "parentID": "opencode-1",
+                "title": "Explore the repo (@explore subagent)",
+                "directory": "/work/opencode",
+                "time": {"updated": 1_720_000_000_000_i64}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
             message_dir.join("msg_1.json"),
             json!({"id": "msg-1", "role": "user"}).to_string(),
         )
@@ -1245,6 +1273,13 @@ mod tests {
             adapter.resume_command(&sessions[0], false),
             vec!["opencode", "/work/opencode", "--session", "opencode-1"]
         );
+
+        // Indexed before subagent sessions were skipped.
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "opencode-child".to_string()), 1.0);
+        let scan = adapter.find_sessions_incremental(&known);
+        assert_eq!(session_ids(&scan.new_or_modified), ["opencode-1"]);
+        assert_eq!(scan.deleted_ids, ["opencode-child"]);
     }
 
     #[test]
@@ -1702,6 +1737,7 @@ mod tests {
             r#"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 title TEXT,
                 directory TEXT,
                 time_created INTEGER,
@@ -1765,6 +1801,7 @@ mod tests {
             r#"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 title TEXT,
                 directory TEXT,
                 time_created INTEGER,
@@ -1830,6 +1867,7 @@ mod tests {
             r#"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 title TEXT,
                 directory TEXT,
                 time_created INTEGER,
@@ -1937,6 +1975,7 @@ mod tests {
             r#"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 title TEXT,
                 directory TEXT,
                 time_created INTEGER,
@@ -1992,6 +2031,8 @@ mod tests {
         );
         CREATE TABLE session_v2 (
             id TEXT PRIMARY KEY,
+            parent_id TEXT,
+            fork_session_id TEXT,
             directory TEXT NOT NULL,
             title TEXT,
             time_created INTEGER NOT NULL,
@@ -2212,6 +2253,7 @@ mod tests {
             r#"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 title TEXT,
                 directory TEXT,
                 time_created INTEGER,
@@ -2237,7 +2279,8 @@ mod tests {
 
     fn insert_v1_session(conn: &Connection, id: &str, title: &str, prompt: &str) {
         conn.execute(
-            "INSERT INTO session VALUES (?1, ?2, '/work/opencode', 1720000000000, 1720000000000)",
+            "INSERT INTO session (id, title, directory, time_created, time_updated)
+             VALUES (?1, ?2, '/work/opencode', 1720000000000, 1720000000000)",
             (id, title),
         )
         .unwrap();
@@ -2286,6 +2329,45 @@ mod tests {
             .iter()
             .map(|session| (("opencode".to_string(), session.id.clone()), session.mtime))
             .collect()
+    }
+
+    #[test]
+    fn skips_subagent_child_sessions_but_keeps_forks() {
+        let temp = tempdir().unwrap();
+        let (adapter, conn) = v2_adapter(&temp);
+        for id in ["ses_main", "ses_child", "ses_fork"] {
+            insert_v2_session(&conn, id, "Thread", 1_720_000_000_000);
+            insert_v2_message(
+                &conn,
+                id,
+                0,
+                "user",
+                1_720_000_000_001,
+                &json!({"text": "Prompt"}).to_string(),
+            );
+        }
+        // OpenCode 2 has not copied these 1.x sessions yet.
+        create_v1_tables(&conn);
+        insert_v1_session(&conn, "ses_v1_main", "1.x thread", "Prompt");
+        insert_v1_session(&conn, "ses_v1_child", "1.x subagent", "Prompt");
+        set_v1_migration_state(&conn, json!({"phase": "sessions"}));
+        conn.execute_batch(
+            "UPDATE session_v2 SET parent_id = 'ses_main' WHERE id = 'ses_child';
+             UPDATE session_v2 SET fork_session_id = 'ses_main' WHERE id = 'ses_fork';
+             UPDATE session SET parent_id = 'ses_v1_main' WHERE id = 'ses_v1_child';",
+        )
+        .unwrap();
+        // Indexed before subagent sessions were skipped.
+        let mut known = KnownSessions::new();
+        known.insert(("opencode".to_string(), "ses_child".to_string()), 1.0);
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        let expected = ["ses_fork", "ses_main", "ses_v1_main"];
+        assert_eq!(session_ids(&full), expected);
+        assert_eq!(session_ids(&scan.new_or_modified), expected);
+        assert_eq!(scan.deleted_ids, ["ses_child"]);
     }
 
     #[test]

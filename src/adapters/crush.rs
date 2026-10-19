@@ -136,6 +136,7 @@ fn load_crush_db_checked(
     project_path: &str,
 ) -> Option<CrushLoad> {
     let conn = Connection::open(db_path).ok()?;
+    // Subagents run in child sessions, which Crush's own session list leaves out.
     let mut stmt = conn
         .prepare(
             r#"
@@ -145,7 +146,7 @@ fn load_crush_db_checked(
             m.updated_at as msg_updated_at
         FROM sessions s
         LEFT JOIN messages m ON m.session_id = s.id
-        WHERE s.message_count > 0
+        WHERE s.message_count > 0 AND s.parent_session_id IS NULL
         ORDER BY s.updated_at DESC, m.created_at ASC
         "#,
         )
@@ -423,6 +424,7 @@ mod tests {
             r#"
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY,
+                parent_session_id TEXT,
                 title TEXT,
                 message_count INTEGER,
                 updated_at INTEGER,
@@ -472,6 +474,59 @@ mod tests {
         assert_eq!(sessions[0].id, "crush-short");
         assert_eq!(sessions[0].title, "Hi");
         assert_eq!(sessions[0].content, "» Hi");
+    }
+
+    #[test]
+    fn skips_child_sessions_and_deletes_indexed_ones() {
+        let temp = tempdir().unwrap();
+        let projects_file = temp.path().join("projects.json");
+        let data_dir = temp.path().join("project-data");
+        fs::create_dir(&data_dir).unwrap();
+        let conn = Connection::open(data_dir.join("crush.db")).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                parent_session_id TEXT,
+                title TEXT,
+                message_count INTEGER,
+                updated_at INTEGER,
+                created_at INTEGER
+            );
+            CREATE TABLE messages (
+                session_id TEXT,
+                role TEXT,
+                parts TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            );
+            INSERT INTO sessions VALUES
+                ('crush-1', NULL, 'Fix the bug', 1, 1720000000, 1720000000),
+                ('msg-1$$call-1', 'crush-1', 'New Agent Session', 1, 1720000000, 1720000000);
+            INSERT INTO messages VALUES
+                ('crush-1', 'user', '[{"type":"text","data":{"text":"Fix it"}}]', 1720000000, 1720000000),
+                ('msg-1$$call-1', 'user', '[{"type":"text","data":{"text":"Find it"}}]', 1720000000, 1720000000);
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &projects_file,
+            json!({"projects": [{"path": "/work/crush", "data_dir": data_dir}]}).to_string(),
+        )
+        .unwrap();
+        let adapter = CrushAdapter { projects_file };
+        // Indexed before subagent sessions were skipped.
+        let mut known = KnownSessions::new();
+        known.insert(("crush".to_string(), "msg-1$$call-1".to_string()), 1.0);
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [&full, &scan.new_or_modified] {
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, "crush-1");
+        }
+        assert_eq!(scan.deleted_ids, ["msg-1$$call-1"]);
     }
 
     #[test]
@@ -536,6 +591,7 @@ mod tests {
             r#"
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY,
+                parent_session_id TEXT,
                 title TEXT,
                 message_count INTEGER,
                 updated_at INTEGER,
@@ -616,6 +672,7 @@ mod tests {
             r#"
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY,
+                parent_session_id TEXT,
                 title TEXT,
                 message_count INTEGER,
                 updated_at INTEGER,
