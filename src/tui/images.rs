@@ -144,7 +144,7 @@ fn env_contains(key: &str, needle: &str) -> bool {
 
 fn load_agent_protocols(picker: &Picker, size: Size) -> HashMap<String, Protocol> {
     let mut protocols = HashMap::new();
-    for agent in AGENT_ORDER {
+    for &agent in AGENT_ORDER.iter() {
         let Some(bytes) = agent_asset_bytes(agent) else {
             continue;
         };
@@ -199,6 +199,8 @@ fn agent_asset_bytes(agent: &str) -> Option<&'static [u8]> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::BUILTIN_AGENTS;
+
     use super::*;
 
     fn visible_size(image: &image::DynamicImage) -> (u32, u32) {
@@ -235,7 +237,7 @@ mod tests {
 
     #[test]
     fn logos_receive_the_same_vertical_compensation() {
-        for agent in AGENT_ORDER {
+        for agent in BUILTIN_AGENTS {
             let image =
                 ImageReader::new(Cursor::new(agent_asset_bytes(agent).expect("agent asset")))
                     .with_guessed_format()

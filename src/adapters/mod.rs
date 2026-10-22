@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::harness;
 use crate::model::{RawAdapterStats, Session};
 
 mod antigravity;
@@ -9,6 +10,7 @@ mod copilot_cli;
 mod copilot_vscode;
 mod crush;
 mod cursor;
+mod custom;
 mod fx;
 mod grok;
 mod kimi;
@@ -24,6 +26,7 @@ pub use copilot_cli::CopilotCliAdapter;
 pub use copilot_vscode::CopilotVsCodeAdapter;
 pub use crush::CrushAdapter;
 pub use cursor::CursorAdapter;
+pub use custom::CustomAdapter;
 pub use fx::FxAdapter;
 pub use grok::GrokAdapter;
 pub use kimi::KimiAdapter;
@@ -80,7 +83,7 @@ pub trait Adapter: Send {
 }
 
 pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
-    vec![
+    let mut adapters: Vec<Box<dyn Adapter>> = vec![
         Box::new(AntigravityAdapter::default()),
         Box::new(ClaudeAdapter::default()),
         Box::new(CodexAdapter::default()),
@@ -94,7 +97,13 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(OpenCodeAdapter::default()),
         Box::new(PiAdapter::default()),
         Box::new(VibeAdapter::default()),
-    ]
+    ];
+    adapters.extend(
+        harness::harnesses()
+            .iter()
+            .map(|harness| Box::new(CustomAdapter::new(harness)) as Box<dyn Adapter>),
+    );
+    adapters
 }
 
 pub fn adapter_for(agent: &str) -> Option<Box<dyn Adapter>> {

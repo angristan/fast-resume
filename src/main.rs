@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use fast_resume::adapters::all_adapters;
 use fast_resume::config::{VERSION, index_dir, is_agent};
+use fast_resume::harness;
 use fast_resume::index::SessionIndex;
 use fast_resume::output::{DEFAULT_LIST_LIMIT, print_sessions_json, print_sessions_table};
 use fast_resume::search::SearchEngine;
@@ -110,6 +111,9 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    if let Some(error) = harness::load_error() {
+        eprintln!("fr: ignoring custom harnesses: {error}");
+    }
     let args = Args::parse();
     if args.agent_context {
         print!("{}", include_str!("../skills/fast-resume/SKILL.md"));
