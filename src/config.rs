@@ -7,10 +7,13 @@ use serde_json::Value;
 
 use once_cell::sync::Lazy;
 
+use crate::harness;
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const INDEX_SCHEMA_VERSION: u32 = 24;
 
-pub const AGENT_ORDER: [&str; 13] = [
+/// Agents with a built-in adapter, alphabetical by visible badge.
+pub const BUILTIN_AGENTS: [&str; 13] = [
     "antigravity",
     "claude",
     "codex",
@@ -26,6 +29,19 @@ pub const AGENT_ORDER: [&str; 13] = [
     "copilot-vscode",
 ];
 
+/// Built-in agents and custom harnesses, alphabetical by visible badge.
+pub static AGENT_ORDER: Lazy<Vec<&'static str>> = Lazy::new(|| {
+    let mut order: Vec<&'static str> = BUILTIN_AGENTS.to_vec();
+    order.extend(
+        harness::harnesses()
+            .iter()
+            .map(|harness| harness.name.as_str()),
+    );
+    // Stable, so built-ins keep their order and ties stay in file order.
+    order.sort_by_key(|agent| AGENTS.get(agent).map_or(*agent, |config| config.badge));
+    order
+});
+
 #[derive(Debug, Clone, Copy)]
 pub struct AgentConfig {
     pub name: &'static str,
@@ -35,6 +51,22 @@ pub struct AgentConfig {
 }
 
 pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
+    let mut agents = builtin_agents();
+    for harness in harness::harnesses() {
+        agents.insert(
+            harness.name.as_str(),
+            AgentConfig {
+                name: harness.name.as_str(),
+                badge: harness.badge.as_str(),
+                color: harness.color,
+                light_color: harness.light_color,
+            },
+        );
+    }
+    agents
+});
+
+fn builtin_agents() -> HashMap<&'static str, AgentConfig> {
     HashMap::from([
         (
             "antigravity",
@@ -154,7 +186,7 @@ pub static AGENTS: Lazy<HashMap<&'static str, AgentConfig>> = Lazy::new(|| {
             },
         ),
     ])
-});
+}
 
 pub fn is_agent(value: &str) -> bool {
     AGENT_ORDER.contains(&value)
@@ -253,7 +285,7 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(|value| expand_tilde(&value))
 }
 
-fn expand_tilde(path: &str) -> PathBuf {
+pub(crate) fn expand_tilde(path: &str) -> PathBuf {
     if path == "~" {
         return home_dir();
     }
@@ -315,7 +347,7 @@ mod tests {
 
     #[test]
     fn agent_order_is_alphabetical_by_visible_badge() {
-        let badges: Vec<_> = AGENT_ORDER
+        let badges: Vec<_> = BUILTIN_AGENTS
             .iter()
             .map(|agent| AGENTS.get(agent).expect("known agent").badge)
             .collect();

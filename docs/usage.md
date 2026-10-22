@@ -264,6 +264,69 @@ opencode            9275    46.3 MB         72       1912   597.7 KB
 
 The shown index location is the default. When `XDG_CACHE_HOME` is an absolute path, fast-resume uses `$XDG_CACHE_HOME/fast-resume/tantivy_index` instead.
 
+## Custom harnesses
+
+fast-resume can index an agent without a built-in adapter when the agent stores each session as one JSON Lines file. Declare the agent as a custom harness in the config file:
+
+- `$FAST_RESUME_CONFIG`, when set
+- `$XDG_CONFIG_HOME/fast-resume/config.toml`, when `XDG_CONFIG_HOME` is an absolute path
+- `~/.config/fast-resume/config.toml` otherwise
+
+A harness names its session directory, its resume command, and how rows map to session fields. This example reads a store where each row has a `type` field:
+
+```toml
+[[harness]]
+name = "piti"                       # used in agent:piti and --agent piti
+badge = "piti"                      # optional, defaults to name
+color = "#9776ff"                   # optional; light_color is also accepted
+dir = "~/.local/share/piti/sessions"
+extension = "jsonl"                 # optional, default "jsonl"
+recursive = false                   # optional; true also reads subdirectories
+resume = ["piti", "--resume", "{id}"]
+yolo_resume = ["piti", "--yes-all", "--resume", "{id}"]  # optional
+
+[harness.format]
+kind = "type"                       # field that identifies the row kind
+timestamp = "timestamp"             # optional default timestamp for every row
+
+[harness.format.rows.session]       # rows where type == "session"
+id = "id"
+cwd = "cwd"
+
+[harness.format.rows.cwd]
+cwd = "path"
+
+[harness.format.rows.title]
+title = "title"
+
+[harness.format.rows.compaction]
+text = "summary"                    # indexed without a role
+
+[harness.format.rows.message]
+role = "message.role"
+text = "message.content[type=text].text"
+```
+
+Each key under `rows` is a value of the `kind` field. Rows of other kinds are skipped. A row mapping can read these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Session ID. The first value is used. Defaults to the file name without its extension |
+| `cwd` | Working directory. The last value is used |
+| `title` | Session title. The last value is used. Defaults to the first user message |
+| `timestamp` | Overrides `format.timestamp` for this row kind |
+| `role` | Message role. Rows with a role that is not listed in `roles` are skipped |
+| `roles` | Maps source role values to `user` or `assistant`. Defaults to `{ user = "user", assistant = "assistant" }` |
+| `text` | Text to index. Rows with `text` and no `role` are indexed but not counted as messages |
+
+Paths are object keys separated by dots, such as `message.role`. Arrays are read element by element. `key[field=value]` keeps only the elements of the `key` array whose `field` equals `value`; `key[field=a|b]` accepts several values. When `key` holds a string instead of an array, that string is used. Timestamps can be epoch seconds, epoch milliseconds, or RFC 3339 strings. The session time is the latest user or assistant message, or the first row timestamp, or the file modification time.
+
+`resume` and `yolo_resume` replace `{id}` with the session ID and `{directory}` with its working directory. The command runs in the session's working directory. Without `yolo_resume`, yolo mode does not apply to the harness.
+
+Refresh compares file modification times keyed by file name, so a harness whose session IDs match its file names avoids reopening unchanged files. A file that ends in an incomplete row keeps its previously indexed version until the row is complete.
+
+Harness names use lowercase letters, digits, and dashes, and cannot reuse a built-in agent name. If the config file cannot be parsed, fr prints the error, ignores every custom harness, and keeps their indexed sessions. Sessions of a harness removed from a valid config file are removed from the index on the next refresh.
+
 ## Terminal images
 
 Artwork is enabled automatically when the terminal exposes a supported image protocol. Use:

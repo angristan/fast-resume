@@ -865,3 +865,122 @@ fn json_empty_results_and_invalid_pagination_are_explicit() {
         assert!(!stderr.is_empty());
     }
 }
+
+const PITI_HARNESS: &str = r#"
+[[harness]]
+name = "piti"
+dir = "~/piti/sessions"
+resume = ["piti", "--resume", "{id}"]
+yolo_resume = ["piti", "--yes-all", "--resume", "{id}"]
+
+[harness.format]
+kind = "type"
+timestamp = "timestamp"
+
+[harness.format.rows.session]
+id = "id"
+cwd = "cwd"
+
+[harness.format.rows.title]
+title = "title"
+
+[harness.format.rows.message]
+role = "message.role"
+text = "message.content[type=text].text"
+"#;
+
+fn write_config(home: &Path, config: &str) {
+    let dir = home.join(".config").join("fast-resume");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.toml"), config).unwrap();
+}
+
+fn write_piti_session(home: &Path, id: &str, directory: &str, prompt: &str) {
+    let dir = home.join("piti").join("sessions");
+    fs::create_dir_all(&dir).unwrap();
+    write_jsonl(
+        &dir.join(format!("{id}.jsonl")),
+        &[
+            json!({"seq":0,"timestamp":1_790_000_000_000i64,"type":"session","id":id,"cwd":directory,"version":1}),
+            json!({"seq":1,"parent":0,"timestamp":1_790_000_001_000i64,"type":"message","message":{"role":"user","content":[{"type":"text","text":prompt}]}}),
+            json!({"seq":2,"parent":1,"timestamp":1_790_000_002_000i64,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"custom harness reply"}]}}),
+            json!({"seq":3,"parent":2,"timestamp":1_790_000_003_000i64,"type":"title","title":"named piti session"}),
+        ],
+    );
+}
+
+#[test]
+fn lists_and_resumes_custom_harness_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_config(temp.path(), PITI_HARNESS);
+    write_piti_session(
+        temp.path(),
+        "01a1piti",
+        "/repo/piti",
+        "Custom harness prompt",
+    );
+    write_pi_session(temp.path(), "pi123", "/repo/pi", "Pi neighbour session");
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list", "agent:piti"]));
+    assert!(stderr.is_empty(), "{stderr}");
+    assert!(stdout.contains("named piti session"));
+    assert!(!stdout.contains("Pi neighbour session"));
+
+    let (stdout, _) = assert_success(run_fr(
+        temp.path(),
+        &["--json", "--agent", "piti", "--yolo", "harness reply"],
+    ));
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "piti");
+    assert_eq!(sessions[0]["id"], "01a1piti");
+    assert_eq!(sessions[0]["title"], "named piti session");
+    assert_eq!(sessions[0]["directory"], "/repo/piti");
+    assert_eq!(
+        sessions[0]["resume_command"],
+        json!(["piti", "--yes-all", "--resume", "01a1piti"])
+    );
+}
+
+#[test]
+fn removing_a_custom_harness_drops_its_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_config(temp.path(), PITI_HARNESS);
+    write_piti_session(
+        temp.path(),
+        "01a1piti",
+        "/repo/piti",
+        "Custom harness prompt",
+    );
+    write_pi_session(temp.path(), "pi123", "/repo/pi", "Pi neighbour session");
+
+    let (stdout, _) = assert_success(run_fr(temp.path(), &["--list"]));
+    assert!(stdout.contains("named piti session"));
+
+    // An invalid config keeps the harness's indexed sessions.
+    write_config(temp.path(), "[[harness]]\nname = \"piti\"\n");
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list"]));
+    assert!(stderr.contains("ignoring custom harnesses"), "{stderr}");
+    assert!(stdout.contains("named piti session"));
+
+    write_config(temp.path(), "");
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list"]));
+    assert!(stderr.is_empty(), "{stderr}");
+    assert!(!stdout.contains("named piti session"));
+    assert!(stdout.contains("Pi neighbour session"));
+}
+
+#[test]
+fn invalid_config_is_reported_and_its_agents_are_unknown() {
+    let temp = TempDir::new().unwrap();
+    write_config(
+        temp.path(),
+        &PITI_HARNESS.replace("\"piti\"\n", "\"claude\"\n"),
+    );
+
+    let (_, stderr) = assert_failure(run_fr(temp.path(), &["--list", "--agent", "piti"]));
+    assert!(stderr.contains("ignoring custom harnesses"), "{stderr}");
+    assert!(stderr.contains("built-in agent"), "{stderr}");
+    assert!(stderr.contains("unknown agent: piti"), "{stderr}");
+}
