@@ -615,6 +615,43 @@ fn skips_subagent_sessions() {
                VALUES ('msg-2', 'ses_child', 'user', 0, 1784110800500, 1784110800500, '{"text":"Explore"}');"#,
         )
         .unwrap();
+    let grok_workspace = temp.path().join(".grok/sessions/%2Frepo%2Fgrok");
+    for (id, kind) in [("grok-main", "headless"), ("grok-child", "subagent")] {
+        let session_dir = grok_workspace.join(id);
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("summary.json"),
+            json!({"info": {"id": id, "cwd": "/repo/grok"}, "session_kind": kind}).to_string(),
+        )
+        .unwrap();
+        write_jsonl(
+            &session_dir.join("updates.jsonl"),
+            &[
+                json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Prompt"}}}}),
+            ],
+        );
+    }
+    let copilot = temp.path().join(".copilot/session-state");
+    for (id, detached) in [
+        ("copilot-main", None),
+        ("copilot-detached", Some("copilot-main")),
+    ] {
+        let session_dir = copilot.join(id);
+        fs::create_dir_all(&session_dir).unwrap();
+        let mut start = json!({"type": "session.start", "data": {"sessionId": id}});
+        if let Some(parent) = detached {
+            start["data"]["detachedFromSpawningParentSessionId"] = json!(parent);
+            fs::write(session_dir.join(".detached"), "").unwrap();
+        }
+        write_jsonl(
+            &session_dir.join("events.jsonl"),
+            &[
+                start,
+                json!({"type": "user.message", "data": {"content": "Prompt"}}),
+                json!({"type": "assistant.message", "data": {"content": "Done"}}),
+            ],
+        );
+    }
 
     let (stdout, _) = assert_success(run_fr(temp.path(), &["--json"]));
 
@@ -626,7 +663,7 @@ fn skips_subagent_sessions() {
         .map(|session| session["id"].as_str().unwrap())
         .collect();
     ids.sort_unstable();
-    assert_eq!(ids, ["codex-main", "ses_main"]);
+    assert_eq!(ids, ["codex-main", "copilot-main", "grok-main", "ses_main"]);
 }
 
 #[test]
