@@ -28,12 +28,18 @@ const READ_BUFFER_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone)]
 pub struct PiAdapter {
     sessions_dir: PathBuf,
+    /// Directory depth of transcripts: 2 for the default store, grouped by
+    /// working directory, and 1 for a custom store. Pi lists only that level,
+    /// so subagent sessions that extensions nest deeper stay out.
+    depth: usize,
 }
 
 impl Default for PiAdapter {
     fn default() -> Self {
+        let (sessions_dir, custom) = config::pi_sessions_dir();
         Self {
-            sessions_dir: config::pi_sessions_dir(),
+            sessions_dir,
+            depth: if custom { 1 } else { 2 },
         }
     }
 }
@@ -53,9 +59,28 @@ impl PiAdapter {
         )
     }
 
+    /// A custom store, with transcripts directly in `sessions_dir`.
     #[allow(dead_code)]
     pub fn new(sessions_dir: PathBuf) -> Self {
-        Self { sessions_dir }
+        Self {
+            sessions_dir,
+            depth: 1,
+        }
+    }
+
+    /// The default store, with transcripts grouped by working directory.
+    #[allow(dead_code)]
+    pub fn grouped(sessions_dir: PathBuf) -> Self {
+        Self {
+            sessions_dir,
+            depth: 2,
+        }
+    }
+
+    fn transcripts(&self) -> WalkDir {
+        WalkDir::new(&self.sessions_dir)
+            .min_depth(self.depth)
+            .max_depth(self.depth)
     }
 
     fn scan_session_files(&self) -> Option<(SessionFiles, bool)> {
@@ -68,7 +93,7 @@ impl PiAdapter {
             return None;
         }
 
-        for entry in WalkDir::new(&self.sessions_dir) {
+        for entry in self.transcripts() {
             let Ok(entry) = entry else {
                 complete = false;
                 continue;
@@ -184,7 +209,8 @@ impl Adapter for PiAdapter {
         if !self.sessions_dir.exists() {
             return Vec::new();
         }
-        let paths: Vec<PathBuf> = WalkDir::new(&self.sessions_dir)
+        let paths: Vec<PathBuf> = self
+            .transcripts()
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("jsonl"))
@@ -752,6 +778,51 @@ mod tests {
     }
 
     #[test]
+    fn scans_only_the_level_pi_lists() {
+        let temp = tempdir().unwrap();
+        let write = |path: PathBuf, id: &str| {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            write_jsonl(
+                &path,
+                &[
+                    json!({"type":"session","version":3,"id":id,"timestamp":"2026-07-15T10:00:00.000Z","cwd":"/repo/app"}),
+                    json!({"type":"message","id":"m1","parentId":null,"message":{"role":"user","content":"Prompt"}}),
+                ],
+            );
+        };
+        let grouped = temp.path().join("sessions");
+        let project = grouped.join("--repo-app--");
+        write(project.join("2026-07-15T10-00-00-000Z_main.jsonl"), "main");
+        // Subagent extensions nest child sessions under the parent's file stem.
+        write(
+            project.join("2026-07-15T10-00-00-000Z_main/run-1/run-0/session.jsonl"),
+            "nested",
+        );
+        write(
+            project.join("2026-07-15T10-00-00-000Z_main/tasks/task.jsonl"),
+            "task",
+        );
+        write(grouped.join("loose.jsonl"), "loose");
+        let custom = temp.path().join("custom");
+        write(custom.join("2026-07-15T10-00-00-000Z_flat.jsonl"), "flat");
+        write(custom.join("child/session.jsonl"), "child");
+        // Indexed before nested sessions were skipped.
+        let known: KnownSessions = [(("pi".to_string(), "nested".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let ids = |sessions: Vec<Session>| -> Vec<String> {
+            sessions.into_iter().map(|session| session.id).collect()
+        };
+        let grouped = PiAdapter::grouped(grouped);
+        let scan = grouped.find_sessions_incremental(&known);
+        assert_eq!(ids(grouped.find_sessions()), ["main"]);
+        assert_eq!(ids(scan.new_or_modified), ["main"]);
+        assert_eq!(scan.deleted_ids, ["nested"]);
+        assert_eq!(ids(PiAdapter::new(custom).find_sessions()), ["flat"]);
+    }
+
+    #[test]
     fn parses_pi_session_messages_and_metadata() {
         let temp = tempdir().unwrap();
         let sessions_dir = temp.path().join("sessions");
@@ -778,7 +849,7 @@ mod tests {
             ],
         );
 
-        let adapter = PiAdapter::new(sessions_dir);
+        let adapter = PiAdapter::grouped(sessions_dir);
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         let session = &sessions[0];

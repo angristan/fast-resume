@@ -222,9 +222,11 @@ pub fn opencode_dir() -> PathBuf {
     home_dir().join(".local").join("share").join("opencode")
 }
 
-pub fn pi_sessions_dir() -> PathBuf {
+/// Pi's session store, and whether it is a custom one. Pi keeps the default
+/// store grouped by working directory and a custom one flat.
+pub fn pi_sessions_dir() -> (PathBuf, bool) {
     if let Some(path) = env_path("PI_CODING_AGENT_SESSION_DIR") {
-        return path;
+        return (path, true);
     }
 
     let agent_dir = pi_agent_dir();
@@ -236,10 +238,10 @@ pub fn pi_sessions_dir() -> PathBuf {
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {
-        return expand_tilde(session_dir);
+        return (expand_tilde(session_dir), true);
     }
 
-    agent_dir.join("sessions")
+    (agent_dir.join("sessions"), false)
 }
 
 fn pi_agent_dir() -> PathBuf {
