@@ -140,6 +140,10 @@ impl CopilotCliAdapter {
     }
 
     fn parse_session(&self, path: &Path) -> Option<Session> {
+        // Detached maintenance runs, which Copilot hides from its resume list.
+        if path.with_file_name(".detached").exists() {
+            return None;
+        }
         let file = fs::File::open(path).ok()?;
         let mut session_id = copilot_fallback_session_id(path, &self.sessions_dir);
         let mut directory = String::new();
@@ -158,9 +162,23 @@ impl CopilotCliAdapter {
             };
             let msg_type = string_at(&entry, &["type"]);
             let data = entry.get("data").unwrap_or(&Value::Null);
+            // Inline subagent turns, which Copilot leaves out of the main conversation.
+            if [
+                string_at(&entry, &["agentId"]),
+                string_at(data, &["agentId"]),
+                string_at(data, &["parentToolCallId"]),
+            ]
+            .iter()
+            .any(|marker| !marker.is_empty())
+            {
+                continue;
+            }
 
             match msg_type.as_str() {
                 "session.start" => {
+                    if !string_at(data, &["detachedFromSpawningParentSessionId"]).is_empty() {
+                        return None;
+                    }
                     let id = string_at(data, &["sessionId"]);
                     if !id.is_empty() {
                         session_id = id;
@@ -284,6 +302,57 @@ mod tests {
             adapter.resume_command(&sessions[0], true),
             vec!["copilot", "--yolo", "--resume", "copilot-1"]
         );
+    }
+
+    #[test]
+    fn skips_detached_sessions_and_inline_subagent_turns() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("session-state");
+        let start = |id: &str| json!({"type": "session.start", "data": {"sessionId": id}});
+        let write = |id: &str, start: Value| {
+            let session_dir = sessions_dir.join(id);
+            fs::create_dir_all(&session_dir).unwrap();
+            write_jsonl(
+                &session_dir.join("events.jsonl"),
+                &[
+                    start,
+                    json!({"type": "user.message", "data": {"content": "Delegate a look at main.rs"}}),
+                    json!({"type": "user.message", "agentId": "agent-1", "data": {"content": "Subagent task"}}),
+                    json!({"type": "assistant.message", "agentId": "agent-1", "data": {"content": "Subagent answer", "parentToolCallId": "call-1"}}),
+                    json!({"type": "assistant.message", "data": {"content": "Done"}}),
+                ],
+            );
+            session_dir
+        };
+        let mut main = start("main");
+        // Only a parent session id marks a detached session.
+        main["data"]["detachedFromSpawningParentSessionId"] = Value::Null;
+        write("main", main);
+        let mut detached = start("detached");
+        detached["data"]["detachedFromSpawningParentSessionId"] = json!("main");
+        write("detached", detached);
+        // Copilot can add the marker file after the session started.
+        let marked = write("marked", start("marked"));
+        fs::write(marked.join(".detached"), "").unwrap();
+        let adapter = CopilotCliAdapter { sessions_dir };
+        // Indexed before detached sessions were skipped.
+        let known: KnownSessions = [(("copilot-cli".to_string(), "detached".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [full, scan.new_or_modified] {
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, "main");
+            assert_eq!(sessions[0].message_count, 2);
+            assert_eq!(
+                sessions[0].content,
+                "» Delegate a look at main.rs\n\n  Done"
+            );
+        }
+        assert_eq!(scan.deleted_ids, ["detached"]);
     }
 
     #[test]

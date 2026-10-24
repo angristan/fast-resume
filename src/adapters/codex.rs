@@ -10,9 +10,9 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    SessionFileScan, build_resume_command, codex_session_id_from_path, content_texts,
-    fallback_session_id, incremental_parse_jsonl, incremental_scan, parse_timestamp_seconds,
-    raw_stats_for_tree, string_at,
+    IncrementalParse, SessionFileScan, build_resume_command, codex_session_id_from_path,
+    content_texts, fallback_session_id, incremental_parse_jsonl, incremental_scan,
+    parse_timestamp_seconds, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -42,7 +42,14 @@ impl CodexAdapter {
             self.name(),
             known,
             self.scan_session_files(),
-            |path| incremental_parse_jsonl(path, || self.parse_session(path, &thread_names)),
+            |path| {
+                // Subagent rollouts are never indexed, so every refresh sees
+                // them as new. Skip them before the full-file health check.
+                if first_session_meta(path).is_some_and(|meta| is_subagent_meta(&meta)) {
+                    return IncrementalParse::Delete;
+                }
+                incremental_parse_jsonl(path, || self.parse_session(path, &thread_names))
+            },
             on_session,
         )
     }
@@ -67,6 +74,7 @@ impl CodexAdapter {
         let mut user_prompts = Vec::new();
         let mut response_user_prompts = Vec::new();
         let mut yolo = false;
+        let mut seen_meta = false;
 
         for line in BufReader::new(file).lines().map_while(Result::ok) {
             if line.trim().is_empty() {
@@ -80,6 +88,10 @@ impl CodexAdapter {
 
             match msg_type.as_str() {
                 "session_meta" => {
+                    if !seen_meta && is_subagent_meta(payload) {
+                        return None;
+                    }
+                    seen_meta = true;
                     if session_id.is_empty() {
                         session_id = string_at(payload, &["id"]);
                     }
@@ -198,24 +210,10 @@ impl CodexAdapter {
         if let Some(session_id) = codex_session_id_from_path(path) {
             return session_id;
         }
-        if let Ok(file) = fs::File::open(path) {
-            for line in BufReader::new(file).lines().map_while(Result::ok) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let Ok(data) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
-                if string_at(&data, &["type"]) == "session_meta" {
-                    let id = string_at(data.get("payload").unwrap_or(&Value::Null), &["id"]);
-                    if !id.is_empty() {
-                        return id;
-                    }
-                    break;
-                }
-            }
-        }
-        fallback_session_id(path)
+        first_session_meta(path)
+            .map(|meta| string_at(&meta, &["id"]))
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| fallback_session_id(path))
     }
 
     fn scan_session_files(&self) -> Option<SessionFileScan> {
@@ -300,6 +298,23 @@ impl Adapter for CodexAdapter {
     }
 }
 
+/// Payload of the rollout's own `session_meta`. Later ones can be copied from
+/// fork history.
+fn first_session_meta(path: &Path) -> Option<Value> {
+    let file = fs::File::open(path).ok()?;
+    BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+        .find(|data| string_at(data, &["type"]) == "session_meta")
+        .and_then(|mut data| data.get_mut("payload").map(Value::take))
+}
+
+/// Reviews, guardian checks, and spawned threads, which `codex resume` does not list.
+fn is_subagent_meta(meta: &Value) -> bool {
+    meta.pointer("/source/subagent").is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -352,6 +367,56 @@ mod tests {
             "rebuild mtimes must satisfy the incremental scan"
         );
         assert!(scan.deleted_ids.is_empty());
+    }
+
+    #[test]
+    fn skips_subagent_rollouts_but_keeps_forks() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let day_dir = sessions_dir.join("2026/06/21");
+        fs::create_dir_all(&day_dir).unwrap();
+        let review = json!({"id": "review", "source": {"subagent": "review"}});
+        for (id, metas) in [
+            ("main", vec![json!({"id": "main", "source": "cli"})]),
+            // A fork keeps a user source and copies the review's meta after its own.
+            (
+                "fork",
+                vec![
+                    json!({"id": "fork", "source": "cli", "forked_from_id": "review"}),
+                    review.clone(),
+                ],
+            ),
+            ("review", vec![review]),
+            (
+                "guardian",
+                vec![json!({"id": "guardian", "source": {"subagent": {"other": "guardian"}}})],
+            ),
+        ] {
+            let mut rows: Vec<_> = metas
+                .into_iter()
+                .map(|meta| json!({"type": "session_meta", "payload": meta}))
+                .collect();
+            rows.push(json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Prompt"}}));
+            write_jsonl(
+                &day_dir.join(format!("rollout-2026-06-21T10-00-00-{id}.jsonl")),
+                &rows,
+            );
+        }
+        let adapter = CodexAdapter::new(sessions_dir, temp.path().join("session_index.jsonl"));
+        // Indexed before subagent sessions were skipped; the stale mtime forces a re-read.
+        let known: KnownSessions = [(("codex".to_string(), "review".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [full, scan.new_or_modified] {
+            let mut ids: Vec<_> = sessions.into_iter().map(|session| session.id).collect();
+            ids.sort();
+            assert_eq!(ids, ["fork", "main"]);
+        }
+        assert_eq!(scan.deleted_ids, ["review"]);
     }
 
     #[test]
