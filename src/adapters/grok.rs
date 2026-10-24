@@ -14,7 +14,7 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     IncrementalParse, build_resume_command, incremental_parse_jsonl, incremental_scan,
-    json_file_has_parse_errors, parse_datetime, percent_decode, raw_stats_for_tree, string_at,
+    parse_datetime, percent_decode, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -267,9 +267,17 @@ impl GrokAdapter {
     }
 
     fn parse_incremental(&self, path: &Path) -> IncrementalParse {
-        if json_file_has_parse_errors(&path.parent().unwrap_or(Path::new("")).join("summary.json"))
-        {
+        let summary_path = path.parent().unwrap_or(Path::new("")).join("summary.json");
+        let Some(summary) = fs::read(summary_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        else {
             return IncrementalParse::Retain;
+        };
+        // Hidden sessions are never indexed, so every refresh sees them as new.
+        // Skip them before the full-file health check.
+        if is_hidden_session(&summary) {
+            return IncrementalParse::Delete;
         }
         incremental_parse_jsonl(path, || self.parse_session(path))
     }
@@ -543,6 +551,29 @@ mod tests {
             );
         }
         assert_eq!(scan.deleted_ids, ["subagent"]);
+    }
+
+    #[test]
+    fn keeps_indexed_session_while_summary_is_half_written() {
+        let temp = tempdir().unwrap();
+        let session_dir = temp.path().join("%2Fwork%2Fgrok").join("main");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("summary.json"), r#"{"info":"#).unwrap();
+        fs::write(
+            session_dir.join("updates.jsonl"),
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Prompt"}}}})
+                .to_string(),
+        )
+        .unwrap();
+        let adapter = GrokAdapter::new(temp.path().to_path_buf());
+        let known: KnownSessions = [(("grok".to_string(), "main".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
