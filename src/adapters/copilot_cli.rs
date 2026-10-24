@@ -163,15 +163,20 @@ impl CopilotCliAdapter {
             let msg_type = string_at(&entry, &["type"]);
             let data = entry.get("data").unwrap_or(&Value::Null);
             // Inline subagent turns, which Copilot leaves out of the main conversation.
-            if ["agentId", "parentToolCallId"].iter().any(|key| {
-                !string_at(&entry, &[key]).is_empty() || !string_at(data, &[key]).is_empty()
-            }) {
+            if [
+                string_at(&entry, &["agentId"]),
+                string_at(data, &["agentId"]),
+                string_at(data, &["parentToolCallId"]),
+            ]
+            .iter()
+            .any(|marker| !marker.is_empty())
+            {
                 continue;
             }
 
             match msg_type.as_str() {
                 "session.start" => {
-                    if data.get("detachedFromSpawningParentSessionId").is_some() {
+                    if !string_at(data, &["detachedFromSpawningParentSessionId"]).is_empty() {
                         return None;
                     }
                     let id = string_at(data, &["sessionId"]);
@@ -319,7 +324,10 @@ mod tests {
             );
             session_dir
         };
-        write("main", start("main"));
+        let mut main = start("main");
+        // Only a parent session id marks a detached session.
+        main["data"]["detachedFromSpawningParentSessionId"] = Value::Null;
+        write("main", main);
         let mut detached = start("detached");
         detached["data"]["detachedFromSpawningParentSessionId"] = json!("main");
         write("detached", detached);
