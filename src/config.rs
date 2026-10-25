@@ -222,8 +222,7 @@ pub fn opencode_dir() -> PathBuf {
     home_dir().join(".local").join("share").join("opencode")
 }
 
-/// Pi's session store, and whether it is a custom one. Pi keeps the default
-/// store grouped by working directory and a custom one flat.
+/// Pi's session store, and whether it is a custom one.
 pub fn pi_sessions_dir() -> (PathBuf, bool) {
     if let Some(path) = env_path("PI_CODING_AGENT_SESSION_DIR") {
         return (path, true);

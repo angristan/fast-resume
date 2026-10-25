@@ -681,7 +681,6 @@ fn skips_subagent_sessions() {
         let mut start = json!({"type": "session.start", "data": {"sessionId": id}});
         if let Some(parent) = detached {
             start["data"]["detachedFromSpawningParentSessionId"] = json!(parent);
-            fs::write(session_dir.join(".detached"), "").unwrap();
         }
         write_jsonl(
             &session_dir.join("events.jsonl"),

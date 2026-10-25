@@ -163,13 +163,9 @@ impl CopilotCliAdapter {
             let msg_type = string_at(&entry, &["type"]);
             let data = entry.get("data").unwrap_or(&Value::Null);
             // Inline subagent turns, which Copilot leaves out of the main conversation.
-            if [
-                string_at(&entry, &["agentId"]),
-                string_at(data, &["agentId"]),
-                string_at(data, &["parentToolCallId"]),
-            ]
-            .iter()
-            .any(|marker| !marker.is_empty())
+            if !string_at(&entry, &["agentId"]).is_empty()
+                || !string_at(data, &["agentId"]).is_empty()
+                || !string_at(data, &["parentToolCallId"]).is_empty()
             {
                 continue;
             }
@@ -249,6 +245,11 @@ impl CopilotCliAdapter {
     }
 
     fn parse_session_incremental(&self, path: &Path) -> IncrementalParse {
+        // Detached sessions are never indexed, so every refresh sees them as
+        // new. Skip them before the full-file health check.
+        if path.with_file_name(".detached").exists() {
+            return IncrementalParse::Delete;
+        }
         incremental_parse_jsonl(path, || self.parse_session(path))
     }
 }
@@ -318,7 +319,8 @@ mod tests {
                     start,
                     json!({"type": "user.message", "data": {"content": "Delegate a look at main.rs"}}),
                     json!({"type": "user.message", "agentId": "agent-1", "data": {"content": "Subagent task"}}),
-                    json!({"type": "assistant.message", "agentId": "agent-1", "data": {"content": "Subagent answer", "parentToolCallId": "call-1"}}),
+                    json!({"type": "assistant.message", "data": {"content": "Subagent answer", "agentId": "agent-1"}}),
+                    json!({"type": "assistant.message", "data": {"content": "Subagent note", "parentToolCallId": "call-1"}}),
                     json!({"type": "assistant.message", "data": {"content": "Done"}}),
                 ],
             );
