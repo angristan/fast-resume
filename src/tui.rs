@@ -431,6 +431,42 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "benchmark: cargo test --release bench_preview_render -- --ignored --nocapture"]
+    fn bench_preview_render() {
+        let mut content = String::new();
+        let mut rng = 0x1234_5678_9abc_def0u64;
+        while content.len() < 500_000 {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            content.push_str("authentication token login backend ");
+            let len = 4 + (rng % 9) as usize;
+            for _ in 0..len {
+                content.push((b'a' + (rng % 26) as u8) as char);
+            }
+            content.push(' ');
+            if rng.is_multiple_of(20) {
+                content.push_str("\n\n");
+            }
+        }
+        let mut session = session("big");
+        session.content = content;
+        let mut state = test_state(vec![session.clone()]);
+        state.visible = vec![session.clone()];
+        let mut total = 0.0;
+        for i in 0..30 {
+            state.query = format!("authenticaton{i}");
+            let start = std::time::Instant::now();
+            let lines = state.preview_lines(&session);
+            std::hint::black_box(&lines);
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            total += ms;
+            println!("BENCH\tpreview_query_{i}\t{ms:.2}\tms");
+        }
+        println!("BENCH\tpreview_avg\t{:.2}\tms", total / 30.0);
+    }
+
+    #[test]
     fn pending_search_requests_coalesce_to_latest() {
         let (tx, rx) = std::sync::mpsc::channel();
         tx.send(search_request(2, "second")).unwrap();
