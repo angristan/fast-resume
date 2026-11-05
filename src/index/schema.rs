@@ -6,6 +6,11 @@ use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, STORED, Schema, TEXT, TextFieldIndexing, TextOptions,
 };
 
+// Conversation content is indexed but not stored in the Tantivy document:
+// stored documents are decompressed whole, so keeping transcripts there made
+// every search hit pay for the full conversation. Transcripts live in the
+// content sidecar store (see content_store.rs) and load on demand.
+
 use crate::config::INDEX_SCHEMA_VERSION;
 
 const VERSION_FILE: &str = ".schema_version";
@@ -18,6 +23,7 @@ pub(super) struct IndexFields {
     pub(super) directory: Field,
     pub(super) agent: Field,
     pub(super) content: Field,
+    pub(super) content_len: Field,
     pub(super) timestamp: Field,
     pub(super) message_count: Field,
     pub(super) mtime: Field,
@@ -33,6 +39,7 @@ impl IndexFields {
             directory: schema.get_field("directory")?,
             agent: schema.get_field("agent")?,
             content: schema.get_field("content")?,
+            content_len: schema.get_field("content_len")?,
             timestamp: schema.get_field("timestamp")?,
             message_count: schema.get_field("message_count")?,
             mtime: schema.get_field("mtime")?,
@@ -50,7 +57,11 @@ pub(super) fn build_schema() -> Schema {
     schema.add_text_field("title", TEXT | STORED);
     schema.add_text_field("directory", raw_text_options());
     schema.add_text_field("agent", raw_text_options().set_fast(Some("raw")));
-    schema.add_text_field("content", TEXT | STORED);
+    schema.add_text_field("content", TEXT);
+    schema.add_u64_field(
+        "content_len",
+        NumericOptions::default().set_stored().set_fast(),
+    );
     schema.add_f64_field(
         "timestamp",
         NumericOptions::default()

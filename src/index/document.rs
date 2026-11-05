@@ -14,6 +14,7 @@ pub(super) fn session_document(fields: IndexFields, session: &Session) -> Tantiv
         fields.directory => session.directory.clone(),
         fields.agent => session.agent.clone(),
         fields.content => session.content.clone(),
+        fields.content_len => session.content_len as u64,
         fields.timestamp => datetime_to_seconds(session.timestamp),
         fields.message_count => session.message_count as i64,
         fields.mtime => session.mtime,
@@ -29,9 +30,13 @@ pub(super) fn doc_to_session(fields: IndexFields, doc: &TantivyDocument) -> Opti
         text(doc, fields.title).unwrap_or_default().to_string(),
         text(doc, fields.directory).unwrap_or_default().to_string(),
         Local.timestamp_opt(timestamp as i64, 0).single()?,
-        text(doc, fields.content).unwrap_or_default().to_string(),
+        String::new(),
         integer(doc, fields.message_count).unwrap_or(0) as usize,
     );
+    session.content_len = doc
+        .get_first(fields.content_len)
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
     session.mtime = number(doc, fields.mtime).unwrap_or(0.0);
     session.yolo = boolean(doc, fields.yolo).unwrap_or(false);
     Some(session)

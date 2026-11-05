@@ -21,11 +21,15 @@ pub(super) fn build(
     agent_filter: Option<Filter>,
     directory_filter: Option<Filter>,
     date_filter: Option<DateFilter>,
+    include_fuzzy: bool,
 ) -> Result<Box<dyn Query>> {
     let mut parts: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
     if !search_text.is_empty() {
-        parts.push((Occur::Must, text_query(index, fields, search_text)?));
+        parts.push((
+            Occur::Must,
+            text_query(index, fields, search_text, include_fuzzy)?,
+        ));
     }
 
     if let Some(query) = agent_query(fields, agent_filter) {
@@ -53,7 +57,12 @@ pub(super) fn build(
     })
 }
 
-fn text_query(index: &Index, fields: IndexFields, search_text: &str) -> Result<Box<dyn Query>> {
+fn text_query(
+    index: &Index,
+    fields: IndexFields,
+    search_text: &str,
+    include_fuzzy: bool,
+) -> Result<Box<dyn Query>> {
     let parser =
         QueryParser::for_index(index, vec![fields.title, fields.content, fields.directory]);
     let (exact, _) = parser.parse_query_lenient(search_text);
@@ -61,31 +70,32 @@ fn text_query(index: &Index, fields: IndexFields, search_text: &str) -> Result<B
 
     let mut alternatives: Vec<(Occur, Box<dyn Query>)> =
         vec![(Occur::Should, Box::new(boosted_exact))];
-    let fuzzy_parts: Vec<(Occur, Box<dyn Query>)> = search_text
-        .split_whitespace()
-        .filter(|term| term.chars().count() >= 3)
-        .map(|term| {
-            let term = term.to_lowercase();
-            let title =
-                FuzzyTermQuery::new_prefix(Term::from_field_text(fields.title, &term), 1, true);
-            let content =
-                FuzzyTermQuery::new_prefix(Term::from_field_text(fields.content, &term), 1, true);
-            let fields = BooleanQuery::new(vec![
-                (Occur::Should, Box::new(title) as Box<dyn Query>),
-                (Occur::Should, Box::new(content) as Box<dyn Query>),
-            ]);
-            (Occur::Must, Box::new(fields) as Box<dyn Query>)
-        })
-        .collect();
-
-    if !fuzzy_parts.is_empty() {
-        alternatives.push((Occur::Should, Box::new(BooleanQuery::new(fuzzy_parts))));
+    if include_fuzzy {
+        let fuzzy_parts: Vec<(Occur, Box<dyn Query>)> = search_text
+            .split_whitespace()
+            .filter(|term| term.chars().count() >= 3)
+            .map(|term| fuzzy_term(fields, term))
+            .collect();
+        if !fuzzy_parts.is_empty() {
+            alternatives.push((Occur::Should, Box::new(BooleanQuery::new(fuzzy_parts))));
+        }
     }
     if let Some(directory_query) = directory_text_query(fields, search_text)? {
         alternatives.push((Occur::Should, directory_query));
     }
 
     Ok(Box::new(BooleanQuery::new(alternatives)))
+}
+
+fn fuzzy_term(fields: IndexFields, term: &str) -> (Occur, Box<dyn Query>) {
+    let term = term.to_lowercase();
+    let title = FuzzyTermQuery::new_prefix(Term::from_field_text(fields.title, &term), 1, true);
+    let content = FuzzyTermQuery::new_prefix(Term::from_field_text(fields.content, &term), 1, true);
+    let fields = BooleanQuery::new(vec![
+        (Occur::Should, Box::new(title) as Box<dyn Query>),
+        (Occur::Should, Box::new(content) as Box<dyn Query>),
+    ]);
+    (Occur::Must, Box::new(fields) as Box<dyn Query>)
 }
 
 fn directory_text_query(fields: IndexFields, search_text: &str) -> Result<Option<Box<dyn Query>>> {

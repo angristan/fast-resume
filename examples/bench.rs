@@ -246,7 +246,17 @@ fn run(home: &Path, index_dir: &Path, changed: bool) {
         time1("rebuild", || index.rebuild(sessions).unwrap().sessions);
     }
 
-    time1("known_sessions", || index.known_sessions().unwrap().len());
+    let start = Instant::now();
+    let known = index.known_sessions().unwrap();
+    println!(
+        "BENCH1\tknown_sessions\t{:.2}\tms\t{}",
+        start.elapsed().as_secs_f64() * 1000.0,
+        known.len()
+    );
+    let (agent, id) = known.keys().next().unwrap().clone();
+    time1("content_for", || {
+        index.content_for(&agent, &id).unwrap().len()
+    });
     time1("refresh_no_change", || {
         index.refresh_incremental().unwrap().sessions
     });

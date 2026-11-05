@@ -63,9 +63,20 @@ struct PreviewCache {
     lines: Vec<ratatui::text::Line<'static>>,
 }
 
+/// Transcript loaded from the content sidecar store. Search hits carry no
+/// conversation text, so the preview fetches it once per session instead of
+/// decompressing every result's content on each search.
+struct ContentCache {
+    agent: String,
+    id: String,
+    mtime: f64,
+    content: String,
+}
+
 pub(super) struct AppState {
     pub(super) engine: SearchEngine,
     preview_cache: RefCell<Option<PreviewCache>>,
+    content_cache: RefCell<Option<ContentCache>>,
     pub(super) visible: Vec<Session>,
     pub(super) query: String,
     pub(super) cursor: usize,
@@ -95,6 +106,16 @@ impl AppState {
     /// content, so the result is cached per (session, mtime, query) instead
     /// of being recomputed on every frame while the user types.
     pub(super) fn preview_lines(&self, session: &Session) -> Vec<ratatui::text::Line<'static>> {
+        let owned;
+        let session = if session.content.is_empty() {
+            owned = Session {
+                content: self.preview_content(session),
+                ..session.clone()
+            };
+            &owned
+        } else {
+            session
+        };
         let mut cache = self.preview_cache.borrow_mut();
         if let Some(cached) = cache.as_ref()
             && cached.session_id == session.id
@@ -113,6 +134,28 @@ impl AppState {
         lines
     }
 
+    fn preview_content(&self, session: &Session) -> String {
+        let mut cache = self.content_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref()
+            && cached.agent == session.agent
+            && cached.id == session.id
+            && cached.mtime == session.mtime
+        {
+            return cached.content.clone();
+        }
+        let content = self
+            .engine
+            .session_content(&session.agent, &session.id)
+            .unwrap_or_default();
+        *cache = Some(ContentCache {
+            agent: session.agent.clone(),
+            id: session.id.clone(),
+            mtime: session.mtime,
+            content: content.clone(),
+        });
+        content
+    }
+
     pub(super) fn new(
         query: String,
         agent_filter: Option<String>,
@@ -125,6 +168,7 @@ impl AppState {
         let mut state = Self {
             engine,
             preview_cache: RefCell::new(None),
+            content_cache: RefCell::new(None),
             visible: Vec::new(),
             cursor: query.chars().count(),
             query,

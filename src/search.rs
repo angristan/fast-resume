@@ -50,6 +50,11 @@ impl SearchEngine {
         self.index.agents_with_sessions().unwrap_or_default()
     }
 
+    /// Load a session's full transcript from the content sidecar store.
+    pub fn session_content(&self, agent: &str, id: &str) -> Result<String> {
+        self.index.content_for(agent, id)
+    }
+
     pub fn search(
         &self,
         query: &str,

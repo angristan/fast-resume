@@ -16,6 +16,7 @@ use crate::config::index_dir;
 use crate::model::{Session, sort_and_dedupe_sessions};
 use crate::query::{Filter, parse_query};
 
+mod content_store;
 mod document;
 mod queries;
 mod schema;
@@ -28,6 +29,19 @@ pub const INDEX_REFRESH_BATCH_SIZE: usize = 500;
 /// How often a streaming refresh commits, so TUI results update while long
 /// refreshes run without paying a commit (fsync plus a new segment) per batch.
 const STREAMING_COMMIT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// One indexing arena per writer thread. Parsing is already parallel, so the
+/// writer uses the available cores too; the heap grows with the thread count.
+const WRITER_THREADS_MAX: usize = 8;
+const WRITER_HEAP_PER_THREAD: usize = 32_000_000;
+
+fn new_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(WRITER_THREADS_MAX);
+    index.writer_with_num_threads(threads, WRITER_HEAP_PER_THREAD * threads)
+}
 
 /// Text relevance remains the primary signal, while recent sessions receive a
 /// bounded boost that halves every two weeks. The multiplier starts at 2.5 for
@@ -142,6 +156,7 @@ impl SessionIndex {
             let _write_lock = IndexLock::acquire(&path, "write")?;
             fs::remove_dir_all(&path)
                 .with_context(|| format!("failed to clear stale index {}", path.display()))?;
+            content_store::remove_store(&path)?;
         }
 
         let index_schema = schema::build_schema();
@@ -177,8 +192,15 @@ impl SessionIndex {
     }
 
     fn rebuild_unlocked(&self, sessions: Vec<Session>) -> Result<RefreshSummary> {
-        let mut writer: IndexWriter<TantivyDocument> =
-            self.index.writer_with_num_threads(1, 128_000_000)?;
+        for session in &sessions {
+            content_store::write_content(
+                &self.path,
+                &session.agent,
+                &session.id,
+                &session.content,
+            )?;
+        }
+        let mut writer = new_writer(&self.index)?;
         writer.delete_all_documents()?;
         for session in &sessions {
             writer.add_document(document::session_document(self.fields, session))?;
@@ -229,6 +251,13 @@ impl SessionIndex {
     pub fn reload(&self) -> Result<()> {
         self.reader.reload()?;
         Ok(())
+    }
+
+    /// Load a session's full transcript from the content sidecar store.
+    /// Search hits only carry metadata; the TUI calls this for the session
+    /// being previewed.
+    pub fn content_for(&self, agent: &str, id: &str) -> Result<String> {
+        content_store::read_content(&self.path, agent, id)
     }
 
     /// Read `(agent, id) -> mtime` from columnar fast fields. This runs on
@@ -348,14 +377,36 @@ impl SessionIndex {
         }
 
         let searcher = self.searcher()?;
-        let (query, has_text) = self.build_search_query(query, agent_filter, directory_filter)?;
+        // Exact matches run first; the fuzzy expansion is only paid when the
+        // exact query comes up short, which is the common case while typing
+        // in a large index.
+        let (exact_query, has_text) =
+            self.build_search_query(query, agent_filter, directory_filter, false)?;
+        let hits = self.run_search(&searcher, &exact_query, has_text, offset, limit, now)?;
+        if has_text && hits.len() < limit {
+            let (fuzzy_query, _) =
+                self.build_search_query(query, agent_filter, directory_filter, true)?;
+            return self.run_search(&searcher, &fuzzy_query, has_text, offset, limit, now);
+        }
+        Ok(hits)
+    }
+
+    fn run_search(
+        &self,
+        searcher: &tantivy::Searcher,
+        query: &dyn tantivy::query::Query,
+        has_text: bool,
+        offset: usize,
+        limit: usize,
+        now: f64,
+    ) -> Result<Vec<SearchHit>> {
         if !has_text {
             let collector = TopDocs::with_limit(limit)
                 .and_offset(offset)
                 .order_by_fast_field::<f64>("timestamp", Order::Desc);
-            let hits: Vec<(Option<f64>, DocAddress)> = searcher.search(&query, &collector)?;
+            let hits: Vec<(Option<f64>, DocAddress)> = searcher.search(query, &collector)?;
             self.hits_to_sessions(
-                &searcher,
+                searcher,
                 hits.into_iter()
                     .map(|(score, addr)| (score.unwrap_or_default() as f32, addr)),
             )
@@ -378,9 +429,9 @@ impl SessionIndex {
                             )
                         }
                     });
-            let hits: Vec<((f64, f64), DocAddress)> = searcher.search(&query, &collector)?;
+            let hits: Vec<((f64, f64), DocAddress)> = searcher.search(query, &collector)?;
             self.hits_to_sessions(
-                &searcher,
+                searcher,
                 hits.into_iter()
                     .map(|((score, _timestamp), addr)| (score as f32, addr)),
             )
@@ -394,7 +445,7 @@ impl SessionIndex {
         directory_filter: Option<&str>,
     ) -> Result<usize> {
         let searcher = self.searcher()?;
-        let (query, _) = self.build_search_query(query, agent_filter, directory_filter)?;
+        let (query, _) = self.build_search_query(query, agent_filter, directory_filter, true)?;
         Ok(searcher.search(&query, &Count)?)
     }
 
@@ -431,6 +482,7 @@ impl SessionIndex {
             dirty: false,
             commit_interval,
             last_commit: Instant::now(),
+            pending_content_deletes: Vec::new(),
         }
     }
 
@@ -447,6 +499,7 @@ impl SessionIndex {
         query: &str,
         agent_filter: Option<&str>,
         directory_filter: Option<&str>,
+        include_fuzzy: bool,
     ) -> Result<(Box<dyn tantivy::query::Query>, bool)> {
         let parsed = parse_query(query);
         let effective_agent = agent_filter
@@ -471,6 +524,7 @@ impl SessionIndex {
             effective_agent,
             effective_dir,
             parsed.date,
+            include_fuzzy,
         )?;
         Ok((query, has_text))
     }
@@ -510,6 +564,7 @@ pub(crate) struct IndexUpdater<'a> {
     dirty: bool,
     commit_interval: Option<Duration>,
     last_commit: Instant,
+    pending_content_deletes: Vec<(String, String)>,
 }
 
 impl IndexUpdater<'_> {
@@ -518,6 +573,14 @@ impl IndexUpdater<'_> {
             return Ok(());
         }
         let fields = self.index.fields;
+        for session in sessions {
+            content_store::write_content(
+                &self.index.path,
+                &session.agent,
+                &session.id,
+                &session.content,
+            )?;
+        }
         let writer = self.writer()?;
         for session in sessions {
             writer.delete_term(Term::from_field_text(
@@ -537,6 +600,10 @@ impl IndexUpdater<'_> {
             return Ok(());
         }
         let fields = self.index.fields;
+        for id in ids {
+            self.pending_content_deletes
+                .push((agent.to_string(), id.clone()));
+        }
         let writer = self.writer()?;
         for id in ids {
             writer.delete_term(Term::from_field_text(
@@ -561,7 +628,7 @@ impl IndexUpdater<'_> {
     /// never pay for its indexing arena.
     fn writer(&mut self) -> Result<&mut IndexWriter<TantivyDocument>> {
         if self.writer.is_none() {
-            self.writer = Some(self.index.index.writer_with_num_threads(1, 128_000_000)?);
+            self.writer = Some(new_writer(&self.index.index)?);
         }
         self.writer.as_mut().context("index writer was not created")
     }
@@ -580,6 +647,9 @@ impl IndexUpdater<'_> {
         if let Some(writer) = self.writer.as_mut() {
             writer.commit()?;
             self.index.reader.reload()?;
+        }
+        for (agent, id) in self.pending_content_deletes.drain(..) {
+            content_store::delete_content(&self.index.path, &agent, &id);
         }
         self.dirty = false;
         self.last_commit = Instant::now();
@@ -858,6 +928,46 @@ mod tests {
                 .iter()
                 .any(|s| s.agent == "codex" && s.title == "Updated Codex")
         );
+    }
+
+    #[test]
+    fn search_hits_carry_metadata_and_content_loads_from_sidecar() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[session(
+                "a",
+                "claude",
+                "Auth bug",
+                "/work/api",
+                "token refresh",
+            )])
+            .unwrap();
+
+        let hits = index.search("token", None, None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].session.content.is_empty());
+        assert_eq!(hits[0].session.content_len, "token refresh".len());
+        assert_eq!(index.content_for("claude", "a").unwrap(), "token refresh");
+    }
+
+    #[test]
+    fn deleting_a_session_removes_its_sidecar_content() {
+        let temp = tempdir().unwrap();
+        let index = SessionIndex::open(temp.path().join("index")).unwrap();
+        index
+            .update_sessions(&[session("a", "claude", "Auth bug", "/work/api", "token")])
+            .unwrap();
+        assert!(index.content_for("claude", "a").is_ok());
+
+        let mut updater = index.updater(None);
+        updater
+            .delete_sessions("claude", &["a".to_string()])
+            .unwrap();
+        updater.finish().unwrap();
+
+        assert!(index.content_for("claude", "a").is_err());
+        assert_eq!(index.total_len().unwrap(), 0);
     }
 
     #[test]

@@ -13,6 +13,10 @@ pub struct Session {
     pub directory: String,
     pub timestamp: DateTime<Local>,
     pub content: String,
+    /// Byte length of `content`. Index-loaded sessions carry an empty
+    /// `content` (the transcript lives in the content sidecar store) but
+    /// still know its size through this field.
+    pub content_len: usize,
     pub message_count: usize,
     pub mtime: f64,
     pub yolo: bool,
@@ -28,13 +32,15 @@ impl Session {
         content: impl Into<String>,
         message_count: usize,
     ) -> Self {
+        let content = content.into();
         Self {
             id: id.into(),
             agent: agent.into(),
             title: title.into(),
             directory: directory.into(),
             timestamp,
-            content: content.into(),
+            content_len: content.len(),
+            content,
             message_count,
             mtime: 0.0,
             yolo: false,
@@ -100,7 +106,7 @@ pub fn sort_and_dedupe_sessions(sessions: Vec<Session>) -> Vec<Session> {
             Some(existing)
                 if existing.mtime >= session.mtime
                     && existing.timestamp >= session.timestamp
-                    && existing.content.len() >= session.content.len() => {}
+                    && existing.content_len >= session.content_len => {}
             _ => {
                 by_key.insert(key, session);
             }

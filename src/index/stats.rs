@@ -43,7 +43,7 @@ pub(super) fn build(sessions: Vec<Session>, path: &Path) -> IndexStats {
         *stats
             .content_bytes_by_agent
             .entry(session.agent.clone())
-            .or_default() += session.content.len() as u64;
+            .or_default() += session.content_len as u64;
 
         let dir = if session.directory.is_empty() {
             "n/a".to_string()
