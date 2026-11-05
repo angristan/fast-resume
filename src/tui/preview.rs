@@ -10,8 +10,10 @@ pub(super) fn render_preview_lines(
     session: &Session,
     query: &str,
     theme: &Theme,
+    content: &str,
+    content_lc: &str,
 ) -> Vec<Line<'static>> {
-    let snippet = preview_snippet(session, query);
+    let snippet = preview_snippet(content, query, content_lc);
     let agent = AGENTS.get(session.agent.as_str());
     let agent_label = agent.map(|agent| agent.badge).unwrap_or(&session.agent);
     let agent_color = agent
@@ -32,17 +34,16 @@ pub(super) fn render_preview_lines(
     lines
 }
 
-fn preview_snippet(session: &Session, query: &str) -> String {
+fn preview_snippet(content: &str, query: &str, content_lc: &str) -> String {
     if query.trim().is_empty() {
-        return truncate_chars(&session.content, 6_000);
+        return truncate_chars(content, 6_000);
     }
 
     let terms = preview_terms(query);
     if terms.is_empty() {
-        return truncate_chars(&session.content, 6_000);
+        return truncate_chars(content, 6_000);
     }
 
-    let content_lc = session.content.to_ascii_lowercase();
     let mut best = None;
     for term in &terms {
         if let Some(pos) = content_lc.find(term.as_str()) {
@@ -51,28 +52,28 @@ fn preview_snippet(session: &Session, query: &str) -> String {
     }
 
     if let Some(pos) = best {
-        let start = session.content[..pos]
+        let start = content[..pos]
             .char_indices()
             .rev()
             .nth(220)
             .map(|(idx, _)| idx)
             .unwrap_or(0);
-        let end = session.content[pos..]
+        let end = content[pos..]
             .char_indices()
             .nth(5_000)
             .map(|(idx, _)| pos + idx)
-            .unwrap_or(session.content.len());
+            .unwrap_or(content.len());
         let mut snippet = String::new();
         if start > 0 {
             snippet.push_str("...\n");
         }
-        snippet.push_str(&session.content[start..end]);
-        if end < session.content.len() {
+        snippet.push_str(&content[start..end]);
+        if end < content.len() {
             snippet.push_str("\n...");
         }
         snippet
     } else {
-        truncate_chars(&session.content, 6_000)
+        truncate_chars(content, 6_000)
     }
 }
 
@@ -528,7 +529,13 @@ mod tests {
         );
 
         let theme = Theme::dark();
-        let lines = render_preview_lines(&session, "", &theme);
+        let lines = render_preview_lines(
+            &session,
+            "",
+            &theme,
+            &session.content,
+            &session.content.to_ascii_lowercase(),
+        );
         let rendered = rendered_text(&lines);
 
         assert!(rendered.contains("» show rust"));
@@ -557,7 +564,13 @@ mod tests {
         let session = session_with_content("» inspect\n\n  ```rust\nfn main() {}\n```");
 
         let theme = Theme::dark();
-        let lines = render_preview_lines(&session, "agent:codex main", &theme);
+        let lines = render_preview_lines(
+            &session,
+            "agent:codex main",
+            &theme,
+            &session.content,
+            &session.content.to_ascii_lowercase(),
+        );
 
         let highlighted = lines
             .iter()
@@ -579,7 +592,13 @@ mod tests {
         let session = session_with_content("  readable assistant response");
         let theme = Theme::light();
 
-        let lines = render_preview_lines(&session, "", &theme);
+        let lines = render_preview_lines(
+            &session,
+            "",
+            &theme,
+            &session.content,
+            &session.content.to_ascii_lowercase(),
+        );
         let response = lines
             .iter()
             .flat_map(|line| line.spans.iter())

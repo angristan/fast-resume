@@ -451,7 +451,11 @@ mod tests {
         }
         let mut session = session("big");
         session.content = content;
-        let mut state = test_state(vec![session.clone()]);
+        let (state, index) = test_state_and_index(vec![session], None);
+        let engine = SearchEngine::from_index(index);
+        let session = engine.search("", None, None, 10).remove(0);
+        assert!(session.content.is_empty());
+        let mut state = state;
         state.visible = vec![session.clone()];
         let mut total = 0.0;
         for i in 0..30 {

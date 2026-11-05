@@ -146,8 +146,9 @@ fast-resume avoids a full parse on ordinary launches:
 - Adapters scan concurrently.
 - The current index is searchable before refresh finishes.
 - Launch reads indexed session markers from columnar fast fields, not from stored conversation content.
+- Conversation transcripts live in a sidecar store next to the index, so search hits never decompress full conversations; the preview loads one transcript on demand.
 - Unchanged sessions are not re-parsed.
-- Changed sessions flow through one index writer with periodic commits.
+- Changed sessions flow through one single-threaded index writer with periodic commits; bulk rebuilds use all cores.
 - Search and index reloads stay off the input path.
 - Obsolete search generations are discarded.
 

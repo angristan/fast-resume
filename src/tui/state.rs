@@ -71,6 +71,7 @@ struct ContentCache {
     id: String,
     mtime: f64,
     content: String,
+    content_lc: String,
 }
 
 pub(super) struct AppState {
@@ -106,15 +107,13 @@ impl AppState {
     /// content, so the result is cached per (session, mtime, query) instead
     /// of being recomputed on every frame while the user types.
     pub(super) fn preview_lines(&self, session: &Session) -> Vec<ratatui::text::Line<'static>> {
-        let owned;
-        let session = if session.content.is_empty() {
-            owned = Session {
-                content: self.preview_content(session),
-                ..session.clone()
-            };
-            &owned
+        let (content, content_lc) = if session.content.is_empty() {
+            self.preview_content(session)
         } else {
-            session
+            (
+                session.content.clone(),
+                session.content.to_ascii_lowercase(),
+            )
         };
         let mut cache = self.preview_cache.borrow_mut();
         if let Some(cached) = cache.as_ref()
@@ -124,7 +123,7 @@ impl AppState {
         {
             return cached.lines.clone();
         }
-        let lines = render_preview_lines(session, &self.query, &self.theme);
+        let lines = render_preview_lines(session, &self.query, &self.theme, &content, &content_lc);
         *cache = Some(PreviewCache {
             session_id: session.id.clone(),
             mtime: session.mtime,
@@ -134,26 +133,28 @@ impl AppState {
         lines
     }
 
-    fn preview_content(&self, session: &Session) -> String {
+    fn preview_content(&self, session: &Session) -> (String, String) {
         let mut cache = self.content_cache.borrow_mut();
         if let Some(cached) = cache.as_ref()
             && cached.agent == session.agent
             && cached.id == session.id
             && cached.mtime == session.mtime
         {
-            return cached.content.clone();
+            return (cached.content.clone(), cached.content_lc.clone());
         }
         let content = self
             .engine
             .session_content(&session.agent, &session.id)
             .unwrap_or_default();
+        let content_lc = content.to_ascii_lowercase();
         *cache = Some(ContentCache {
             agent: session.agent.clone(),
             id: session.id.clone(),
             mtime: session.mtime,
             content: content.clone(),
+            content_lc: content_lc.clone(),
         });
-        content
+        (content, content_lc)
     }
 
     pub(super) fn new(
