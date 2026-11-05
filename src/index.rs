@@ -30,17 +30,24 @@ pub const INDEX_REFRESH_BATCH_SIZE: usize = 500;
 /// refreshes run without paying a commit (fsync plus a new segment) per batch.
 const STREAMING_COMMIT_INTERVAL: Duration = Duration::from_secs(1);
 
-/// One indexing arena per writer thread. Parsing is already parallel, so the
-/// writer uses the available cores too; the heap grows with the thread count.
+/// One indexing arena per writer thread. Parsing is already parallel, so bulk
+/// rebuilds use the available cores too; the heap grows with the thread count.
 const WRITER_THREADS_MAX: usize = 8;
 const WRITER_HEAP_PER_THREAD: usize = 32_000_000;
 
-fn new_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
+/// Bulk writer for rebuilds: one thread per core. The incremental writer stays
+/// single-threaded so each streaming commit produces one segment.
+fn bulk_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
         .min(WRITER_THREADS_MAX);
-    index.writer_with_num_threads(threads, WRITER_HEAP_PER_THREAD * threads)
+    Ok(index.writer_with_num_threads(threads, WRITER_HEAP_PER_THREAD * threads)?)
+}
+
+/// Incremental writer: one thread keeps each commit to a single segment.
+fn new_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
+    Ok(index.writer_with_num_threads(1, 128_000_000)?)
 }
 
 /// Text relevance remains the primary signal, while recent sessions receive a
@@ -200,12 +207,13 @@ impl SessionIndex {
                 &session.content,
             )?;
         }
-        let mut writer = new_writer(&self.index)?;
+        let mut writer = bulk_writer(&self.index)?;
         writer.delete_all_documents()?;
         for session in &sessions {
             writer.add_document(document::session_document(self.fields, session))?;
         }
         writer.commit()?;
+        writer.wait_merging_threads()?;
         self.reader.reload()?;
         Ok(RefreshSummary {
             sessions: sessions.len(),
