@@ -147,7 +147,7 @@ fast-resume avoids a full parse on ordinary launches:
 - The current index is searchable before refresh finishes.
 - Launch reads indexed session markers from columnar fast fields, not from stored conversation content.
 - Unchanged sessions are not re-parsed.
-- Changed sessions flow through one index writer with periodic commits.
+- Changed sessions flow through one single-threaded index writer with periodic commits. Full rebuilds use up to eight indexing threads.
 - Search and index reloads stay off the input path.
 - Obsolete search generations are discarded.
 
