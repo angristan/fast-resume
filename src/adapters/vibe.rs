@@ -43,6 +43,10 @@ impl Adapter for VibeAdapter {
         true
     }
 
+    fn asks_yolo_confirmation(&self) -> bool {
+        false
+    }
+
     fn find_sessions(&self) -> Vec<Session> {
         if !self.sessions_dir.exists() {
             return Vec::new();
@@ -357,6 +361,7 @@ mod tests {
         );
 
         let adapter = VibeAdapter { sessions_dir };
+        assert!(!adapter.asks_yolo_confirmation());
         let sessions = adapter.find_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "vibe-1");
