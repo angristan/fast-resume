@@ -48,6 +48,12 @@ pub trait Adapter: Send {
     fn supports_yolo(&self) -> bool {
         false
     }
+    /// Whether the TUI asks for yolo confirmation before resuming this agent's
+    /// sessions. Agents that record the permission mode in the session itself
+    /// (Vibe) resume as recorded and skip the prompt.
+    fn asks_yolo_confirmation(&self) -> bool {
+        true
+    }
     fn find_sessions(&self) -> Vec<Session>;
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
         let sessions = self.find_sessions();

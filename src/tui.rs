@@ -1236,4 +1236,67 @@ mod tests {
             super::TuiExit::Quit => panic!("expected resume exit"),
         }
     }
+
+    #[test]
+    fn enter_resumes_vibe_session_without_yolo_modal() {
+        let vibe = session_for_agent("vibe-1", "vibe", "/tmp/fast-resume");
+        let mut state = test_state(vec![vibe]);
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        assert!(state.modal.is_none());
+        match exit {
+            super::TuiExit::Resume { command, directory } => {
+                assert_eq!(command, vec!["vibe", "--resume", "vibe-1"]);
+                assert_eq!(directory, "/tmp/fast-resume");
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
+
+    #[test]
+    fn enter_resumes_yolo_vibe_session_with_auto_approve() {
+        let mut vibe = session_for_agent("vibe-1", "vibe", "/tmp/fast-resume");
+        vibe.yolo = true;
+        let mut state = test_state(vec![vibe]);
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        assert!(state.modal.is_none());
+        match exit {
+            super::TuiExit::Resume { command, .. } => {
+                assert_eq!(
+                    command,
+                    vec!["vibe", "--agent", "auto-approve", "--resume", "vibe-1"]
+                );
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
+
+    #[test]
+    fn global_yolo_still_adds_auto_approve_for_vibe_sessions() {
+        let vibe = session_for_agent("vibe-1", "vibe", "/tmp/fast-resume");
+        let mut state = test_state(vec![vibe]);
+        state.yolo = true;
+
+        let exit = handle_key(&mut state, key(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap()
+            .unwrap();
+
+        assert!(state.modal.is_none());
+        match exit {
+            super::TuiExit::Resume { command, .. } => {
+                assert_eq!(
+                    command,
+                    vec!["vibe", "--agent", "auto-approve", "--resume", "vibe-1"]
+                );
+            }
+            super::TuiExit::Quit => panic!("expected resume exit"),
+        }
+    }
 }

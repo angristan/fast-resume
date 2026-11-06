@@ -92,10 +92,14 @@ fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<Tu
         return Ok(None);
     };
 
-    let supports_yolo = adapter_for(&session.agent)
+    let adapter = adapter_for(&session.agent);
+    let supports_yolo = adapter
         .as_ref()
         .is_some_and(|adapter| adapter.supports_yolo());
-    if state.yolo || session.yolo || !supports_yolo {
+    let asks_confirmation = adapter
+        .as_ref()
+        .is_some_and(|adapter| adapter.asks_yolo_confirmation());
+    if state.yolo || session.yolo || !supports_yolo || !asks_confirmation {
         return finish_action(state, action, state.yolo || session.yolo, session);
     }
 
