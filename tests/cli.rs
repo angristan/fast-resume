@@ -595,6 +595,46 @@ fn lists_opencode_v2_sessions() {
 }
 
 #[test]
+fn lists_copilot_vscode_session_logs() {
+    let temp = TempDir::new().unwrap();
+    let storage_dir = if cfg!(target_os = "macos") {
+        "Library/Application Support/Code"
+    } else {
+        ".config/Code"
+    };
+    let workspace_dir = temp
+        .path()
+        .join(storage_dir)
+        .join("User/workspaceStorage/ws1");
+    fs::create_dir_all(workspace_dir.join("chatSessions")).unwrap();
+    fs::write(
+        workspace_dir.join("workspace.json"),
+        json!({"folder": "file:///repo/vscode"}).to_string(),
+    )
+    .unwrap();
+    write_jsonl(
+        &workspace_dir.join("chatSessions/vscode-log.jsonl"),
+        &[
+            json!({"kind": 0, "v": {"version": 3, "sessionId": "vscode-log", "requests": []}}),
+            json!({"kind": 2, "k": ["requests"], "v": [{"message": {"text": "VS Code log binary coverage"}, "response": [{"value": "Done"}]}]}),
+        ],
+    );
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--json"]));
+
+    assert!(stderr.is_empty());
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent"], "copilot-vscode");
+    assert_eq!(sessions[0]["title"], "VS Code log binary coverage");
+    assert_eq!(
+        sessions[0]["resume_command"],
+        json!(["code", "/repo/vscode"])
+    );
+}
+
+#[test]
 fn json_output_is_stable_and_paginated() {
     let temp = TempDir::new().unwrap();
     for (id, prompt) in [
