@@ -1,3 +1,10 @@
+## [2.14.3](https://github.com/angristan/fast-resume/compare/v2.14.2...v2.14.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **tui:** skip yolo modal for vibe sessions ([#110](https://github.com/angristan/fast-resume/issues/110)) ([09345df](https://github.com/angristan/fast-resume/commit/09345df9455d6e3cffd0f2c01b3f3d2bc4505d4e))
+
 ## [2.14.2](https://github.com/angristan/fast-resume/compare/v2.14.1...v2.14.2) (2026-11-06)
 
 
