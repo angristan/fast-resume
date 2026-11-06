@@ -1,3 +1,10 @@
+## [2.14.2](https://github.com/angristan/fast-resume/compare/v2.14.1...v2.14.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **adapters:** skip subagent sessions in more agents ([#104](https://github.com/angristan/fast-resume/issues/104)) ([80d27e6](https://github.com/angristan/fast-resume/commit/80d27e61f1d59200520e8dd688ca6fe1e611c3c3))
+
 ## [2.14.1](https://github.com/angristan/fast-resume/compare/v2.14.0...v2.14.1) (2026-11-06)
 
 
