@@ -14,7 +14,7 @@ use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp,
 
 use super::shared::{
     IncrementalParse, build_resume_command, incremental_parse_jsonl, incremental_scan,
-    json_file_has_parse_errors, parse_datetime, percent_decode, raw_stats_for_tree, string_at,
+    parse_datetime, percent_decode, raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -108,6 +108,9 @@ impl GrokAdapter {
         let fallback_id = session_dir.file_name()?.to_string_lossy().to_string();
         let summary: Value =
             serde_json::from_slice(&fs::read(session_dir.join("summary.json")).ok()?).ok()?;
+        if is_hidden_session(&summary) {
+            return None;
+        }
         let id = summary
             .pointer("/info/id")
             .and_then(Value::as_str)
@@ -264,9 +267,17 @@ impl GrokAdapter {
     }
 
     fn parse_incremental(&self, path: &Path) -> IncrementalParse {
-        if json_file_has_parse_errors(&path.parent().unwrap_or(Path::new("")).join("summary.json"))
-        {
+        let summary_path = path.parent().unwrap_or(Path::new("")).join("summary.json");
+        let Some(summary) = fs::read(summary_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        else {
             return IncrementalParse::Retain;
+        };
+        // Hidden sessions are never indexed, so every refresh sees them as new.
+        // Skip them before the full-file health check.
+        if is_hidden_session(&summary) {
+            return IncrementalParse::Delete;
         }
         incremental_parse_jsonl(path, || self.parse_session(path))
     }
@@ -317,6 +328,21 @@ impl Adapter for GrokAdapter {
     fn raw_stats(&self) -> RawAdapterStats {
         raw_stats_for_tree(self.name(), &self.sessions_dir, "jsonl")
     }
+}
+
+/// Grok's `Summary::is_hidden`: subagent kinds are hidden from its session list
+/// unless `hidden` overrides them. Forks set `parent_session_id` too, so it is
+/// not a subagent marker.
+fn is_hidden_session(summary: &Value) -> bool {
+    summary
+        .get("hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            summary
+                .get("session_kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.starts_with("subagent"))
+        })
 }
 
 fn grok_content_text(content: &Value) -> String {
@@ -460,6 +486,94 @@ mod tests {
         assert!(session.content.contains("Replacement response"));
         assert!(!session.content.contains("Discard prompt"));
         assert!(!session.content.contains("Discard response"));
+    }
+
+    #[test]
+    fn skips_sessions_grok_hides() {
+        let temp = tempdir().unwrap();
+        let workspace = temp.path().join("%2Fwork%2Fgrok");
+        for (id, extra) in [
+            ("main", json!({})),
+            (
+                "fork",
+                json!({"session_kind": "fork", "parent_session_id": "main"}),
+            ),
+            ("headless", json!({"session_kind": "headless"})),
+            ("worktree", json!({"session_kind": "worktree"})),
+            ("subagent", json!({"session_kind": "subagent"})),
+            (
+                "subagent-fork",
+                json!({"session_kind": "subagent_fork", "parent_session_id": "main"}),
+            ),
+            (
+                "subagent-resume",
+                json!({"session_kind": "subagent_resume"}),
+            ),
+            (
+                "hidden-fork",
+                json!({"session_kind": "fork", "hidden": true}),
+            ),
+            (
+                "shown-subagent",
+                json!({"session_kind": "subagent", "hidden": false}),
+            ),
+        ] {
+            let session_dir = workspace.join(id);
+            fs::create_dir_all(&session_dir).unwrap();
+            let mut summary = json!({"info": {"id": id, "cwd": "/work/grok"}});
+            summary
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            fs::write(session_dir.join("summary.json"), summary.to_string()).unwrap();
+            fs::write(
+                session_dir.join("updates.jsonl"),
+                json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Prompt"}}}})
+                    .to_string(),
+            )
+            .unwrap();
+        }
+        let adapter = GrokAdapter::new(temp.path().to_path_buf());
+        // Indexed before subagent sessions were skipped.
+        let known: KnownSessions = [(("grok".to_string(), "subagent".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let full = adapter.find_sessions();
+        let scan = adapter.find_sessions_incremental(&known);
+
+        for sessions in [full, scan.new_or_modified] {
+            let mut ids: Vec<_> = sessions.into_iter().map(|session| session.id).collect();
+            ids.sort();
+            assert_eq!(
+                ids,
+                ["fork", "headless", "main", "shown-subagent", "worktree"]
+            );
+        }
+        assert_eq!(scan.deleted_ids, ["subagent"]);
+    }
+
+    #[test]
+    fn keeps_indexed_session_while_summary_is_half_written() {
+        let temp = tempdir().unwrap();
+        let session_dir = temp.path().join("%2Fwork%2Fgrok").join("main");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join("summary.json"), r#"{"info":"#).unwrap();
+        fs::write(
+            session_dir.join("updates.jsonl"),
+            json!({"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Prompt"}}}})
+                .to_string(),
+        )
+        .unwrap();
+        let adapter = GrokAdapter::new(temp.path().to_path_buf());
+        let known: KnownSessions = [(("grok".to_string(), "main".to_string()), 1.0)]
+            .into_iter()
+            .collect();
+
+        let scan = adapter.find_sessions_incremental(&known);
+
+        assert!(scan.new_or_modified.is_empty());
+        assert!(scan.deleted_ids.is_empty());
     }
 
     #[test]
