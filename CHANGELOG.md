@@ -1,3 +1,10 @@
+## [2.14.1](https://github.com/angristan/fast-resume/compare/v2.14.0...v2.14.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **copilot-vscode:** read VS Code 1.109+ session logs ([#105](https://github.com/angristan/fast-resume/issues/105)) ([1b0eac8](https://github.com/angristan/fast-resume/commit/1b0eac87399405d39a6b6ae5135a7bf16cb4c1a8))
+
 # [2.14.0](https://github.com/angristan/fast-resume/compare/v2.13.2...v2.14.0) (2026-10-17)
 
 
