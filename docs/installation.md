@@ -24,7 +24,27 @@ brew upgrade fast-resume
 
 ## Nix
 
-Run the source package without installing it:
+Since 2.14.0, fast-resume is packaged in Nixpkgs. Run it without installing:
+
+```bash
+nix run nixpkgs#fast-resume
+```
+
+Install it into a user profile:
+
+```bash
+nix profile install nixpkgs#fast-resume
+```
+
+On NixOS, add it to `environment.systemPackages` (or `home.packages`):
+
+```nix
+environment.systemPackages = [ pkgs.fast-resume ];
+```
+
+The Nixpkgs package is available on the unstable channel and will reach stable releases with the next NixOS release. On a stable NixOS release before that, use the flake below.
+
+Alternatively, run the source package from this repository without installing it:
 
 ```bash
 nix run github:angristan/fast-resume

@@ -32,9 +32,11 @@ brew tap angristan/tap
 brew install fast-resume
 ```
 
-Nix users can run directly from the source package:
+Nix users can install from Nixpkgs (since 2.14.0) or run directly from the source package:
 
 ```bash
+nix profile install nixpkgs#fast-resume
+# or
 nix run github:angristan/fast-resume
 ```
 
