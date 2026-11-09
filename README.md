@@ -21,7 +21,7 @@ Coding agents can resume previous sessions, but searching those sessions is ofte
 
 ## Supported agents
 
-Antigravity CLI, Claude Code, Codex, Copilot CLI, Copilot in VS Code, Crush, Cursor CLI, fx, Grok Build, Kimi Code, OpenCode, Pi, and Vibe. See [how it works](docs/how-it-works.md#session-adapters) for storage formats and resume behavior.
+Antigravity CLI, Claude Code, Codex, Copilot CLI, Copilot in VS Code, Crush, Cursor CLI, fx, Grok Build, Kimi Code, OpenCode, Pi, and Vibe. See [how it works](docs/how-it-works.md#session-adapters) for storage formats and resume behavior. Other agents that store sessions as JSON Lines files can be added as [custom harnesses](docs/usage.md#custom-harnesses).
 
 ## Install
 
@@ -82,13 +82,13 @@ Run `fr --agent-context` to print the bundled [Agent Skill](skills/fast-resume/S
 ## Documentation
 
 - [Installation](docs/installation.md) — packages, platforms, terminals, and upgrades
-- [Usage](docs/usage.md) — search syntax, CLI options, keybindings, yolo mode, and statistics
+- [Usage](docs/usage.md) — search syntax, CLI options, keybindings, yolo mode, custom harnesses, and statistics
 - [How it works](docs/how-it-works.md) — adapters, indexing, search, refresh safety, and resume handoff
 - [Development](docs/development.md) — local setup, validation, project layout, and release packaging
 
 ## Configuration
 
-No configuration is required. The Tantivy index follows the XDG Base Directory specification. It lives at `$XDG_CACHE_HOME/fast-resume/tantivy_index` when `XDG_CACHE_HOME` is an absolute path, or at `~/.cache/fast-resume/tantivy_index` by default. It is rebuilt automatically when its schema changes.
+No configuration is required. An optional config file declares [custom harnesses](docs/usage.md#custom-harnesses). The Tantivy index follows the XDG Base Directory specification. It lives at `$XDG_CACHE_HOME/fast-resume/tantivy_index` when `XDG_CACHE_HOME` is an absolute path, or at `~/.cache/fast-resume/tantivy_index` by default. It is rebuilt automatically when its schema changes.
 
 To reset it manually:
 
