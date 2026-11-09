@@ -20,6 +20,7 @@ use ratatui::layout::Rect;
 use crate::index::{INDEX_REFRESH_BATCH_SIZE, SessionIndex};
 use crate::model::Session;
 use crate::search::SearchEngine;
+use crate::settings::Settings;
 
 mod images;
 mod input;
@@ -34,7 +35,7 @@ use images::AgentImages;
 use input::handle_key;
 use layout::ScrollTarget;
 use render::draw;
-use state::{AppState, ScanMessage, SearchRequest, handle_scan_message};
+use state::{AppState, ScanMessage, SearchRequest, handle_scan_message, initial_preview_ratio};
 
 pub use images::ImageProtocol;
 pub use theme::ThemeMode;
@@ -86,6 +87,7 @@ pub fn run_tui(
         let _ = scan_tx.send(message);
     });
 
+    let settings = Settings::load();
     install_panic_hook();
     let mut terminal = setup_terminal()?;
     let images = image_protocol.and_then(AgentImages::load);
@@ -98,7 +100,16 @@ pub fn run_tui(
         images,
         theme,
     );
+    state.preview_ratio = initial_preview_ratio(settings.preview_ratio);
+    let loaded_ratio = state.preview_ratio;
+
     let result = run_loop(&mut terminal, &mut state, scan_rx);
+
+    if state.preview_ratio != loaded_ratio {
+        let mut settings = settings;
+        settings.preview_ratio = Some(state.preview_ratio);
+        settings.save();
+    }
     restore_terminal(&mut terminal)?;
     result
 }
@@ -254,7 +265,13 @@ fn handle_mouse(state: &mut AppState, mouse: MouseEvent, area: Rect) -> bool {
         _ => return false,
     };
 
-    match layout::scroll_target(area, state.show_preview, mouse.column, mouse.row) {
+    match layout::scroll_target(
+        area,
+        state.show_preview,
+        state.preview_ratio,
+        mouse.column,
+        mouse.row,
+    ) {
         Some(ScrollTarget::Results) => {
             state.move_selection(delta);
             true
@@ -1181,6 +1198,24 @@ mod tests {
             }
             super::TuiExit::Quit => panic!("expected resume exit"),
         }
+    }
+
+    #[test]
+    fn ctrl_arrows_resize_the_preview() {
+        let mut state = test_state(vec![session("a")]);
+        let default = state.preview_ratio;
+
+        handle_key(&mut state, key(KeyCode::Left, KeyModifiers::CONTROL)).unwrap();
+        assert!(
+            state.preview_ratio > default,
+            "ctrl+left should grow the preview"
+        );
+
+        handle_key(&mut state, key(KeyCode::Right, KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(
+            state.preview_ratio, default,
+            "ctrl+right should shrink it back"
+        );
     }
 
     #[test]
