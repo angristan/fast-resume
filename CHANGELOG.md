@@ -1,3 +1,10 @@
+## [2.14.4](https://github.com/angristan/fast-resume/compare/v2.14.3...v2.14.4) (2026-11-13)
+
+
+### Performance Improvements
+
+* **vibe:** skip hidden sessions before loading history ([#111](https://github.com/angristan/fast-resume/issues/111)) ([a7df5a5](https://github.com/angristan/fast-resume/commit/a7df5a502846ab7d6fce588514c931bdf1f77ab7))
+
 ## [2.14.3](https://github.com/angristan/fast-resume/compare/v2.14.2...v2.14.3) (2026-11-06)
 
 
