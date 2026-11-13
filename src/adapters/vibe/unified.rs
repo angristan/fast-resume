@@ -102,6 +102,18 @@ struct RuntimeState {
     identity: Option<SessionIdentity>,
 }
 
+impl RuntimeState {
+    /// Subagent children appear inside their parent's conversation, and Vibe
+    /// hides them from its own session picker. Ephemeral sessions are not
+    /// meant to be resumed.
+    fn is_hidden(&self) -> bool {
+        self.identity
+            .as_ref()
+            .is_some_and(|identity| identity.kind == "subagent")
+            || self.storage_lifetime.as_deref() == Some("ephemeral")
+    }
+}
+
 #[derive(Deserialize, Default)]
 struct SessionMetadata {
     #[serde(default)]
@@ -240,26 +252,15 @@ pub(super) fn session_mtime(session_dir: &Path) -> f64 {
 }
 
 pub(super) fn parse_session(agent: &'static str, session_dir: &Path) -> UnifiedParse {
-    let Some(stored) = load_store(session_dir) else {
-        return UnifiedParse::Unreadable;
-    };
     let StoredSession {
         session_id,
         runtime,
         projection,
-    } = stored;
-
-    // Subagent children appear inside their parent's conversation, and Vibe
-    // hides them from its own session picker. Ephemeral sessions are not meant
-    // to be resumed.
-    if runtime
-        .identity
-        .as_ref()
-        .is_some_and(|identity| identity.kind == "subagent")
-        || runtime.storage_lifetime.as_deref() == Some("ephemeral")
-    {
-        return UnifiedParse::Skip;
-    }
+    } = match load_store(session_dir) {
+        Some(StoreLoad::Visible(stored)) => stored,
+        Some(StoreLoad::Hidden) => return UnifiedParse::Skip,
+        None => return UnifiedParse::Unreadable,
+    };
 
     let mut messages = Vec::new();
     let mut first_user = String::new();
@@ -335,11 +336,24 @@ struct StoredSession {
     projection: Projection,
 }
 
+/// Result of loading a session store that could be read consistently.
+enum StoreLoad {
+    /// The runtime state marks the session as hidden from Vibe's picker. The
+    /// conversation was not loaded.
+    Hidden,
+    Visible(StoredSession),
+}
+
 /// Load the published generation and replay its journal. Any missing or
 /// inconsistent document yields `None` so callers keep indexed data; Vibe
 /// keeps the previous generation on disk while it publishes the next one, so
 /// a retry on the next refresh normally succeeds.
-fn load_store(session_dir: &Path) -> Option<StoredSession> {
+///
+/// Hidden sessions stop after the small runtime state document. Subagent
+/// children are never indexed, so incremental refresh has no marker for them
+/// and checks them again on every scan; loading their full history, chunks,
+/// and journal each time would dominate an otherwise idle refresh.
+fn load_store(session_dir: &Path) -> Option<StoreLoad> {
     let current: CurrentPointer = read_json(&session_dir.join("CURRENT"))?;
     let dir_name = session_dir.file_name()?.to_str()?;
     if current.session_id != dir_name || !is_plain_name(&current.generation) {
@@ -353,6 +367,9 @@ fn load_store(session_dir: &Path) -> Option<StoredSession> {
 
     let runtime: RuntimeState =
         read_json(&generation_dir.join(document_name(&manifest.runtime_state)?))?;
+    if runtime.is_hidden() {
+        return Some(StoreLoad::Hidden);
+    }
 
     let snapshot =
         read_json::<Value>(&generation_dir.join(document_name(&manifest.projection_state)?))?
@@ -375,11 +392,11 @@ fn load_store(session_dir: &Path) -> Option<StoredSession> {
     }
     replay_journal(&session_dir.join("journal").join(segment), &mut projection)?;
 
-    Some(StoredSession {
+    Some(StoreLoad::Visible(StoredSession {
         session_id: current.session_id,
         runtime,
         projection,
-    })
+    }))
 }
 
 /// Replay projection records from a journal segment. A missing segment means
@@ -690,6 +707,51 @@ mod tests {
 
         let ids: Vec<_> = sessions.iter().map(|session| session.id.as_str()).collect();
         assert_eq!(ids, ["fork"]);
+    }
+
+    #[test]
+    fn hidden_sessions_are_skipped_from_runtime_state_alone() {
+        let temp = tempdir().unwrap();
+        let sessions_dir = temp.path().join("sessions");
+        let prompt = [message("u1", "user", "Hidden prompt")];
+        // The runtime state is enough to hide these sessions, so the reader
+        // must not need their history: one lost its projection document and
+        // pooled chunks, the other has a journal that cannot be replayed.
+        let child = write_session(
+            &sessions_dir,
+            "child",
+            json!({"identity": {"kind": "subagent"}}),
+            &prompt,
+        );
+        fs::remove_file(
+            child
+                .join("generations")
+                .join(GENERATION)
+                .join("projection-state.json"),
+        )
+        .unwrap();
+        fs::remove_dir_all(child.join("chunks")).unwrap();
+        let scratch = write_session(
+            &sessions_dir,
+            "scratch",
+            json!({"storage_lifetime": "ephemeral"}),
+            &prompt,
+        );
+        fs::write(scratch.join(JOURNAL), "{\"type\":\"projection_delta\",\n").unwrap();
+
+        let mut known = KnownSessions::new();
+        for id in ["child", "scratch"] {
+            known.insert(("vibe".to_string(), id.to_string()), 0.0);
+        }
+
+        let scan = adapter(&sessions_dir).find_sessions_incremental(&known);
+
+        // Hidden is a definite answer, unlike an unreadable store, so stale
+        // documents for these IDs are removed instead of retained.
+        assert!(scan.new_or_modified.is_empty());
+        let mut deleted = scan.deleted_ids;
+        deleted.sort();
+        assert_eq!(deleted, ["child", "scratch"]);
     }
 
     #[test]
