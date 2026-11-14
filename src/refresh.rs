@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::mpsc;
 use std::thread;
@@ -7,14 +7,16 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use rayon::prelude::*;
 
-use crate::adapters::all_adapters;
+use crate::adapters::{KnownSessions, all_adapters};
+use crate::config::is_agent;
+use crate::harness;
 use crate::index::{INDEX_REFRESH_BATCH_SIZE, IndexUpdater, RefreshSummary, SessionIndex};
 use crate::model::{Session, sort_and_dedupe_sessions};
 
 enum AdapterEvent {
     Session(Session),
     Finished {
-        agent: &'static str,
+        agent: String,
         deleted_ids: Vec<String>,
     },
 }
@@ -78,10 +80,13 @@ where
                 );
             }
             let _ = tx.send(AdapterEvent::Finished {
-                agent: scan.agent,
+                agent: scan.agent.to_string(),
                 deleted_ids: scan.deleted_ids,
             });
         });
+    }
+    for (agent, deleted_ids) in orphaned_sessions(&known) {
+        let _ = tx.send(AdapterEvent::Finished { agent, deleted_ids });
     }
     drop(tx);
 
@@ -121,9 +126,8 @@ where
                     )?;
                 }
                 if !deleted_ids.is_empty() {
-                    updater.delete_sessions(agent, &deleted_ids)?;
+                    updater.delete_sessions(&agent, &deleted_ids)?;
                     deleted += deleted_ids.len();
-                    let agent = agent.to_string();
                     for id in &deleted_ids {
                         if known_keys.remove(&(agent.clone(), id.clone())) {
                             total_sessions = total_sessions.saturating_sub(1);
@@ -157,6 +161,23 @@ where
         new_or_modified: changed,
         deleted,
     })
+}
+
+/// Indexed sessions whose agent no longer exists, grouped by agent. This
+/// happens when a custom harness is removed from the config file. Nothing is
+/// reported while the config file is invalid, since its harnesses may only be
+/// missing until the file is fixed.
+fn orphaned_sessions(known: &KnownSessions) -> HashMap<String, Vec<String>> {
+    let mut orphaned: HashMap<String, Vec<String>> = HashMap::new();
+    if harness::load_error().is_some() {
+        return orphaned;
+    }
+    for (agent, id) in known.keys() {
+        if !is_agent(agent) {
+            orphaned.entry(agent.clone()).or_default().push(id.clone());
+        }
+    }
+    orphaned
 }
 
 fn flush_refresh_batch<F>(
