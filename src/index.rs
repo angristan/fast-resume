@@ -29,6 +29,27 @@ pub const INDEX_REFRESH_BATCH_SIZE: usize = 500;
 /// refreshes run without paying a commit (fsync plus a new segment) per batch.
 const STREAMING_COMMIT_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Rebuilds index every session at once, so they give each core its own
+/// indexing thread and memory arena. Tantivy needs at least 15 MB per thread.
+const REBUILD_WRITER_THREADS_MAX: usize = 8;
+const REBUILD_WRITER_HEAP_PER_THREAD: usize = 32_000_000;
+
+/// Incremental refreshes keep one indexing thread, so each streaming commit
+/// adds a single segment instead of one per thread.
+const INCREMENTAL_WRITER_HEAP: usize = 128_000_000;
+
+fn rebuild_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(REBUILD_WRITER_THREADS_MAX);
+    Ok(index.writer_with_num_threads(threads, REBUILD_WRITER_HEAP_PER_THREAD * threads)?)
+}
+
+fn incremental_writer(index: &Index) -> Result<IndexWriter<TantivyDocument>> {
+    Ok(index.writer_with_num_threads(1, INCREMENTAL_WRITER_HEAP)?)
+}
+
 /// Text relevance remains the primary signal, while recent sessions receive a
 /// bounded boost that halves every two weeks. The multiplier starts at 2.5 for
 /// current sessions and approaches 1.0 as sessions age.
@@ -177,13 +198,15 @@ impl SessionIndex {
     }
 
     fn rebuild_unlocked(&self, sessions: Vec<Session>) -> Result<RefreshSummary> {
-        let mut writer: IndexWriter<TantivyDocument> =
-            self.index.writer_with_num_threads(1, 128_000_000)?;
+        let mut writer = rebuild_writer(&self.index)?;
         writer.delete_all_documents()?;
         for session in &sessions {
             writer.add_document(document::session_document(self.fields, session))?;
         }
         writer.commit()?;
+        // Each thread commits its own segment. Let the background merges
+        // finish so searches after a rebuild do not scan many small segments.
+        writer.wait_merging_threads()?;
         self.reader.reload()?;
         Ok(RefreshSummary {
             sessions: sessions.len(),
@@ -561,7 +584,7 @@ impl IndexUpdater<'_> {
     /// never pay for its indexing arena.
     fn writer(&mut self) -> Result<&mut IndexWriter<TantivyDocument>> {
         if self.writer.is_none() {
-            self.writer = Some(self.index.index.writer_with_num_threads(1, 128_000_000)?);
+            self.writer = Some(incremental_writer(&self.index.index)?);
         }
         self.writer.as_mut().context("index writer was not created")
     }
