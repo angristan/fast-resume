@@ -183,15 +183,21 @@ pub fn index_dir() -> PathBuf {
 }
 
 pub fn claude_dir() -> PathBuf {
-    home_dir().join(".claude").join("projects")
+    env_path("CLAUDE_CONFIG_DIR")
+        .unwrap_or_else(|| home_dir().join(".claude"))
+        .join("projects")
+}
+
+fn codex_home() -> PathBuf {
+    env_path("CODEX_HOME").unwrap_or_else(|| home_dir().join(".codex"))
 }
 
 pub fn codex_dir() -> PathBuf {
-    home_dir().join(".codex").join("sessions")
+    codex_home().join("sessions")
 }
 
 pub fn codex_session_index_file() -> PathBuf {
-    home_dir().join(".codex").join("session_index.jsonl")
+    codex_home().join("session_index.jsonl")
 }
 
 pub fn antigravity_dir() -> PathBuf {
@@ -203,7 +209,10 @@ pub fn cursor_chats_dir() -> PathBuf {
 }
 
 pub fn fx_sessions_dir() -> PathBuf {
-    home_dir().join(".fx").join("sessions")
+    env_path("FX_HOME")
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home_dir().join(".fx"))
+        .join("sessions")
 }
 
 pub fn grok_sessions_dir() -> PathBuf {
@@ -218,8 +227,14 @@ pub fn kimi_sessions_dir() -> PathBuf {
         .join("sessions")
 }
 
+fn data_home() -> PathBuf {
+    env_path("XDG_DATA_HOME")
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home_dir().join(".local").join("share"))
+}
+
 pub fn opencode_dir() -> PathBuf {
-    home_dir().join(".local").join("share").join("opencode")
+    data_home().join("opencode")
 }
 
 /// Pi's session store, and whether it is a custom one.
@@ -273,19 +288,22 @@ pub fn opencode_legacy_dir() -> PathBuf {
 }
 
 pub fn vibe_dir() -> PathBuf {
-    home_dir().join(".vibe").join("logs").join("session")
+    env_path("VIBE_HOME")
+        .unwrap_or_else(|| home_dir().join(".vibe"))
+        .join("logs")
+        .join("session")
 }
 
 pub fn crush_projects_file() -> PathBuf {
-    home_dir()
-        .join(".local")
-        .join("share")
-        .join("crush")
+    env_path("CRUSH_GLOBAL_DATA")
+        .unwrap_or_else(|| data_home().join("crush"))
         .join("projects.json")
 }
 
 pub fn copilot_dir() -> PathBuf {
-    home_dir().join(".copilot").join("session-state")
+    env_path("COPILOT_HOME")
+        .unwrap_or_else(|| home_dir().join(".copilot"))
+        .join("session-state")
 }
 
 pub fn vscode_storage_dir() -> PathBuf {

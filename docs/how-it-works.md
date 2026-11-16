@@ -32,7 +32,23 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Pi | `~/.pi/agent/sessions/<workspace>/*.jsonl`, or a custom session directory | Reads session headers, user and assistant messages, names, visible custom messages, and summaries. Like Pi, it skips sessions nested deeper, such as subagent sessions from extensions |
 | Vibe | `~/.vibe/logs/session/unified/<id>/` or legacy `session_*/{meta.json,messages.jsonl}` | Reads the Unified Harness store's published history snapshot and replays journal updates, or reads legacy metadata and role-based content. Indexes user and assistant text, records the auto-approve agent, and skips subagent and ephemeral sessions |
 
-Grok discovery respects `GROK_HOME`. Kimi Code discovery uses `$KIMI_CODE_HOME/sessions/`, defaulting to `~/.kimi-code/sessions/`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
+Session discovery follows the environment inherited by `fr`:
+
+| Agent | Override | Default |
+| --- | --- | --- |
+| Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| Codex | `CODEX_HOME` (sessions and session title index) | `~/.codex` |
+| Copilot CLI | `COPILOT_HOME` | `~/.copilot` |
+| fx | `FX_HOME` (absolute path) | `~/.fx` |
+| Grok | `GROK_HOME` | `~/.grok` |
+| Kimi Code | `KIMI_CODE_HOME` | `~/.kimi-code` |
+| OpenCode | `XDG_DATA_HOME` + `/opencode` | `~/.local/share/opencode` |
+| Crush | `CRUSH_GLOBAL_DATA`, then `XDG_DATA_HOME` + `/crush` | `~/.local/share/crush` |
+| Vibe | `VIBE_HOME` | `~/.vibe` |
+
+Empty overrides use the default. `XDG_DATA_HOME` must be absolute; relative values are ignored. These variables select one store per agent, not multiple named profiles. Resuming directly from the TUI inherits the same environment. A copied resume command needs that environment in the destination shell too.
+
+Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 
 The normalized model contains:
 
