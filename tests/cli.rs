@@ -780,6 +780,148 @@ fn json_output_is_stable_and_paginated() {
     assert_eq!(all["meta"]["returned"], 2);
 }
 
+fn write_env_sessions(home: &Path) {
+    write_codex_session(home, "env-codex", "/repo/codex", "Relocated history");
+    write_jsonl(
+        &home.join(".codex/session_index.jsonl"),
+        &[
+            json!({"id": "env-codex", "thread_name": "Custom Codex title", "updated_at": "2026-07-15T10:00:00Z"}),
+        ],
+    );
+    write_claude_session(home, "env-claude", "/repo/claude", "Relocated history");
+    write_fx_session(home, "env-fx", "/repo/fx", "Relocated history");
+    write_vibe_unified_session(home, "env-vibe", "/repo/vibe", "Relocated history");
+    write_opencode_v2_session(home, "env-opencode", "/repo/opencode", "Relocated history");
+    let copilot = home.join(".copilot/session-state/env-copilot");
+    fs::create_dir_all(&copilot).unwrap();
+    write_jsonl(
+        &copilot.join("events.jsonl"),
+        &[
+            json!({"type": "session.start", "data": {"sessionId": "env-copilot"}}),
+            json!({"type": "user.message", "data": {"content": "Relocated history"}}),
+        ],
+    );
+    let crush = home.join(".local/share/crush");
+    fs::create_dir_all(&crush).unwrap();
+    let data_dir = home.join("crush-project-data");
+    fs::create_dir_all(&data_dir).unwrap();
+    let db = rusqlite::Connection::open(data_dir.join("crush.db")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, title TEXT, message_count INTEGER, updated_at INTEGER, created_at INTEGER);
+         CREATE TABLE messages (session_id TEXT, role TEXT, parts TEXT, created_at INTEGER, updated_at INTEGER);
+         INSERT INTO sessions VALUES ('env-crush', NULL, 'Relocated history', 1, 1784110800, 1784110800);",
+    ).unwrap();
+    db.execute(
+        "INSERT INTO messages VALUES ('env-crush', 'user', ?1, 1784110800, 1784110800)",
+        [json!([{"type": "text", "data": {"text": "Relocated history"}}]).to_string()],
+    )
+    .unwrap();
+    fs::write(
+        crush.join("projects.json"),
+        json!({"projects": [{"path": "/repo/crush", "data_dir": data_dir}]}).to_string(),
+    )
+    .unwrap();
+}
+
+const AGENT_HOME_OVERRIDES: [(&str, &str); 6] = [
+    ("CODEX_HOME", ".codex"),
+    ("CLAUDE_CONFIG_DIR", ".claude"),
+    ("FX_HOME", ".fx"),
+    ("COPILOT_HOME", ".copilot"),
+    ("VIBE_HOME", ".vibe"),
+    ("XDG_DATA_HOME", ".local/share"),
+];
+
+fn assert_env_sessions(output: Output) {
+    let (stdout, _) = assert_success(output);
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = payload["sessions"].as_array().unwrap();
+    let mut ids: Vec<_> = sessions.iter().map(|s| s["id"].as_str().unwrap()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [
+            "env-claude",
+            "env-codex",
+            "env-copilot",
+            "env-crush",
+            "env-fx",
+            "env-opencode",
+            "env-vibe"
+        ]
+    );
+    let codex = sessions.iter().find(|s| s["id"] == "env-codex").unwrap();
+    assert_eq!(codex["title"], "Custom Codex title");
+    assert_eq!(
+        codex["resume_command"],
+        json!(["codex", "resume", "env-codex"])
+    );
+}
+
+#[test]
+fn agent_home_overrides_discover_relocated_sessions_and_titles() {
+    let home = TempDir::new().unwrap();
+    let storage = TempDir::new().unwrap();
+    write_env_sessions(storage.path());
+    // A valid default store must not override the explicitly selected one.
+    write_codex_session(
+        home.path(),
+        "default-decoy",
+        "/repo/default",
+        "Relocated history",
+    );
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fr"));
+    command
+        .args(["--json", "Relocated history"])
+        .env_clear()
+        .env("HOME", home.path());
+    for (name, suffix) in AGENT_HOME_OVERRIDES {
+        command.env(name, storage.path().join(suffix));
+    }
+    assert_env_sessions(command.output().unwrap());
+    // The same stores must remain searchable during incremental refresh.
+    assert_env_sessions(command.output().unwrap());
+
+    // Crush's own override takes precedence over XDG_DATA_HOME.
+    let crush_override = storage.path().join("custom crush");
+    fs::rename(storage.path().join(".local/share/crush"), &crush_override).unwrap();
+    command.env("CRUSH_GLOBAL_DATA", crush_override);
+    assert_env_sessions(command.output().unwrap());
+}
+
+#[test]
+fn empty_agent_home_overrides_keep_default_stores() {
+    let home = TempDir::new().unwrap();
+    write_env_sessions(home.path());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fr"));
+    command
+        .args(["--json", "Relocated history"])
+        .env_clear()
+        .env("HOME", home.path());
+    assert_env_sessions(command.output().unwrap());
+    for (name, _) in AGENT_HOME_OVERRIDES {
+        command.env(name, "");
+    }
+    command.env("CRUSH_GLOBAL_DATA", "");
+    assert_env_sessions(command.output().unwrap());
+}
+
+#[test]
+fn relative_xdg_data_home_and_fx_home_keep_default_stores() {
+    let home = TempDir::new().unwrap();
+    write_env_sessions(home.path());
+    assert_env_sessions(
+        Command::new(env!("CARGO_BIN_EXE_fr"))
+            .args(["--json", "Relocated history"])
+            .env_clear()
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", "relative-data")
+            .env("FX_HOME", "relative-fx")
+            .output()
+            .unwrap(),
+    );
+}
+
 #[test]
 fn xdg_cache_home_controls_index_location() {
     let temp = TempDir::new().unwrap();
