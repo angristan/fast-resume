@@ -1,3 +1,9 @@
+## [2.14.5](https://github.com/angristan/fast-resume/compare/v2.14.4...v2.14.5) (2026-11-20)
+
+### Bug Fixes
+
+* **nix:** provide zstd and sqlite to the -sys crates ([#113](https://github.com/angristan/fast-resume/issues/113)) ([fb8d3f9](https://github.com/angristan/fast-resume/commit/fb8d3f9572795eaa4d5b1ce0d98dd8b8d9a02c71))
+
 ## [2.14.4](https://github.com/angristan/fast-resume/compare/v2.14.3...v2.14.4) (2026-11-13)
 
 
