@@ -1,6 +1,9 @@
 {
   lib,
   rustPlatform,
+  pkg-config,
+  sqlite,
+  zstd,
   versionCheckHook,
 }:
 let
@@ -22,6 +25,12 @@ rustPlatform.buildRustPackage {
     ];
   };
   cargoLock.lockFile = ../Cargo.lock;
+
+  nativeBuildInputs = [ pkg-config ];
+  buildInputs = [
+    sqlite
+    zstd
+  ];
 
   postInstall = ''
     ln -s fr "$out/bin/fast-resume"
