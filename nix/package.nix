@@ -26,9 +26,6 @@ rustPlatform.buildRustPackage {
   };
   cargoLock.lockFile = ../Cargo.lock;
 
-  # Nixpkgs' cargo setup hook tells -sys crates to link the system copy of
-  # their C library instead of building the vendored one: libsqlite3-sys
-  # and zstd-sys then find SQLite and zstd through pkg-config.
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [
     sqlite
