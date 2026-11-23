@@ -162,6 +162,36 @@ fn write_kimi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> P
     wire_file
 }
 
+fn write_reasonix_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home
+        .join(".reasonix/projects")
+        .join(directory.replace('/', "-"))
+        .join("sessions");
+    fs::create_dir_all(&session_dir).unwrap();
+    let session_file = session_dir.join(format!("{id}.jsonl"));
+    write_jsonl(
+        &session_file,
+        &[
+            json!({"role": "system", "content": "You are Reasonix, a coding agent."}),
+            json!({"role": "user", "content": prompt}),
+            json!({"role": "assistant", "content": "Done"}),
+        ],
+    );
+    fs::write(
+        session_dir.join(format!("{id}.jsonl.meta")),
+        json!({
+            "id": id,
+            "created_at": "2026-07-23T03:25:35.557318Z",
+            "updated_at": "2026-07-23T03:43:46.915110Z",
+            "turns": 1,
+            "preview": prompt
+        })
+        .to_string(),
+    )
+    .unwrap();
+    session_file
+}
+
 fn write_jsonl(path: &Path, rows: &[Value]) {
     fs::write(
         path,
@@ -397,6 +427,32 @@ fn lists_antigravity_cursor_and_grok_sessions() {
         );
     }
     assert!(stdout.contains("Showing 3 of 3 sessions"));
+}
+
+#[test]
+fn lists_reasonix_sessions() {
+    let temp = TempDir::new().unwrap();
+    write_reasonix_session(
+        temp.path(),
+        "reasonix123",
+        "/repo/reasonix",
+        "Reasonix adapter integration coverage",
+    );
+
+    let (stdout, stderr) = assert_success(run_fr(temp.path(), &["--list", "agent:reasonix"]));
+
+    assert!(stderr.is_empty());
+    for expected in [
+        "reasonix",
+        "Reasonix adapter integration coverage",
+        "reasonix123",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected} in:\n{stdout}"
+        );
+    }
+    assert!(stdout.contains("Showing 1 of 1 sessions"));
 }
 
 #[test]
