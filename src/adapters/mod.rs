@@ -104,7 +104,20 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
 }
 
 pub fn adapter_for(agent: &str) -> Option<Box<dyn Adapter>> {
-    all_adapters()
-        .into_iter()
-        .find(|adapter| adapter.name() == agent)
+    match agent {
+        "antigravity" => Some(Box::new(AntigravityAdapter::default())),
+        "claude" => Some(Box::new(ClaudeAdapter::default())),
+        "codex" => Some(Box::new(CodexAdapter::default())),
+        "copilot-cli" => Some(Box::new(CopilotCliAdapter::default())),
+        "copilot-vscode" => Some(Box::new(CopilotVsCodeAdapter::default())),
+        "crush" => Some(Box::new(CrushAdapter::default())),
+        "cursor" => Some(Box::new(CursorAdapter::default())),
+        "fx" => Some(Box::new(FxAdapter::default())),
+        "grok" => Some(Box::new(GrokAdapter::default())),
+        "kimi" => Some(Box::new(KimiAdapter::default())),
+        "opencode" => Some(Box::new(OpenCodeAdapter::default())),
+        "pi" => Some(Box::new(PiAdapter::default())),
+        "vibe" => Some(Box::new(VibeAdapter::default())),
+        _ => None,
+    }
 }

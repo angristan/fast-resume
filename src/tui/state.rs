@@ -53,6 +53,8 @@ pub(super) enum PendingAction {
 pub(super) struct YoloModal {
     pub(super) action: PendingAction,
     pub(super) session: Session,
+    pub(super) normal_command: Vec<String>,
+    pub(super) yolo_command: Vec<String>,
     pub(super) selected: bool,
 }
 
