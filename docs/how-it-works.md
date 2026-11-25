@@ -34,6 +34,8 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 
 Grok discovery respects `GROK_HOME`. Kimi Code discovery uses `$KIMI_CODE_HOME/sessions/`, defaulting to `~/.kimi-code/sessions/`. Pi discovery respects `PI_CODING_AGENT_SESSION_DIR`, `PI_CODING_AGENT_DIR`, and the global `settings.json` `sessionDir`. Project-local `sessionDir` overrides outside that configured store cannot be discovered automatically.
 
+Custom harnesses from the config file use one generic JSON Lines adapter. Each harness maps row kinds and JSON paths to session fields; see [custom harnesses](usage.md#custom-harnesses). They share the same incremental scan and deletion rules as the built-in file adapters.
+
 The normalized model contains:
 
 ```rust
@@ -136,6 +138,7 @@ Each adapter returns the command needed to continue its session:
 | OpenCode | `opencode <directory> --session <id>` | No change |
 | Pi | `pi --session <id>` | No change |
 | Vibe | `vibe --resume <id>` | `vibe --agent auto-approve --resume <id>` |
+| Custom harness | `resume` from the config file | `yolo_resume`, when set |
 
 `exec()` replaces fast-resume with the agent process, and the agent receives the session's working directory.
 
