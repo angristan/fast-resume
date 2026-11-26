@@ -24,7 +24,7 @@ Each adapter maps an agent-specific format into the shared `Session` model.
 | Copilot CLI | `~/.copilot/session-state/**/*.jsonl` | Reads session identity, user messages, assistant messages, and titles, and skips detached sessions and subagent turns |
 | Copilot in VS Code | VS Code chat-session JSON, or `.jsonl` session logs since VS Code 1.109 | Replays session logs, skipping an unfinished last line, and reads request text, response values, and workspace references |
 | Crush | Per-project SQLite database | Queries sessions and messages, parses JSON message parts, and skips subagent sessions |
-| Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores |
+| Cursor CLI | `~/.cursor/chats/*/*/store.db` | Reads session metadata and user/assistant records from Cursor's local SQLite stores, mapping hashed workspace directories through Cursor project logs |
 | fx | `~/.fx/sessions/<id>/{session.json,events.jsonl}` | Reads session metadata and the event log, indexes user, steering, and assistant text, excludes tool calls, tool results, and compaction summaries, and skips subagent sessions. The experimental `--sessions-v2` store under `~/.fx/sessions/v2/` is not read yet |
 | Grok Build | `$GROK_HOME/sessions/<workspace>/<id>/{summary.json,updates.jsonl}` | Reads session metadata, combines streamed ACP message chunks, applies rewind markers, and skips sessions Grok hides, such as subagent sessions |
 | Kimi Code | `$KIMI_CODE_HOME/session_index.jsonl`, session `state.json`, and `agents/main/wire.jsonl` | Reads working directories, session metadata, user messages, and streamed assistant text |
@@ -74,6 +74,8 @@ On an incremental refresh, fast-resume:
 Only one process refreshes the index at a time. Concurrent `fr --list` and `fr --json` calls wait for exclusive access, reload the latest committed index, and then run their own incremental refresh. This keeps every invocation current without allowing refresh batches to interleave. Cold initialization uses the same lock, so its source scan also runs serially. A call that has to wait prints a notice on stderr; `--no-refresh` skips the refresh entirely and serves the last committed index immediately.
 
 File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
+
+Cursor discovery maps the MD5 workspace hash used under `~/.cursor/chats/` back to a workspace path using `~/.cursor/projects/*/worker.log` when Cursor did not store the workspace directly in the chat database. Newer Cursor releases write a `meta.json` sidecar next to `store.db` with the generated title and `cwd`; those values take precedence. For older chats with neither, the `Workspace Path:` line from Cursor's injected `<user_info>` block is used when it hashes to the chat's workspace directory. A chat's update marker includes the `meta.json` modification time and, for chats without a recorded `cwd`, the newest matching `worker.log`, so late titles and late workspace mappings are picked up by incremental refreshes.
 
 JSONL sources distinguish three states:
 

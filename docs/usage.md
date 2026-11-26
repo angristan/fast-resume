@@ -223,7 +223,7 @@ Yolo mode resumes an agent with its auto-approve or skip-permissions option when
 | Codex | `--dangerously-bypass-approvals-and-sandbox` | Yes |
 | Copilot CLI | `--yolo` | No |
 | Crush | `--yolo` | No |
-| Cursor CLI | `--yolo` | No |
+| Cursor CLI | `--yolo` | Yes |
 | Grok Build | `--always-approve` | No |
 | Kimi Code | `--yolo` | No |
 | Vibe | `--agent auto-approve` | Yes |
@@ -232,7 +232,7 @@ Yolo mode resumes an agent with its auto-approve or skip-permissions option when
 | Pi | Not applicable | — |
 | Copilot in VS Code | Not applicable | — |
 
-Vibe records its agent in the session, so it is always resumed as recorded — with `--agent auto-approve` when the session used it, without it otherwise — and the TUI never asks. Codex also records its permission mode in session data. Antigravity CLI, Claude, Copilot CLI, Crush, Cursor CLI, Grok Build, and Kimi Code do not; the TUI asks before resuming them. fx reads its permission mode from settings or `FX_PERMISSION_MODE`, and Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one.
+Vibe records its agent in the session, so it is always resumed as recorded — with `--agent auto-approve` when the session used it, without it otherwise — and the TUI never asks. Codex and Cursor CLI also record their permission mode in session data. Antigravity CLI, Claude, Copilot CLI, Crush, Grok Build, and Kimi Code do not; the TUI asks before resuming them. fx reads its permission mode from settings or `FX_PERMISSION_MODE`, and Pi has no fast-resume yolo variant. Pass `fr --yolo` to skip prompts and force supported options for agents that have one.
 
 ## Statistics
 
