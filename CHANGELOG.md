@@ -1,3 +1,9 @@
+# [2.15.0](https://github.com/angristan/fast-resume/compare/v2.14.5...v2.15.0) (2026-11-26)
+
+### Features
+
+* **tui:** redesign yolo confirmation modal ([#114](https://github.com/angristan/fast-resume/issues/114)) ([d042610](https://github.com/angristan/fast-resume/commit/d0426107c75debbefcd212e10e1f4f0633acf3f3))
+
 ## [2.14.5](https://github.com/angristan/fast-resume/compare/v2.14.4...v2.14.5) (2026-11-20)
 
 ### Bug Fixes
