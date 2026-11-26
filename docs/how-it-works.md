@@ -75,7 +75,7 @@ Only one process refreshes the index at a time. Concurrent `fr --list` and `fr -
 
 File-backed adapters normally use modification times. Antigravity and Cursor include SQLite WAL modification times, while database-backed adapters include their relevant message and part activity; Crush also fingerprints the final indexed projection so same-second edits are detected.
 
-Cursor discovery maps the MD5 workspace hash used under `~/.cursor/chats/` back to a workspace path using `~/.cursor/projects/*/worker.log` when Cursor did not store the workspace directly in the chat database.
+Cursor discovery maps the MD5 workspace hash used under `~/.cursor/chats/` back to a workspace path using `~/.cursor/projects/*/worker.log` when Cursor did not store the workspace directly in the chat database. Newer Cursor releases write a `meta.json` sidecar next to `store.db` with the generated title and `cwd`; those values take precedence. For older chats with neither, the `Workspace Path:` line from Cursor's injected `<user_info>` block is used when it hashes to the chat's workspace directory. A chat's update marker includes the `meta.json` modification time and, for chats without a recorded `cwd`, the newest matching `worker.log`, so late titles and late workspace mappings are picked up by incremental refreshes.
 
 JSONL sources distinguish three states:
 

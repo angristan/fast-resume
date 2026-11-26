@@ -14,7 +14,7 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::config;
-use crate::model::{RawAdapterStats, Session, file_timestamp, truncate_title};
+use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
     IncrementalParse, build_resume_command, incremental_scan, percent_decode, sqlite_file_stats,
@@ -23,6 +23,8 @@ use super::shared::{
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
 type SessionFiles = HashMap<String, (PathBuf, f64)>;
+/// Workspace hash -> (workspace path, newest mtime of a worker.log naming it).
+type WorkspaceIndex = HashMap<String, (String, f64)>;
 
 #[derive(Debug, Clone)]
 pub struct CursorAdapter {
@@ -49,7 +51,7 @@ impl CursorAdapter {
         incremental_scan(
             self.name(),
             known,
-            self.scan_session_files(),
+            self.scan_session_files(&workspace_by_hash),
             |path| self.parse_incremental(path, &workspace_by_hash),
             on_session,
         )
@@ -75,7 +77,10 @@ impl CursorAdapter {
         }
     }
 
-    fn scan_session_files(&self) -> Option<(SessionFiles, bool)> {
+    fn scan_session_files(
+        &self,
+        workspace_by_hash: &WorkspaceIndex,
+    ) -> Option<(SessionFiles, bool)> {
         let mut files = HashMap::new();
         let mut complete = true;
         if !self.chats_dir.exists() {
@@ -101,26 +106,36 @@ impl CursorAdapter {
             else {
                 continue;
             };
-            files.insert(id.to_string(), (path.to_path_buf(), sqlite_mtime(path)));
+            files.insert(
+                id.to_string(),
+                (
+                    path.to_path_buf(),
+                    cursor_session_mtime(path, workspace_by_hash),
+                ),
+            );
         }
         Some((files, complete))
     }
 
-    fn workspace_paths_by_hash(&self) -> HashMap<String, String> {
-        let mut workspaces = HashMap::new();
+    fn workspace_paths_by_hash(&self) -> WorkspaceIndex {
+        let mut workspaces: WorkspaceIndex = HashMap::new();
         let Ok(projects) = fs::read_dir(&self.projects_dir) else {
             return workspaces;
         };
         for project in projects.filter_map(Result::ok) {
             let worker_log = project.path().join("worker.log");
-            let Ok(contents) = fs::read_to_string(worker_log) else {
+            let Ok(contents) = fs::read_to_string(&worker_log) else {
                 continue;
             };
+            let log_mtime = file_mtime_seconds(&worker_log);
             for line in contents.lines() {
                 let Some(workspace) = cursor_workspace_path_from_log_line(line) else {
                     continue;
                 };
-                workspaces.insert(cursor_workspace_hash(&workspace), workspace);
+                let entry = workspaces
+                    .entry(cursor_workspace_hash(&workspace))
+                    .or_insert_with(|| (workspace, log_mtime));
+                entry.1 = entry.1.max(log_mtime);
             }
         }
         workspaces
@@ -129,7 +144,7 @@ impl CursorAdapter {
     fn parse_session(
         &self,
         path: &Path,
-        workspace_by_hash: &HashMap<String, String>,
+        workspace_by_hash: &WorkspaceIndex,
     ) -> rusqlite::Result<Option<Session>> {
         let connection = Connection::open_with_flags(
             path,
@@ -140,6 +155,22 @@ impl CursorAdapter {
         let mut created_at = None;
         let mut yolo = false;
         let mut messages = Vec::new();
+
+        // Newer Cursor CLI releases write a plain meta.json sidecar with the
+        // generated title and the workspace cwd; prefer it when present.
+        if let Some(value) = path
+            .parent()
+            .and_then(|dir| fs::read(dir.join("meta.json")).ok())
+            .and_then(|bytes| parse_json_bytes(&bytes))
+        {
+            apply_cursor_metadata(
+                &value,
+                &mut title,
+                &mut directory,
+                &mut created_at,
+                &mut yolo,
+            );
+        }
 
         for (_, bytes) in read_key_value_table(&connection, "meta")? {
             let Some(value) = decode_json(&bytes) else {
@@ -185,6 +216,9 @@ impl CursorAdapter {
         if directory.trim().is_empty() {
             directory = cursor_directory_from_path(path, workspace_by_hash);
         }
+        if directory.trim().is_empty() {
+            directory = cursor_workspace_from_user_info(path, &first_user).unwrap_or_default();
+        }
         let timestamp = messages
             .iter()
             .filter_map(|message| message.timestamp)
@@ -219,7 +253,7 @@ impl CursorAdapter {
             content,
             user_turns,
         );
-        session.mtime = sqlite_mtime(path);
+        session.mtime = cursor_session_mtime(path, workspace_by_hash);
         session.yolo = yolo;
         Ok(Some(session))
     }
@@ -227,7 +261,7 @@ impl CursorAdapter {
     fn parse_incremental(
         &self,
         path: &Path,
-        workspace_by_hash: &HashMap<String, String>,
+        workspace_by_hash: &WorkspaceIndex,
     ) -> IncrementalParse {
         match self.parse_session(path, workspace_by_hash) {
             Ok(Some(session)) => IncrementalParse::Session(session),
@@ -247,9 +281,9 @@ impl Adapter for CursorAdapter {
     }
 
     fn find_sessions(&self) -> Vec<Session> {
-        self.scan_session_files()
+        let workspace_by_hash = self.workspace_paths_by_hash();
+        self.scan_session_files(&workspace_by_hash)
             .map(|(files, _)| {
-                let workspace_by_hash = self.workspace_paths_by_hash();
                 files
                     .into_values()
                     .filter_map(|(path, _)| {
@@ -525,14 +559,14 @@ fn cursor_timestamp(value: Option<&Value>) -> Option<DateTime<Local>> {
     }
 }
 
-fn cursor_directory_from_path(path: &Path, workspace_by_hash: &HashMap<String, String>) -> String {
+fn cursor_directory_from_path(path: &Path, workspace_by_hash: &WorkspaceIndex) -> String {
     let encoded = path
         .parent()
         .and_then(Path::parent)
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if let Some(workspace) = workspace_by_hash.get(encoded) {
+    if let Some((workspace, _)) = workspace_by_hash.get(encoded) {
         return workspace.clone();
     }
     let decoded = percent_decode(encoded);
@@ -547,6 +581,53 @@ fn cursor_workspace_path_from_log_line(line: &str) -> Option<String> {
     let (_, rest) = line.split_once("workspacePath=")?;
     let workspace = rest.trim();
     (!workspace.is_empty()).then(|| workspace.to_string())
+}
+
+/// Cursor injects a `<user_info>` block with `Workspace Path: ...` into the
+/// first user message. Accept it only when it hashes to the chat's parent
+/// directory name, so stray text in a prompt cannot set the directory.
+fn cursor_workspace_from_user_info(path: &Path, first_user: &str) -> Option<String> {
+    let encoded = path.parent()?.parent()?.file_name()?.to_str()?;
+    first_user
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("Workspace Path:"))
+        .map(str::trim)
+        .find(|workspace| !workspace.is_empty() && cursor_workspace_hash(workspace) == encoded)
+        .map(str::to_string)
+}
+
+/// Update marker for incremental indexing. Title and directory can come from
+/// the `meta.json` sidecar and, for older chats without a `cwd` there, from a
+/// project `worker.log`, so changes to either must trigger a reparse even when
+/// the database itself is untouched. Chats with a recorded `cwd` ignore the
+/// logs, which Cursor appends to constantly while a workspace is open.
+fn cursor_session_mtime(path: &Path, workspace_by_hash: &WorkspaceIndex) -> f64 {
+    let mut mtime = sqlite_mtime(path);
+    let Some(session_dir) = path.parent() else {
+        return mtime;
+    };
+    let meta_path = session_dir.join("meta.json");
+    mtime = mtime.max(file_mtime_seconds(&meta_path));
+    let has_cwd = fs::read(&meta_path)
+        .ok()
+        .and_then(|bytes| parse_json_bytes(&bytes))
+        .and_then(|value| {
+            value
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(|cwd| !cwd.is_empty())
+        })
+        .unwrap_or(false);
+    if !has_cwd
+        && let Some((_, log_mtime)) = session_dir
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .and_then(|hash| workspace_by_hash.get(hash))
+    {
+        mtime = mtime.max(*log_mtime);
+    }
+    mtime
 }
 
 fn cursor_workspace_hash(workspace: &str) -> String {
@@ -738,6 +819,139 @@ mod tests {
                 .contains("Written to the WAL")
         );
         assert!(scan.new_or_modified[0].mtime > initial.mtime);
+    }
+
+    fn write_minimal_store(session_dir: &Path, user_text: &str) {
+        fs::create_dir_all(session_dir).unwrap();
+        let connection = Connection::open(session_dir.join("store.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE meta (key TEXT, value BLOB); CREATE TABLE blobs (key TEXT, value BLOB);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO blobs (key, value) VALUES (?1, ?2)",
+                ("u1", json!({"role":"user","content":user_text}).to_string()),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn prefers_meta_json_sidecar_title_and_cwd() {
+        let temp = tempdir().unwrap();
+        let workspace = "/work/sidecar";
+        let session_dir = temp
+            .path()
+            .join("chats")
+            .join(cursor_workspace_hash(workspace))
+            .join("sidecar-session");
+        write_minimal_store(
+            &session_dir,
+            "<user_info>\nOS Version: darwin\n</user_info>\nreal prompt",
+        );
+        fs::write(
+            session_dir.join("meta.json"),
+            json!({"schemaVersion":1,"title":"Sidecar title","cwd":workspace}).to_string(),
+        )
+        .unwrap();
+
+        let adapter = CursorAdapter::new_with_projects_dir(
+            temp.path().join("chats"),
+            temp.path().join("projects"),
+        );
+        let sessions = adapter.find_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Sidecar title");
+        assert_eq!(sessions[0].directory, workspace);
+    }
+
+    #[test]
+    fn falls_back_to_user_info_workspace_path_matching_hash() {
+        let temp = tempdir().unwrap();
+        let workspace = "/work/user-info";
+        let chats = temp.path().join("chats");
+        let user_info = |path: &str| {
+            format!("<user_info>\nShell: zsh\n\nWorkspace Path: {path}\n</user_info>\nhello")
+        };
+        write_minimal_store(
+            &chats
+                .join(cursor_workspace_hash(workspace))
+                .join("matching"),
+            &user_info(workspace),
+        );
+        // A path that does not hash to the parent directory must be ignored.
+        write_minimal_store(
+            &chats
+                .join(cursor_workspace_hash("/elsewhere"))
+                .join("mismatched"),
+            &user_info(workspace),
+        );
+
+        let adapter = CursorAdapter::new_with_projects_dir(chats, temp.path().join("projects"));
+        let sessions: HashMap<_, _> = adapter
+            .find_sessions()
+            .into_iter()
+            .map(|session| (session.id.clone(), session.directory))
+            .collect();
+        assert_eq!(sessions["matching"], workspace);
+        assert_eq!(sessions["mismatched"], "");
+    }
+
+    #[test]
+    fn incremental_scan_reparses_when_only_worker_log_changes() {
+        let temp = tempdir().unwrap();
+        let chats = temp.path().join("chats");
+        let projects = temp.path().join("projects");
+        let workspace = "/work/late-log";
+        let id = "late-log-session";
+        write_minimal_store(
+            &chats.join(cursor_workspace_hash(workspace)).join(id),
+            "prompt",
+        );
+
+        let adapter = CursorAdapter::new_with_projects_dir(chats, projects.clone());
+        let initial = adapter.find_sessions().pop().unwrap();
+        assert_eq!(initial.directory, "");
+        let mut known = KnownSessions::new();
+        known.insert(("cursor".to_string(), id.to_string()), initial.mtime);
+
+        thread::sleep(Duration::from_millis(10));
+        fs::create_dir_all(projects.join("work-late-log")).unwrap();
+        fs::write(
+            projects.join("work-late-log").join("worker.log"),
+            format!("[info] workspacePath={workspace}\n"),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].directory, workspace);
+        assert!(scan.new_or_modified[0].mtime > initial.mtime);
+    }
+
+    #[test]
+    fn incremental_scan_reparses_when_only_meta_json_changes() {
+        let temp = tempdir().unwrap();
+        let chats = temp.path().join("chats");
+        let session_dir = chats.join("somehash").join("meta-session");
+        write_minimal_store(&session_dir, "prompt");
+
+        let adapter = CursorAdapter::new_with_projects_dir(chats, temp.path().join("projects"));
+        let initial = adapter.find_sessions().pop().unwrap();
+        let mut known = KnownSessions::new();
+        known.insert(("cursor".to_string(), initial.id.clone()), initial.mtime);
+
+        thread::sleep(Duration::from_millis(10));
+        fs::write(
+            session_dir.join("meta.json"),
+            json!({"title":"Generated later"}).to_string(),
+        )
+        .unwrap();
+
+        let scan = adapter.find_sessions_incremental(&known);
+        assert_eq!(scan.new_or_modified.len(), 1);
+        assert_eq!(scan.new_or_modified[0].title, "Generated later");
     }
 
     #[test]
