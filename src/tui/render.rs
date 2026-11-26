@@ -2,7 +2,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::prelude::Frame;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap};
 use ratatui_image::{Image as TuiImage, protocol::Protocol};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -12,7 +12,7 @@ use crate::model::Session;
 use super::layout::{self, MainLayout};
 use super::state::{AppState, PendingAction, YoloModal};
 use super::text::{
-    age_style, display_width_until, line_width, search_query_spans, time_ago, truncate,
+    age_style, display_width_until, line_width, search_query_spans, shell_quote, time_ago, truncate,
 };
 use super::theme::Theme;
 const SEARCH_PLACEHOLDER: &str = "Search titles, messages, paths. Try agent:claude";
@@ -879,27 +879,230 @@ fn draw_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 fn draw_yolo_modal(frame: &mut Frame, area: Rect, modal: &YoloModal, theme: &Theme) {
-    let popup = centered_rect(48, 8, area);
+    let popup = centered_rect(74, 10, area);
     frame.render_widget(Clear, popup);
+
+    let h_pad = if popup.width >= 30 {
+        2
+    } else if popup.width >= 10 {
+        1
+    } else {
+        0
+    };
+    let v_pad = if popup.height >= 10 { 1 } else { 0 };
+    let border_color = if modal.selected {
+        theme.error
+    } else {
+        theme.accent
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(theme.warning))
-        .title(" Yolo mode ");
+        .border_style(Style::new().fg(border_color))
+        .padding(Padding::new(h_pad, h_pad, v_pad, v_pad))
+        .title_top(yolo_modal_title(modal, theme))
+        .title_bottom(yolo_modal_hints(theme).centered());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let text = vec![
-        Line::from(yolo_modal_prompt(modal.action)),
-        Line::raw(""),
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let inner_width = inner.width as usize;
+    let session_line = yolo_modal_session_line(&modal.session, inner_width, theme);
+    let prompt_line = Line::from(Span::styled(
+        truncate(yolo_modal_prompt(modal.action), inner_width),
+        Style::new().fg(theme.secondary),
+    ));
+    let command_line = yolo_modal_command_line(modal, inner_width, theme);
+    let buttons_line = yolo_modal_buttons_line(modal.selected, inner_width, theme);
+
+    let lines = match inner.height {
+        0..=1 => vec![buttons_line],
+        2 => vec![prompt_line, buttons_line],
+        3 => vec![session_line, command_line, buttons_line],
+        4 => vec![session_line, prompt_line, command_line, buttons_line],
+        5 => vec![
+            session_line,
+            prompt_line,
+            command_line,
+            Line::raw(""),
+            buttons_line,
+        ],
+        _ => vec![
+            session_line,
+            prompt_line,
+            Line::raw(""),
+            command_line,
+            Line::raw(""),
+            buttons_line,
+        ],
+    };
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn yolo_modal_title(modal: &YoloModal, theme: &Theme) -> Line<'static> {
+    let action_title = match modal.action {
+        PendingAction::Resume => "Resume session",
+        PendingAction::Copy => "Copy command",
+    };
+    if !modal.selected {
+        return Line::from(Span::styled(
+            format!(" {action_title} "),
+            Style::new().fg(theme.accent).bold(),
+        ));
+    }
+    Line::from(vec![
+        Span::styled(
+            format!(" {action_title} "),
+            Style::new().fg(theme.error).bold(),
+        ),
+        Span::styled("· ", Style::new().fg(theme.muted)),
+        Span::styled("Yolo ", Style::new().fg(theme.error).bold()),
+    ])
+}
+
+fn yolo_modal_hints(theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" ←/→ ", Style::new().fg(theme.secondary)),
+        Span::styled("switch · ", Style::new().fg(theme.muted)),
+        Span::styled("Enter", Style::new().fg(theme.secondary)),
+        Span::styled(" confirm · ", Style::new().fg(theme.muted)),
+        Span::styled("Esc", Style::new().fg(theme.secondary)),
+        Span::styled(" cancel ", Style::new().fg(theme.muted)),
+    ])
+}
+
+fn yolo_modal_session_line(session: &Session, inner_width: usize, theme: &Theme) -> Line<'static> {
+    let agent_color = AGENTS
+        .get(session.agent.as_str())
+        .map(|agent| theme.agent_color(agent))
+        .unwrap_or(theme.foreground);
+    let badge = agent_badge(&session.agent);
+    let title = if session.title.is_empty() {
+        session.id.as_str()
+    } else {
+        session.title.as_str()
+    };
+
+    if inner_width > badge.width() + 3 {
+        let title_width = inner_width.saturating_sub(badge.width() + 3);
         Line::from(vec![
-            button_span(" No ", !modal.selected, theme),
-            Span::raw("  "),
-            button_span(" Yolo ", modal.selected, theme),
+            Span::styled(badge.to_string(), Style::new().fg(agent_color).bold()),
+            Span::styled(" · ", Style::new().fg(theme.muted)),
+            Span::styled(
+                truncate(title, title_width),
+                Style::new().fg(theme.foreground).bold(),
+            ),
         ])
-        .alignment(Alignment::Center),
-    ];
-    frame.render_widget(Paragraph::new(text).alignment(Alignment::Center), inner);
+    } else {
+        Line::from(Span::styled(
+            truncate(badge, inner_width),
+            Style::new().fg(agent_color).bold(),
+        ))
+    }
+}
+
+fn yolo_modal_command_line(modal: &YoloModal, inner_width: usize, theme: &Theme) -> Line<'static> {
+    let normal = &modal.normal_command;
+    let yolo = &modal.yolo_command;
+    if normal.is_empty() && yolo.is_empty() {
+        return Line::raw("");
+    }
+    let (active, highlight_range) = if modal.selected {
+        let prefix_len = normal.iter().zip(yolo).take_while(|(a, b)| a == b).count();
+        let suffix_len = normal[prefix_len..]
+            .iter()
+            .rev()
+            .zip(yolo[prefix_len..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        (yolo, prefix_len..yolo.len().saturating_sub(suffix_len))
+    } else {
+        (normal, 0..0)
+    };
+
+    let mut spans = vec![Span::styled(" $ ", Style::new().fg(theme.muted))];
+    for (idx, part) in active.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled(" ", Style::new().fg(theme.secondary)));
+        }
+        let style = if highlight_range.contains(&idx) {
+            Style::new().fg(theme.error).bold()
+        } else if idx == 0 {
+            Style::new().fg(theme.foreground).bold()
+        } else {
+            Style::new().fg(theme.secondary)
+        };
+        spans.push(Span::styled(shell_quote(part), style));
+    }
+
+    style_command_bar(spans, inner_width, theme)
+}
+
+fn style_command_bar(
+    spans: Vec<Span<'static>>,
+    inner_width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let bg = theme.filter_selected_bg;
+    let total_width: usize = spans.iter().map(|span| span.content.as_ref().width()).sum();
+    let content_budget = if inner_width >= 2 {
+        inner_width - 1
+    } else {
+        inner_width
+    };
+
+    let mut out = Vec::new();
+    let mut used = 0usize;
+
+    if total_width <= content_budget {
+        for span in spans {
+            used += span.content.as_ref().width();
+            out.push(Span::styled(span.content, span.style.bg(bg)));
+        }
+    } else {
+        let keep = if content_budget >= 3 {
+            content_budget - 3
+        } else {
+            content_budget
+        };
+        for span in spans {
+            if used >= keep {
+                break;
+            }
+            let mut text = String::new();
+            for ch in span.content.as_ref().chars() {
+                let ch_width = ch.width().unwrap_or(0);
+                if used + ch_width > keep {
+                    break;
+                }
+                text.push(ch);
+                used += ch_width;
+            }
+            let truncated = text.len() < span.content.as_ref().len();
+            if !text.is_empty() {
+                out.push(Span::styled(text, span.style.bg(bg)));
+            }
+            if truncated {
+                break;
+            }
+        }
+        if content_budget >= 3 {
+            out.push(Span::styled("...", Style::new().fg(theme.muted).bg(bg)));
+            used += 3;
+        }
+    }
+
+    if used < inner_width {
+        out.push(Span::styled(
+            " ".repeat(inner_width - used),
+            Style::new().bg(bg),
+        ));
+    }
+
+    Line::from(out)
 }
 
 fn yolo_modal_prompt(action: PendingAction) -> &'static str {
@@ -909,15 +1112,55 @@ fn yolo_modal_prompt(action: PendingAction) -> &'static str {
     }
 }
 
-fn button_span(label: &'static str, selected: bool, theme: &Theme) -> Span<'static> {
-    if selected {
-        Span::styled(
-            label,
-            Style::new().fg(theme.key_fg).bg(theme.warning).bold(),
+fn yolo_modal_buttons_line(selected: bool, inner_width: usize, theme: &Theme) -> Line<'static> {
+    let accent_selected_fg = if theme.is_light {
+        Color::White
+    } else {
+        theme.key_fg
+    };
+    let (no_label_style, no_hint_style) = if !selected {
+        (
+            Style::new().fg(accent_selected_fg).bg(theme.accent).bold(),
+            Style::new().fg(accent_selected_fg).bg(theme.accent),
         )
     } else {
-        Span::styled(label, Style::new().fg(theme.secondary))
-    }
+        (
+            Style::new()
+                .fg(theme.secondary)
+                .bg(theme.filter_selected_bg),
+            Style::new().fg(theme.muted).bg(theme.filter_selected_bg),
+        )
+    };
+    let (yolo_label_style, yolo_hint_style) = if selected {
+        (
+            Style::new().fg(Color::White).bg(theme.error).bold(),
+            Style::new().fg(Color::White).bg(theme.error),
+        )
+    } else {
+        (
+            Style::new()
+                .fg(theme.secondary)
+                .bg(theme.filter_selected_bg),
+            Style::new().fg(theme.muted).bg(theme.filter_selected_bg),
+        )
+    };
+
+    let (no_prefix, no_suffix, gap, yolo_prefix, yolo_suffix) = if inner_width >= 27 {
+        ("   No ", "(n)   ", "   ", "  Yolo ", "(y)  ")
+    } else if inner_width >= 19 {
+        (" No ", "(n) ", " ", " Yolo ", "(y) ")
+    } else {
+        (" No", " ", " ", " Yolo", " ")
+    };
+
+    Line::from(vec![
+        Span::styled(no_prefix, no_label_style),
+        Span::styled(no_suffix, no_hint_style),
+        Span::raw(gap),
+        Span::styled(yolo_prefix, yolo_label_style),
+        Span::styled(yolo_suffix, yolo_hint_style),
+    ])
+    .alignment(Alignment::Center)
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -1106,6 +1349,189 @@ mod tests {
             yolo_modal_prompt(PendingAction::Copy),
             "Copy command with auto-approve / skip-permissions flags?"
         );
+    }
+
+    fn render_yolo_modal_buffer(
+        width: u16,
+        height: u16,
+        modal: &YoloModal,
+        theme: &Theme,
+    ) -> ratatui::buffer::Buffer {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_yolo_modal(frame, frame.area(), modal, theme))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn buffer_row(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    fn find_substring_in_buffer(
+        buffer: &ratatui::buffer::Buffer,
+        needle: &str,
+    ) -> Option<(u16, u16)> {
+        for y in 0..buffer.area.height {
+            let row = buffer_row(buffer, y);
+            if let Some(byte_idx) = row.find(needle) {
+                let x = row[..byte_idx].width() as u16;
+                return Some((x, y));
+            }
+        }
+        None
+    }
+
+    fn test_modal(agent: &str, id: &str, action: PendingAction, selected: bool) -> YoloModal {
+        use chrono::Local;
+
+        use crate::adapters::adapter_for;
+
+        let session = Session::new(
+            id,
+            agent,
+            "Refactor authentication flow",
+            "/tmp/repo",
+            Local::now(),
+            "hello",
+            2,
+        );
+        let adapter = adapter_for(agent).expect("known test adapter");
+        let normal_command = adapter.resume_command(&session, false);
+        let yolo_command = adapter.resume_command(&session, true);
+        YoloModal {
+            action,
+            session,
+            normal_command,
+            yolo_command,
+            selected,
+        }
+    }
+
+    fn test_agy_modal(action: PendingAction, selected: bool) -> YoloModal {
+        test_modal("antigravity", "conv-123", action, selected)
+    }
+
+    #[test]
+    fn yolo_modal_renders_session_command_and_unclipped_prompt_for_normal_selection() {
+        let theme = Theme::dark();
+        let modal = test_agy_modal(PendingAction::Resume, false);
+        let buffer = render_yolo_modal_buffer(80, 24, &modal, &theme);
+        let rendered = buffer_text(&buffer);
+
+        assert!(rendered.contains("Resume session"));
+        assert!(rendered.contains("agy"));
+        assert!(rendered.contains("Refactor authentication flow"));
+        assert!(rendered.contains("Resume with auto-approve / skip-permissions flags?"));
+        assert!(rendered.contains("$ agy --conversation conv-123"));
+        assert!(rendered.contains("No (n)"));
+        assert!(rendered.contains("Yolo (y)"));
+        assert!(rendered.contains("Enter confirm"));
+        assert!(rendered.contains("Esc cancel"));
+        assert!(!rendered.contains("--dangerously-skip-permissions"));
+
+        let popup = centered_rect(74, 10, Rect::new(0, 0, 80, 24));
+        assert_eq!(buffer[(popup.x, popup.y)].fg, theme.accent);
+    }
+
+    #[test]
+    fn yolo_modal_highlights_yolo_flag_and_error_border_when_selected() {
+        let theme = Theme::dark();
+        let modal = test_agy_modal(PendingAction::Resume, true);
+        let buffer = render_yolo_modal_buffer(80, 24, &modal, &theme);
+        let popup = centered_rect(74, 10, Rect::new(0, 0, 80, 24));
+
+        assert!(buffer_row(&buffer, popup.y).contains("Yolo"));
+        assert_eq!(buffer[(popup.x, popup.y)].fg, theme.error);
+
+        let (x, y) = find_substring_in_buffer(&buffer, "--dangerously-skip-permissions")
+            .expect("expected yolo flag in command preview");
+        let cell = &buffer[(x, y)];
+        assert_eq!(cell.fg, theme.error);
+        assert!(cell.modifier.contains(Modifier::BOLD));
+
+        let (bx, by) = find_substring_in_buffer(&buffer, "Yolo (y)").expect("expected Yolo button");
+        assert_eq!(buffer[(bx, by)].fg, Color::White);
+        assert_eq!(buffer[(bx, by)].bg, theme.error);
+    }
+
+    #[test]
+    fn yolo_modal_copy_action_uses_copy_title_and_prompt() {
+        let theme = Theme::dark();
+        let modal = test_agy_modal(PendingAction::Copy, false);
+        let buffer = render_yolo_modal_buffer(80, 24, &modal, &theme);
+        let rendered = buffer_text(&buffer);
+
+        assert!(rendered.contains("Copy command"));
+        assert!(rendered.contains("Copy command with auto-approve / skip-permissions flags?"));
+    }
+
+    #[test]
+    fn yolo_modal_truncates_long_commands_while_keeping_yolo_flag_visible() {
+        let theme = Theme::dark();
+        let modal = test_modal(
+            "codex",
+            "0195c1e2-8f6b-7b40-9e3c-4f2a1d8b6c7e",
+            PendingAction::Resume,
+            true,
+        );
+        let buffer = render_yolo_modal_buffer(80, 24, &modal, &theme);
+        let rendered = buffer_text(&buffer);
+
+        assert!(rendered.contains("--dangerously-bypass-approvals-and-sandbox"));
+        assert!(rendered.contains("resume"));
+        assert!(rendered.contains("..."));
+    }
+
+    #[test]
+    fn yolo_modal_keeps_buttons_visible_on_short_and_narrow_viewports() {
+        let theme = Theme::light();
+        let modal = test_agy_modal(PendingAction::Resume, false);
+
+        let short = render_yolo_modal_buffer(80, 6, &modal, &theme);
+        let short_rendered = buffer_text(&short);
+        assert!(short_rendered.contains("No (n)"));
+        assert!(short_rendered.contains("Yolo (y)"));
+
+        let narrow = render_yolo_modal_buffer(24, 10, &modal, &theme);
+        let narrow_rendered = buffer_text(&narrow);
+        assert!(narrow_rendered.contains("No (n)"));
+        assert!(narrow_rendered.contains("Yolo (y)"));
+
+        let tiny = render_yolo_modal_buffer(14, 5, &modal, &theme);
+        let tiny_rendered = buffer_text(&tiny);
+        assert!(tiny_rendered.contains("No"));
+        assert!(tiny_rendered.contains("Yolo"));
+
+        let normal = render_yolo_modal_buffer(80, 24, &modal, &theme);
+        let (x, y) = find_substring_in_buffer(&normal, "No (n)").expect("expected No button");
+        assert_eq!(normal[(x, y)].fg, Color::White);
+        assert_eq!(normal[(x, y)].bg, theme.accent);
+
+        let yolo_modal = test_agy_modal(PendingAction::Resume, true);
+        let yolo_light = render_yolo_modal_buffer(80, 24, &yolo_modal, &theme);
+        let (yx, yy) =
+            find_substring_in_buffer(&yolo_light, "Yolo (y)").expect("expected Yolo button");
+        assert_eq!(yolo_light[(yx, yy)].fg, Color::White);
+        assert_eq!(yolo_light[(yx, yy)].bg, theme.error);
+        assert_ne!(theme.accent, theme.error);
     }
 
     #[test]

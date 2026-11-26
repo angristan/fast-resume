@@ -92,20 +92,22 @@ fn begin_action(state: &mut AppState, action: PendingAction) -> Result<Option<Tu
         return Ok(None);
     };
 
-    let adapter = adapter_for(&session.agent);
-    let supports_yolo = adapter
-        .as_ref()
-        .is_some_and(|adapter| adapter.supports_yolo());
-    let asks_confirmation = adapter
-        .as_ref()
-        .is_some_and(|adapter| adapter.asks_yolo_confirmation());
+    let Some(adapter) = adapter_for(&session.agent) else {
+        return finish_action(state, action, state.yolo || session.yolo, session);
+    };
+    let supports_yolo = adapter.supports_yolo();
+    let asks_confirmation = adapter.asks_yolo_confirmation();
     if state.yolo || session.yolo || !supports_yolo || !asks_confirmation {
         return finish_action(state, action, state.yolo || session.yolo, session);
     }
 
+    let normal_command = adapter.resume_command(&session, false);
+    let yolo_command = adapter.resume_command(&session, true);
     state.modal = Some(YoloModal {
         action,
         session,
+        normal_command,
+        yolo_command,
         selected: false,
     });
     Ok(None)
